@@ -1,0 +1,13 @@
+name,description,rag,date,shape,swimlane
+Project Kickoff,Initial mobilisation and team onboarding,Green,2026-01-12,diamond,Programme
+Requirements Signed Off,Business requirements baselined with stakeholders,Green,2026-02-06,square,Programme
+Architecture Approved,Solution architecture through design authority,Amber,2026-03-02,triangle,Design
+UX Prototype Complete,Clickable prototype validated with user panel,Green,2026-03-20,diamond,Design
+Vendor Contract Signed,Commercial terms agreed with implementation partner,Red,2026-04-01,square,Commercial
+Build Phase 1 Complete,Core platform features code complete,Amber,2026-05-15,diamond,Delivery
+Integration Test Start,End-to-end integration testing begins,Green,2026-06-01,triangle,Delivery
+Security Pen Test,Independent penetration test of the platform,Amber,2026-07-10,square,Delivery
+UAT Sign-off,User acceptance testing complete and signed off,Green,2026-08-21,diamond,Programme
+Data Migration Rehearsal,Full dress rehearsal of production data migration,Red,2026-09-04,triangle,Delivery
+Go-Live,Production cutover and service go-live,Green,2026-10-05,diamond,Programme
+Hypercare Exit,Transition from hypercare to business as usual,Green,2026-11-13,square,Programme

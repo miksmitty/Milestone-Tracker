@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Milestone Tracker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <rect x="2" y="2" width="22" height="22" rx="5" fill="#4f46e5"/>
+        <path d="M13 6.5 L19.5 13 L13 19.5 L6.5 13 Z" fill="#fff"/>
+      </svg>
+      <h1>Milestone Tracker</h1>
+    </div>
+    <nav class="tabs">
+      <button id="tab-gantt" class="tab active">Gantt Chart</button>
+      <button id="tab-editor" class="tab">Milestones</button>
+    </nav>
+    <div class="header-right">
+      <span id="save-status" class="save-status"></span>
+    </div>
+  </header>
+
+  <!-- ============ GANTT VIEW ============ -->
+  <main id="view-gantt" class="view">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <label class="toolbar-label">Range</label>
+        <input type="date" id="range-start" title="Start date" />
+        <span class="range-sep">→</span>
+        <input type="date" id="range-end" title="End date" />
+        <button id="range-auto" class="btn btn-ghost" title="Reset range to fit all milestones">Auto</button>
+      </div>
+      <div class="toolbar-group">
+        <label class="toolbar-label">Zoom</label>
+        <button id="zoom-out" class="btn btn-ghost" title="Zoom out">−</button>
+        <input type="range" id="zoom-slider" min="1" max="30" step="0.5" value="6" />
+        <button id="zoom-in" class="btn btn-ghost" title="Zoom in">+</button>
+        <button id="zoom-fit" class="btn btn-ghost" title="Fit chart to window">Fit</button>
+      </div>
+      <div class="toolbar-group">
+        <label class="check"><input type="checkbox" id="toggle-months" checked /> Month grid</label>
+        <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Quarter grid</label>
+        <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
+      </div>
+      <div class="toolbar-group toolbar-right">
+        <button id="btn-png" class="btn btn-primary" title="Download the chart as a PNG image">Download PNG</button>
+      </div>
+    </div>
+    <div id="gantt-scroll" class="gantt-scroll">
+      <div id="gantt-container"></div>
+    </div>
+    <div class="legend">
+      <span class="legend-title">RAG</span>
+      <span class="legend-item"><i class="dot" style="background:#16a34a"></i> Green — on track</span>
+      <span class="legend-item"><i class="dot" style="background:#f59e0b"></i> Amber — at risk</span>
+      <span class="legend-item"><i class="dot" style="background:#dc2626"></i> Red — off track</span>
+    </div>
+  </main>
+
+  <!-- ============ EDITOR VIEW ============ -->
+  <main id="view-editor" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="btn-add" class="btn btn-primary">+ Add milestone</button>
+        <button id="btn-sort" class="btn btn-ghost" title="Sort rows by date">Sort by date</button>
+      </div>
+      <div class="toolbar-group toolbar-right">
+        <button id="btn-reload" class="btn btn-ghost" title="Discard unsaved edits and reload from CSV">Reload</button>
+        <button id="btn-save" class="btn btn-primary">Save to CSV</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="editor-table">
+        <thead>
+          <tr>
+            <th style="width:16%">Name</th>
+            <th style="width:30%">Description</th>
+            <th style="width:9%">RAG</th>
+            <th style="width:12%">Date</th>
+            <th style="width:11%">Shape</th>
+            <th style="width:14%">Swimlane</th>
+            <th style="width:5%"></th>
+          </tr>
+        </thead>
+        <tbody id="editor-body"></tbody>
+      </table>
+    </div>
+    <p class="hint">Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.</p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
