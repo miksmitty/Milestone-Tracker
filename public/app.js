@@ -431,7 +431,8 @@ function daysBetween(a, b) {
 }
 
 function autoRange() {
-  const dates = state.items.flatMap(m => [parseDate(m.start), parseDate(m.end)]).filter(Boolean);
+  const shown = state.items.filter(ganttMatches);
+  const dates = (shown.length ? shown : state.items).flatMap(m => [parseDate(m.start), parseDate(m.end)]).filter(Boolean);
   if (!dates.length) {
     const now = new Date();
     state.rangeStart = new Date(now.getFullYear(), 0, 1);
@@ -674,9 +675,11 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
     }
     sub.items.push(m);
   }
+  sortLanes(lanes);
+  const oneEach = ganttSort.rows !== 'packed';
   for (const lane of lanes) {
     for (const sub of lane.subs) {
-      sub.items.sort((a, b) => a._s - b._s || a._e - b._e);
+      sub.items.sort(oneEach ? ganttItemOrder : (a, b) => a._s - b._s || a._e - b._e);
       const rowEnds = [];
       for (const m of sub.items) {
         const x1 = xOf(m._s), x2 = xOf(m._e);
@@ -705,7 +708,7 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
             m._side = 'left'; m._lx = leftX; left = leftX - labelW; right = itemR;
           }
         }
-        let r = rowEnds.findIndex(end => left - 10 > end);
+        let r = oneEach ? -1 : rowEnds.findIndex(end => left - 10 > end);
         if (r < 0) { r = rowEnds.length; rowEnds.push(right); } else rowEnds[r] = right;
         m._row = r;
       }
@@ -768,7 +771,8 @@ function renderGantt() {
   const items = state.items
     // a task's end date is inclusive, so its bar runs to the end of that day
     .map(m => ({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end), _task: isTask(m) }))
-    .filter(m => m._s && m._e && m._e >= state.rangeStart && m._s <= state.rangeEnd);
+    .filter(m => m._s && m._e && m._e >= state.rangeStart && m._s <= state.rangeEnd && ganttMatches(m));
+  renderGanttFilters();
 
   const totalDays = Math.max(1, (state.rangeEnd - state.rangeStart) / MS_DAY);
   const chartW = totalDays * state.pxPerDay;
@@ -973,7 +977,182 @@ function renderGantt() {
     svg.appendChild(g);
   }
 
+  if (!items.length && ganttFiltered()) {
+    svg.appendChild(svgEl('text', { x: LABEL_W + 20, y: headerH + 64, 'font-size': 13, fill: '#7a7870' },
+      `No ${T.items} match the filters in this date range.`));
+  }
   container.appendChild(svg);
+}
+
+/* ================= gantt filters + sort ================= */
+// Filters narrow what the chart draws (and what Auto fits the range to); they reset when the
+// workspace changes. Sort sets the order of swimlanes and, optionally, of items within them:
+// "packed" fits several items to a row by date, the other orders give each item its own row.
+// The sort is a per-browser preference.
+
+const ganttFilter = { q: '', lane: '', owner: '', type: '', rag: [] };
+const ganttSort = { lanes: 'list', rows: 'packed', dir: 1 };
+
+const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.lane || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length);
+
+function ganttMatches(m) {
+  const f = ganttFilter, q = f.q.trim().toLowerCase();
+  return (!f.lane || m.swimlane === f.lane)
+    && (!f.owner || m.owner === f.owner)
+    && (!f.type || (f.type === 'task') === isTask(m))
+    && (!f.rag.length || f.rag.includes(m.status))
+    && (!q || [m.ref, m.title, m.description, m.owner, m.swimlane, m.subswimlane].join(' ').toLowerCase().includes(q));
+}
+
+function clearGanttFilters() {
+  Object.assign(ganttFilter, { q: '', lane: '', owner: '', type: '', rag: [] });
+}
+
+// Swimlanes and their sub-swimlanes share one order.
+function sortLanes(lanes) {
+  const by = ganttSort.lanes;
+  if (by === 'list') return;
+  const key = (group) => {
+    const ms = group.items || group.subs.flatMap(s => s.items);
+    if (by === 'start') return Math.min(...ms.map(m => m._s));
+    if (by === 'end') return -Math.max(...ms.map(m => m._e));
+    if (by === 'risk') return -ms.filter(m => OFF_TRACK.includes(m.status)).length;
+    return 0;
+  };
+  const cmp = (a, b) => (by === 'name'
+    ? (!a.name) - (!b.name) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    : key(a) - key(b));
+  lanes.sort(cmp);
+  for (const lane of lanes) lane.subs.sort(cmp);
+}
+
+// Items one per row: by the chosen field (blanks last), then by date.
+function ganttItemOrder(a, b) {
+  const by = ganttSort.rows;
+  const byDate = a._s - b._s || a._e - b._e;
+  let c = 0;
+  if (by === 'start') c = byDate;
+  else if (by === 'end') c = a._e - b._e || a._s - b._s;
+  else if (by === 'ref') c = cmpRef(a, b);
+  else if (by === 'status') c = ((STATUSES.indexOf(a.status) + 1) || 999) - ((STATUSES.indexOf(b.status) + 1) || 999);
+  else {
+    const va = a[by] || '', vb = b[by] || '';
+    c = (!va) - (!vb) || va.localeCompare(vb, undefined, { numeric: true, sensitivity: 'base' });
+  }
+  return c * ganttSort.dir || byDate;
+}
+
+// Option lists follow the data, so they're rebuilt with the chart. Active filters also show as
+// chips under the toolbar, each removable on its own.
+function renderGanttFilters() {
+  const f = ganttFilter;
+  const distinct = (k) => [...new Set(state.items.map(m => m[k]).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  const fill = (id, all, values, value) => {
+    if (value && !values.includes(value)) values.push(value); // keep a filter whose last item went
+    document.getElementById(id).innerHTML = `<option value="">${all}</option>` + values.map(v =>
+      `<option value="${escAttr(v)}" ${v === value ? 'selected' : ''}>${escAttr(v)}</option>`).join('');
+  };
+  fill('gf-lane', 'All swimlanes', distinct('swimlane'), f.lane);
+  fill('gf-owner', 'All owners', distinct('owner'), f.owner);
+  const types = [['', 'All'], ['milestone', T.Milestones], ['task', T.Tasks]];
+  document.getElementById('gf-type').innerHTML = types.map(([v, label]) =>
+    `<button type="button" data-type="${v}" aria-pressed="${f.type === v}">${escAttr(label)}</button>`).join('');
+  f.rag = f.rag.filter(st => STATUSES.includes(st));
+  document.getElementById('gf-rag').innerHTML = STATUSES.map(st => `
+    <button type="button" data-rag="${escAttr(st)}" aria-pressed="${f.rag.includes(st)}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
+
+  const q = document.getElementById('gf-q');
+  if (document.activeElement !== q) q.value = f.q; // don't disturb the caret while typing
+
+  const chips = [
+    f.lane && ['lane', 'Swimlane', f.lane],
+    f.owner && ['owner', 'Owner', f.owner],
+    f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : T.Milestones],
+    f.rag.length && ['rag', 'RAG', f.rag.join(', ')],
+  ].filter(Boolean);
+  const badge = document.getElementById('gf-badge');
+  badge.hidden = !chips.length;
+  badge.textContent = chips.length;
+  const row = document.getElementById('gf-chips');
+  row.hidden = !ganttFiltered();
+  if (!row.hidden) {
+    const shown = state.items.filter(ganttMatches).length;
+    row.innerHTML = chips.map(([k, label, v]) => `
+      <span class="fchip"><span class="fchip-k">${label}</span> ${escAttr(v)}<button type="button" data-unfilter="${k}" title="Remove this filter">✕</button></span>`).join('')
+      + `<span class="grid-count">Showing ${shown} of ${count(state.items.length, T.item, T.items)}</span>
+         <button type="button" class="link-btn" data-unfilter="all">Clear all</button>`;
+  }
+
+  document.getElementById('gs-lanes').value = ganttSort.lanes;
+  document.getElementById('gs-rows').value = ganttSort.rows;
+  const packed = ganttSort.rows === 'packed';
+  document.querySelectorAll('#gs-dir [data-dir]').forEach(b => {
+    b.disabled = packed;
+    b.setAttribute('aria-pressed', !packed && +b.dataset.dir === ganttSort.dir);
+  });
+  document.getElementById('gs-badge').hidden = ganttSort.lanes === 'list' && packed;
+
+  const fmtR = (d) => d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }).replace(' ', ' ’');
+  if (state.rangeStart) document.getElementById('range-label').textContent = `${fmtR(state.rangeStart)} – ${fmtR(state.rangeEnd)}`;
+}
+
+// Toolbar menus: one open at a time; closed by clicking outside or Esc.
+function closeMenus(except) {
+  document.querySelectorAll('[data-menu]').forEach(btn => {
+    if (btn.dataset.menu === except) return;
+    btn.setAttribute('aria-expanded', 'false');
+    document.getElementById(btn.dataset.menu).hidden = true;
+  });
+}
+function wireMenus() {
+  document.querySelectorAll('[data-menu]').forEach(btn => btn.addEventListener('click', () => {
+    const pop = document.getElementById(btn.dataset.menu);
+    closeMenus(btn.dataset.menu);
+    pop.hidden = !pop.hidden;
+    btn.setAttribute('aria-expanded', !pop.hidden);
+    if (!pop.hidden) pop.querySelector('select, input, button')?.focus();
+  }));
+  document.addEventListener('mousedown', (e) => { if (!e.target.closest('.tb-menu')) closeMenus(); });
+  document.addEventListener('keydown', (e) => {
+    const open = document.querySelector('[data-menu][aria-expanded="true"]');
+    if (e.key === 'Escape' && open) { closeMenus(); open.focus(); }
+  });
+}
+
+function wireGanttFilters() {
+  Object.assign(ganttSort, loadAppPrefs().ganttSort || {});
+  wireMenus();
+  const saveSort = () => { saveAppPrefs({ ganttSort: { ...ganttSort } }); renderGantt(); };
+  document.getElementById('gf-q').addEventListener('input', (e) => { ganttFilter.q = e.target.value; renderGantt(); });
+  for (const [id, k] of [['gf-lane', 'lane'], ['gf-owner', 'owner']]) {
+    document.getElementById(id).addEventListener('change', (e) => { ganttFilter[k] = e.target.value; renderGantt(); });
+  }
+  document.getElementById('gf-type').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-type]');
+    if (b) { ganttFilter.type = b.dataset.type; renderGantt(); }
+  });
+  document.getElementById('gf-rag').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rag]');
+    if (!b) return;
+    const st = b.dataset.rag;
+    ganttFilter.rag = ganttFilter.rag.includes(st) ? ganttFilter.rag.filter(x => x !== st) : [...ganttFilter.rag, st];
+    renderGantt();
+  });
+  document.getElementById('gf-chips').addEventListener('click', (e) => {
+    const k = e.target.closest('[data-unfilter]')?.dataset.unfilter;
+    if (!k) return;
+    if (k === 'all') clearGanttFilters();
+    else ganttFilter[k] = k === 'rag' ? [] : '';
+    renderGantt();
+  });
+  document.getElementById('gs-lanes').addEventListener('change', (e) => { ganttSort.lanes = e.target.value; saveSort(); });
+  document.getElementById('gs-rows').addEventListener('change', (e) => { ganttSort.rows = e.target.value; ganttSort.dir = 1; saveSort(); });
+  document.getElementById('gs-dir').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-dir]');
+    if (b && !b.disabled) { ganttSort.dir = +b.dataset.dir; saveSort(); }
+  });
+  document.getElementById('gs-reset').onclick = () => { Object.assign(ganttSort, { lanes: 'list', rows: 'packed', dir: 1 }); saveSort(); };
 }
 
 /* ================= hover card ================= */
@@ -1827,14 +2006,14 @@ function refreshReportForm() {
 
   // Offer to update the item's RAG, but only from its most recent report.
   const others = state.reports.filter(r => r.item_id === rpItemId && r !== rpEditing);
-  const latest = !others.some(r => r.period_end > end);
+  const latest = isLatestReport(rpItemId, end, rpEditing);
   const sync = document.getElementById('rp-sync');
   sync.hidden = !(m && latest && st !== m.status);
   if (m) sync.querySelector('span').innerHTML = `Also change ${escAttr(itemLabel(m))}’s RAG on the chart from <b>${m.status}</b> to <b>${st}</b>`;
 
   renderPrevReport(others.filter(r => r.period_end < end).sort(byPeriodDesc));
 
-  const clash = end && state.reports.find(r => r !== rpEditing && r.item_id === rpItemId && r.period_end === end);
+  const clash = end && reportClash({ period_end: end }, rpItemId, rpEditing);
   document.getElementById('rp-error').innerHTML = clash
     ? `There’s already a report for this ${escAttr(T.item)} for the period ending ${fmtNice(end)}. <button type="button" class="link-btn" data-open-report="${clash.id}">Open it</button>`
     : '';
@@ -1919,6 +2098,21 @@ function onPrevPanelClick(e) {
   field.setSelectionRange(field.value.length, field.value.length);
 }
 
+// Why a report's values can't be saved yet, or '' if they can.
+function reportProblem(v) {
+  if (!parseDate(v.period_end)) return 'Enter the date the reporting period ends.';
+  if (!v.status) return 'Choose the RAG for this period.';
+  if (!v.exec_summary) return 'Add an exec summary.';
+  if (OFF_TRACK.includes(v.status) && !v.get_to_green) return `A ${v.status} report needs a get to green plan.`;
+  return '';
+}
+// Another report on the same item for the same period.
+const reportClash = (v, itemId, editing) =>
+  state.reports.find(r => r !== editing && r.item_id === itemId && r.period_end === v.period_end);
+// Changing a report's RAG only offers to update the item from its most recent report.
+const isLatestReport = (itemId, end, editing) =>
+  !state.reports.some(r => r.item_id === itemId && r !== editing && r.period_end > end);
+
 async function submitReport(e) {
   e.preventDefault();
   const f = document.getElementById('report-form').elements;
@@ -1927,19 +2121,20 @@ async function submitReport(e) {
   for (const k of ['cadence', 'period_end', 'status', 'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author']) v[k] = f[k].value.trim();
 
   if (!rpItemId) return (err.textContent = `Choose the ${T.item} this report is for.`);
-  if (!parseDate(v.period_end)) return (err.textContent = 'Enter the date the reporting period ends.');
-  if (!v.status) return (err.textContent = 'Choose the RAG for this period.');
-  if (!v.exec_summary) return (err.textContent = 'Add an exec summary.');
-  const offTrack = OFF_TRACK.includes(v.status);
-  if (offTrack && !v.get_to_green) return (err.textContent = `A ${v.status} report needs a get to green plan.`);
-  if (!offTrack) v.get_to_green = '';
-  if (state.reports.some(r => r !== rpEditing && r.item_id === rpItemId && r.period_end === v.period_end)) return refreshReportForm();
+  const problem = reportProblem(v);
+  if (problem) return (err.textContent = problem);
+  if (reportClash(v, rpItemId, rpEditing)) return refreshReportForm();
+  if (!OFF_TRACK.includes(v.status)) v.get_to_green = '';
   v.period_start = periodStart(v.period_end, v.cadence);
 
   const now = new Date().toISOString();
   const isNew = !rpEditing;
   if (rpEditing) Object.assign(rpEditing, v, { updated: now });
-  else state.reports.push({ id: nextReportId(), workspace_id: state.workspaceId, item_id: rpItemId, ...v, created: now, updated: now });
+  else {
+    const r = { id: nextReportId(), workspace_id: state.workspaceId, item_id: rpItemId, ...v, created: now, updated: now };
+    state.reports.push(r);
+    rptSelId = r.id;
+  }
 
   const m = itemById(rpItemId);
   const syncStatus = !document.getElementById('rp-sync').hidden && f.sync_status.checked;
@@ -1992,7 +2187,12 @@ const RPT_COLS = [
   { key: 'updated', label: 'Last updated', w: 150, filter: 'text', text: r => fmtStamp(r.updated) },
 ];
 
-const rptTable = makeTable({ table: 'reports-table', store: 'milestone-tracker.reports-grid', cols: () => RPT_COLS, onChange: () => renderReports() });
+// With the preview open the list keeps to what identifies a report; the pane shows the rest.
+const PREVIEW_HIDDEN = ['cadence', 'exec_summary', 'updated'];
+const rptTable = makeTable({
+  table: 'reports-table', store: 'milestone-tracker.reports-grid', onChange: () => renderReports(),
+  cols: () => (rptPreview ? RPT_COLS.filter(c => !PREVIEW_HIDDEN.includes(c.key)) : RPT_COLS),
+});
 let rptSearch = ''; // free-text search across every report field, from the toolbar
 
 function clearReportFilters() {
@@ -2039,23 +2239,29 @@ function renderReports() {
   const qEl = document.getElementById('rpf-q');
   if (document.activeElement !== qEl) qEl.value = rptSearch; // don't disturb the caret while typing
 
-  const rows = filteredReports();
+  const rows = rptRows = filteredReports();
+  // Keep the selection while it's listed (or being edited); otherwise show the first report.
+  if (!paneEditing && !rows.some(r => r.id === rptSelId)) rptSelId = rows[0]?.id ?? null;
+  const cells = {
+    period_end: r => `<td class="rc-period"><b>${fmtNice(r.period_end)}</b><small>${periodText(r)}</small></td>`,
+    item_id: (r, m) => `<td class="rc-item">${m ? `${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted ${escAttr(T.item)} #${escAttr(r.item_id)}</i>`}</td>`,
+    cadence: r => `<td class="rc-cad">${r.cadence}</td>`,
+    status: r => `<td class="rc-status">${statusPill(r.status)}${rptPreview && r.get_to_green ? '<small class="gtg-flag">Get to green plan</small>' : ''}</td>`,
+    exec_summary: r => `<td class="rc-sum"><div>${escAttr(r.exec_summary)}</div>${r.get_to_green ? '<small class="gtg-flag">Has get to green plan</small>' : ''}</td>`,
+    author: r => `<td class="rc-author">${escAttr(r.author)}</td>`,
+    updated: r => `<td class="rc-upd">${fmtStamp(r.updated)}</td>`,
+  };
+  const cols = rptTable.cols();
   const body = document.getElementById('reports-body');
   body.innerHTML = rows.map(r => {
     const m = itemById(r.item_id);
-    return `<tr data-rid="${r.id}" tabindex="0" title="Click to view or edit">
-      <td class="rc-period"><b>${fmtNice(r.period_end)}</b><small>${periodText(r)}</small></td>
-      <td class="rc-item">${m ? `${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted ${escAttr(T.item)} #${escAttr(r.item_id)}</i>`}</td>
-      <td class="rc-cad">${r.cadence}</td>
-      <td class="rc-status">${statusPill(r.status)}</td>
-      <td class="rc-sum"><div>${escAttr(r.exec_summary)}</div>${r.get_to_green ? '<small class="gtg-flag">Has get to green plan</small>' : ''}</td>
-      <td class="rc-author">${escAttr(r.author)}</td>
-      <td class="rc-upd">${fmtStamp(r.updated)}</td>
-    </tr>`;
+    const sel = rptPreview && r.id === rptSelId;
+    return `<tr data-rid="${r.id}" tabindex="${sel || (!rptPreview) ? 0 : -1}" class="${sel ? 'selected' : ''}" aria-selected="${sel}"
+      title="${rptPreview ? 'Click to preview · double-click to edit' : 'Click to view or edit'}">${cols.map(c => cells[c.key](r, m)).join('')}</tr>`;
   }).join('');
   const filtered = Object.keys(rptTable.filters).length > 0 || !!rptSearch.trim();
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="${RPT_COLS.length}" class="grid-empty">${state.reports.length
+    body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">${state.reports.length
       ? 'No reports match the filters.'
       : `No reports in this workspace yet. Click ${escAttr(withArticle(T.item))} on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.`}</td></tr>`;
   }
@@ -2063,12 +2269,339 @@ function renderReports() {
     ? `Showing ${rows.length} of ${state.reports.length}`
     : `${state.reports.length} report${state.reports.length === 1 ? '' : 's'}`;
   document.getElementById('rpf-clear').hidden = !filtered;
+  document.getElementById('rp-split').classList.toggle('no-preview', !rptPreview);
+  if (!rptPreview) return;
+  if (paneEditing) updatePanePos(); // leave the form (and what's been typed) alone
+  else renderPane();
 }
 
 // The report form's RAG choices follow the current workspace's options.
 function renderReportRagChoices() {
   document.getElementById('rp-status').innerHTML = STATUSES.map(st => `
     <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('');
+}
+
+/* ---- report preview ---- */
+// Beside the list, the selected report reads like a document. ↑ / ↓ step through the list, like
+// previewing files in a folder, and clicking into the preview turns it into a form to edit in place.
+
+let rptPreview = true;    // show the preview (a per-browser preference, read in wirePane)
+let rptRows = [];         // reports as listed, filters and sort applied
+let rptSelId = null;      // the report in the preview
+let paneEditing = false;  // the preview is a form
+const PANE_TEXTS = [
+  { key: 'exec_summary', label: 'Exec summary' },
+  { key: 'achievements', label: 'Achievements last period' },
+  { key: 'next_steps', label: 'Next steps' },
+  { key: 'get_to_green', label: 'Get to green plan', gtg: true },
+];
+const PANE_FIELDS = ['cadence', 'period_end', 'status', 'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author'];
+const selectedReport = () => state.reports.find(r => r.id === rptSelId);
+const paneForm = () => document.getElementById('pane-form');
+const placeholderOf = (k) => document.querySelector(`#report-form [name="${k}"]`)?.placeholder || '';
+
+function setPreview(on) {
+  if (!on && !leavePaneEdit()) return (document.getElementById('rp-preview-toggle').checked = true);
+  rptPreview = on;
+  saveAppPrefs({ rptPreview: on });
+  if (on) for (const k of PREVIEW_HIDDEN) delete rptTable.filters[k]; // their filters are no longer shown
+  renderTableHead(rptTable);
+  renderReports();
+}
+
+function panePosText(r) {
+  const i = rptRows.indexOf(r);
+  return i < 0 ? 'Not in the filtered list' : `${i + 1} of ${rptRows.length}`;
+}
+function updatePanePos() {
+  const r = selectedReport(), el = document.querySelector('#rp-pane .pane-pos');
+  if (r && el) el.textContent = panePosText(r);
+}
+
+function renderPane(focusKey) {
+  const el = document.getElementById('rp-pane');
+  const r = selectedReport();
+  if (!r) {
+    paneEditing = false;
+    el.innerHTML = `<div class="pane-empty">${state.reports.length ? 'No report selected.' : 'Reports appear here once they’re submitted.'}</div>`;
+    return;
+  }
+  const m = itemById(r.item_id);
+  const i = rptRows.indexOf(r);
+  const bar = `
+    <div class="pane-bar">
+      <span class="pane-nav">
+        <button type="button" data-step="-1" title="Previous report (↑)" ${i > 0 ? '' : 'disabled'}>↑</button>
+        <button type="button" data-step="1" title="Next report (↓)" ${i >= 0 && i < rptRows.length - 1 ? '' : 'disabled'}>↓</button>
+      </span>
+      <span class="pane-pos">${panePosText(r)}</span>
+      <span class="spacer"></span>
+      ${paneEditing
+        ? `<button type="button" class="btn btn-sm btn-danger" data-pane="delete">Delete</button>
+           <button type="button" class="btn btn-sm" data-pane="cancel" title="Esc">Cancel</button>
+           <button type="submit" class="btn btn-sm btn-primary" title="${/Mac/.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter">Save</button>`
+        : '<button type="button" class="btn btn-sm" data-pane="edit" title="Enter">Edit</button>'}
+    </div>`;
+  const n = reportsFor(r.item_id).length;
+  const item = `
+    <div class="pane-item">
+      <div class="pane-item-title">${m ? `${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted ${escAttr(T.item)} #${escAttr(r.item_id)}</i>`}</div>
+      ${rptTable.filters.item_id === r.item_id || n < 2 ? ''
+        : `<button type="button" class="link-btn" data-pane="item">All ${n} reports on this ${escAttr(T.item)}</button>`}
+    </div>`;
+  const stamp = `Submitted ${fmtStamp(r.created)}` + (r.updated !== r.created ? ` · last edited ${fmtStamp(r.updated)}` : '');
+
+  if (!paneEditing) {
+    const sections = PANE_TEXTS.filter(s => !s.gtg || r.get_to_green).map(s => `
+      <section class="pane-sec${s.gtg ? ' gtg' : ''}" data-field="${s.key}"><h3>${s.label}</h3>
+        ${r[s.key] ? `<p>${escAttr(r[s.key])}</p>` : '<p class="pane-blank">—</p>'}</section>`).join('');
+    el.innerHTML = `${bar}
+      <div class="pane-doc" title="Click to edit">
+        ${item}
+        <div class="pane-when" data-field="status">${statusPill(r.status)} <span>Period ending <b>${fmtNice(r.period_end)}</b></span></div>
+        <div class="pane-sub">${periodText(r)} · ${r.cadence}${r.author ? ` · <span data-field="author">${escAttr(r.author)}</span>` : ''}</div>
+        ${sections}
+        <p class="pane-meta">${stamp}</p>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = `<form id="pane-form" novalidate>${bar}
+    <div class="pane-doc editing">
+      ${item}
+      <div class="form-grid pane-grid">
+        <div class="span2 field"><span class="field-label">RAG this period</span><div class="rag">${STATUSES.map(st => `
+          <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('')}</div></div>
+        <label id="pane-sync" class="span2 rp-sync"><input type="checkbox" name="sync_status" checked /> <span></span></label>
+        <div class="span2 field"><span class="field-label">Reporting cadence</span><div class="seg">${CADENCES.map(c => `
+          <label><input type="radio" name="cadence" value="${c}" /><span>${c}</span></label>`).join('')}</div></div>
+        <label>Period ending<input name="period_end" type="date" /></label>
+        <label>Reported by<input name="author" list="owner-list" /></label>
+        <p class="span2 rp-range pane-range"></p>
+        ${PANE_TEXTS.map(s => `<label class="span2${s.gtg ? ' rp-gtg' : ''}" data-sec="${s.key}">${s.label}<textarea name="${s.key}" rows="2" placeholder="${escAttr(placeholderOf(s.key))}"></textarea></label>`).join('')}
+      </div>
+      <p class="dlg-error pane-error"></p>
+      <p class="pane-meta">${stamp}</p>
+    </div></form>`;
+  const f = paneForm().elements;
+  for (const k of PANE_FIELDS) f[k].value = r[k];
+  refreshDatalists();
+  refreshPaneForm();
+  paneForm().querySelectorAll('textarea').forEach(autoGrow);
+  const target = f[focusKey] instanceof HTMLTextAreaElement || f[focusKey] instanceof HTMLInputElement ? f[focusKey] : f.exec_summary;
+  target.focus();
+  if (target.setSelectionRange && target.type !== 'date') target.setSelectionRange(target.value.length, target.value.length);
+}
+
+function autoGrow(t) {
+  t.style.height = 'auto';
+  t.style.height = t.scrollHeight + 2 + 'px';
+}
+
+// Show or hide what depends on the RAG and dates while editing, as the report form does.
+function refreshPaneForm() {
+  const r = selectedReport(), form = paneForm();
+  if (!r || !form) return;
+  const f = form.elements, m = itemById(r.item_id);
+  const end = f.period_end.value, st = f.status.value;
+  form.querySelector('.pane-range').textContent = end && parseDate(end)
+    ? `Covers ${fmtShort(periodStart(end, f.cadence.value))} – ${fmtNice(end)}` : '';
+  const gtg = form.querySelector('[data-sec="get_to_green"]');
+  gtg.hidden = !OFF_TRACK.includes(st);
+  if (!gtg.hidden) autoGrow(f.get_to_green);
+  const sync = document.getElementById('pane-sync');
+  sync.hidden = !(m && isLatestReport(r.item_id, end, r) && st !== m.status);
+  if (m) sync.querySelector('span').innerHTML = `Also change ${escAttr(itemLabel(m))}’s RAG on the chart from <b>${m.status}</b> to <b>${st}</b>`;
+}
+
+function paneValues() {
+  const f = paneForm().elements, v = {};
+  for (const k of PANE_FIELDS) v[k] = f[k].value.trim();
+  if (!OFF_TRACK.includes(v.status)) v.get_to_green = '';
+  return v;
+}
+const paneDirty = (r, v) => PANE_FIELDS.some(k => v[k] !== (r[k] || '').trim());
+function paneProblem(r, v) {
+  const clash = reportClash(v, r.item_id, r);
+  return reportProblem(v) || (clash ? `There’s already a report on this ${T.item} for the period ending ${fmtNice(v.period_end)}.` : '');
+}
+
+function editPane(focusKey) {
+  if (!selectedReport()) return;
+  paneEditing = true;
+  renderPane(focusKey);
+}
+
+// Saves the edits; false (with the reason shown) if they can't be saved yet.
+function savePane() {
+  const r = selectedReport();
+  if (!r || !paneEditing) return true;
+  const v = paneValues();
+  const problem = paneProblem(r, v);
+  if (problem) {
+    paneForm().querySelector('.pane-error').textContent = problem;
+    return false;
+  }
+  const sync = !document.getElementById('pane-sync').hidden && paneForm().elements.sync_status.checked;
+  const changed = paneDirty(r, v);
+  paneEditing = false;
+  if (changed) {
+    Object.assign(r, v, { period_start: periodStart(v.period_end, v.cadence), updated: new Date().toISOString() });
+    const m = itemById(r.item_id);
+    if (sync) {
+      m.status = v.status;
+      saveData(`${itemLabel(m)} RAG is now ${v.status}`);
+    }
+    saveReports('Report updated');
+  }
+  rerenderCurrentView();
+  focusSelectedRow();
+  return true;
+}
+
+function cancelPane() {
+  const r = selectedReport();
+  if (r && paneDirty(r, paneValues()) && !confirm('Discard your changes to this report?')) return;
+  paneEditing = false;
+  renderReports();
+  focusSelectedRow();
+}
+
+async function deletePane() {
+  const r = selectedReport();
+  if (!r) return;
+  const m = itemById(r.item_id);
+  if (!confirm(`Delete the report${m ? ` on “${fullLabel(m)}”` : ''} for the period ending ${fmtNice(r.period_end)}?`)) return;
+  const i = rptRows.indexOf(r);
+  const next = rptRows[i + 1] || rptRows[i - 1];
+  state.reports = state.reports.filter(x => x !== r);
+  rptSelId = next?.id ?? null;
+  paneEditing = false;
+  rerenderCurrentView();
+  focusSelectedRow();
+  await saveReports('Report deleted');
+}
+
+// Before the preview shows something else: keep edits that can be saved, otherwise ask.
+function leavePaneEdit() {
+  const r = selectedReport();
+  if (!paneEditing || !r || !paneForm()) return !(paneEditing = false);
+  const v = paneValues();
+  if (!paneDirty(r, v)) return !(paneEditing = false);
+  if (savePane()) return true;
+  if (!confirm(`This report can’t be saved yet: ${paneProblem(r, v)}\n\nDiscard your changes?`)) return false;
+  paneEditing = false;
+  return true;
+}
+
+function selectReport(id, focus) {
+  if (id !== rptSelId && !leavePaneEdit()) return;
+  rptSelId = id;
+  paneEditing = false;
+  document.querySelectorAll('#reports-body tr[data-rid]').forEach(tr => {
+    const on = tr.dataset.rid === id;
+    tr.classList.toggle('selected', on);
+    tr.setAttribute('aria-selected', on);
+    tr.tabIndex = on ? 0 : -1;
+  });
+  if (focus) focusSelectedRow();
+  else document.querySelector('#reports-body tr.selected')?.scrollIntoView({ block: 'nearest' });
+  renderPane();
+}
+
+function stepReport(n) {
+  if (!rptRows.length) return;
+  const i = rptRows.findIndex(r => r.id === rptSelId);
+  const next = rptRows[i < 0 ? 0 : Math.min(rptRows.length - 1, Math.max(0, i + n))];
+  if (next.id !== rptSelId) selectReport(next.id, true);
+}
+
+function focusSelectedRow() {
+  const tr = document.querySelector('#reports-body tr.selected');
+  if (!tr) return;
+  tr.focus({ preventScroll: true });
+  tr.scrollIntoView({ block: 'nearest' });
+}
+
+const isTyping = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+
+function onPaneClick(e) {
+  const step = e.target.closest('[data-step]');
+  if (step) return stepReport(+step.dataset.step);
+  const act = e.target.closest('[data-pane]')?.dataset.pane;
+  if (act === 'edit') return editPane('exec_summary');
+  if (act === 'cancel') return cancelPane();
+  if (act === 'delete') return deletePane();
+  if (act === 'item') {
+    const r = selectedReport();
+    if (!leavePaneEdit()) return;
+    clearReportFilters();
+    rptTable.filters.item_id = r.item_id;
+    renderTableHead(rptTable);
+    return renderReports();
+  }
+  // Clicking into the document edits it — unless the click finished selecting text to copy.
+  if (!paneEditing && e.target.closest('.pane-doc') && !e.target.closest('button, a')
+    && (window.getSelection()?.isCollapsed ?? true)) {
+    editPane(e.target.closest('[data-field]')?.dataset.field);
+  }
+}
+
+function wirePane() {
+  const pane = document.getElementById('rp-pane');
+  pane.addEventListener('click', onPaneClick);
+  pane.addEventListener('submit', (e) => { e.preventDefault(); savePane(); });
+  pane.addEventListener('input', (e) => { if (e.target.tagName === 'TEXTAREA') autoGrow(e.target); });
+  pane.addEventListener('change', (e) => {
+    if (['status', 'cadence', 'period_end'].includes(e.target.name)) refreshPaneForm();
+    const err = paneForm()?.querySelector('.pane-error');
+    if (err) err.textContent = '';
+  });
+  pane.addEventListener('keydown', (e) => {
+    if (!paneEditing) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelPane(); }
+    else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); savePane(); }
+  });
+  // ↑ / ↓ move through the list wherever focus is, except while typing.
+  document.addEventListener('keydown', (e) => {
+    if (!rptPreview || !isShown('reports') || document.querySelector('dialog[open]')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepReport(e.key === 'ArrowDown' ? 1 : -1);
+    } else if (e.key === 'Enter' && !paneEditing && !e.target.closest('button, a, [data-pane]') && selectedReport()) {
+      e.preventDefault();
+      editPane('exec_summary');
+    }
+  });
+
+  const split = document.getElementById('rp-split');
+  const divider = document.getElementById('rp-divider');
+  const w = loadAppPrefs().rptListW;
+  if (w) split.style.setProperty('--rp-list-w', w + 'px');
+  divider.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const list = split.querySelector('.rp-list');
+    const startX = e.clientX, startW = list.getBoundingClientRect().width;
+    divider.setPointerCapture(e.pointerId);
+    document.body.classList.add('col-resizing');
+    const max = () => split.getBoundingClientRect().width - 340;
+    const move = (ev) => split.style.setProperty('--rp-list-w', Math.round(Math.min(max(), Math.max(280, startW + ev.clientX - startX))) + 'px');
+    const up = () => {
+      divider.removeEventListener('pointermove', move);
+      divider.removeEventListener('pointerup', up);
+      document.body.classList.remove('col-resizing');
+      saveAppPrefs({ rptListW: parseInt(split.style.getPropertyValue('--rp-list-w'), 10) || null });
+    };
+    divider.addEventListener('pointermove', move);
+    divider.addEventListener('pointerup', up);
+  });
+  divider.addEventListener('dblclick', () => { split.style.removeProperty('--rp-list-w'); saveAppPrefs({ rptListW: null }); });
+
+  rptPreview = loadAppPrefs().rptPreview ?? true;
+  const toggle = document.getElementById('rp-preview-toggle');
+  toggle.checked = rptPreview;
+  toggle.addEventListener('change', () => setPreview(toggle.checked));
 }
 
 function wireReports() {
@@ -2101,14 +2634,27 @@ function wireReports() {
   });
 
   document.getElementById('btn-reports-csv').onclick = downloadReportsCSV;
-  document.getElementById('btn-new-report').onclick = () => openReportDialog({ itemId: rptTable.filters.item_id || '' });
-  const openRow = (e) => {
-    const tr = e.target.closest('[data-rid]');
-    if (tr) openReportDialog({ report: state.reports.find(r => r.id === tr.dataset.rid) });
+  document.getElementById('btn-new-report').onclick = () => {
+    if (leavePaneEdit()) openReportDialog({ itemId: rptTable.filters.item_id || '' });
   };
+  // With the preview open a click selects the report and a double-click edits it there;
+  // without it, a click opens the report form.
   const body = document.getElementById('reports-body');
-  body.addEventListener('click', openRow);
-  body.addEventListener('keydown', (e) => { if (e.key === 'Enter') openRow(e); });
+  body.addEventListener('click', (e) => {
+    const tr = e.target.closest('[data-rid]');
+    if (!tr) return;
+    if (rptPreview) selectReport(tr.dataset.rid);
+    else openReportDialog({ report: state.reports.find(r => r.id === tr.dataset.rid) });
+  });
+  body.addEventListener('dblclick', (e) => {
+    const tr = e.target.closest('[data-rid]');
+    if (tr && rptPreview && tr.dataset.rid === rptSelId && !paneEditing) editPane('exec_summary');
+  });
+  body.addEventListener('keydown', (e) => {
+    const tr = e.target.closest('[data-rid]');
+    if (tr && e.key === 'Enter' && !rptPreview) openReportDialog({ report: state.reports.find(r => r.id === tr.dataset.rid) });
+  });
+  wirePane();
   wireTable(rptTable);
   document.getElementById('rpf-q').addEventListener('input', (e) => { rptSearch = e.target.value; renderReports(); });
   document.getElementById('rpf-clear').onclick = () => { clearReportFilters(); renderReports(); };
@@ -2182,6 +2728,7 @@ function saveAppPrefs(changes) {
 
 async function switchWorkspace(id, view) {
   if (id !== state.workspaceId) {
+    if (!leavePaneEdit()) return (document.getElementById('workspace-select').value = state.workspaceId);
     hideQuick();
     syncEditorToState(); // table edits belong to the workspace being left
     document.getElementById('editor-body').innerHTML = '';
@@ -2189,6 +2736,7 @@ async function switchWorkspace(id, view) {
     selectWorkspace(id);
     clearTableFilters(grid);
     clearReportFilters();
+    clearGanttFilters();
     state.userZoomed = false;
     applyWorkspaceChrome();
   }
@@ -2638,6 +3186,7 @@ const isShown = (view) => !document.getElementById(`view-${view}`).classList.con
 const currentView = () => VIEWS.find(isShown) || 'gantt';
 
 function switchView(view) {
+  if (view !== 'reports' && isShown('reports') && !leavePaneEdit()) return;
   hideQuick();
   if (view !== 'editor') {
     syncEditorToState();
@@ -2686,6 +3235,7 @@ function wireEvents() {
     const d = parseDate(e.target.value);
     if (d) { state.rangeEnd = d; renderGantt(); }
   };
+  wireGanttFilters();
   document.getElementById('range-auto').onclick = () => { autoRange(); renderGantt(); };
 
   document.getElementById('toggle-months').onchange = (e) => { state.showMonths = e.target.checked; renderGantt(); };

@@ -83,35 +83,107 @@
 
   <!-- ============ GANTT VIEW ============ -->
   <main id="view-gantt" class="view view-fill">
-    <div class="toolbar">
-      <div class="toolbar-group">
-        <label class="toolbar-label">Range</label>
-        <input type="date" id="range-start" title="Start date" />
-        <span class="range-sep">→</span>
-        <input type="date" id="range-end" title="End date" />
-        <button id="range-auto" class="btn btn-ghost" title="Reset range to fit all milestones">Auto</button>
-      </div>
-      <div class="toolbar-group">
-        <label class="toolbar-label">Zoom</label>
-        <button id="zoom-out" class="btn btn-ghost" title="Zoom out">−</button>
-        <input type="range" id="zoom-slider" min="1" max="30" step="0.5" value="6" />
-        <button id="zoom-in" class="btn btn-ghost" title="Zoom in">+</button>
-        <button id="zoom-fit" class="btn btn-ghost" title="Fit chart to window">Fit</button>
-      </div>
-      <div class="toolbar-group">
-        <label class="toolbar-label" for="row-slider">Row height</label>
-        <input type="range" id="row-slider" min="24" max="60" step="2" value="40" title="Row height — below 40 the dates/owner line is hidden" />
-      </div>
-      <div class="toolbar-group">
-        <label class="check"><input type="checkbox" id="toggle-months" checked /> Month grid</label>
-        <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Quarter grid</label>
-        <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
-        <label class="check"><input type="checkbox" id="toggle-links" checked /> Dependencies</label>
-      </div>
-      <div class="toolbar-group toolbar-right">
+    <div class="gbar">
+      <div class="gbar-row">
+        <label class="gsearch">
+          <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
+          <input type="search" id="gf-q" placeholder="Search" aria-label="Search the chart" />
+        </label>
+
+        <div class="tb-menu">
+          <button type="button" class="tb-btn" data-menu="gm-filter" aria-haspopup="true" aria-expanded="false">
+            <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5h14l-5.5 6.5v5l-3 1.5v-6.5z"/></svg>
+            Filter <span id="gf-badge" class="tb-badge" hidden></span>
+          </button>
+          <div id="gm-filter" class="tb-pop" hidden>
+            <label class="pop-field"><span>Swimlane</span><select id="gf-lane"></select></label>
+            <label class="pop-field"><span>Owner</span><select id="gf-owner"></select></label>
+            <div class="pop-field"><span>Type</span><div id="gf-type" class="pop-seg" role="group" aria-label="Type"></div></div>
+            <div class="pop-field"><span>RAG</span><div id="gf-rag" class="rag-pick sm" role="group" aria-label="RAG"></div></div>
+          </div>
+        </div>
+
+        <div class="tb-menu">
+          <button type="button" class="tb-btn" data-menu="gm-sort" aria-haspopup="true" aria-expanded="false">
+            <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4v12M3 13l3 3 3-3M14 16V4M11 7l3-3 3 3"/></svg>
+            Sort <span id="gs-badge" class="tb-dot" hidden></span>
+          </button>
+          <div id="gm-sort" class="tb-pop" hidden>
+            <label class="pop-field"><span>Swimlanes</span>
+              <select id="gs-lanes">
+                <option value="list">As listed</option>
+                <option value="name">A–Z</option>
+                <option value="start">Earliest start first</option>
+                <option value="end">Latest end first</option>
+                <option value="risk">Most at risk first</option>
+              </select>
+            </label>
+            <label class="pop-field"><span>Items in each swimlane</span>
+              <select id="gs-rows">
+                <option value="packed">Packed by date</option>
+                <option value="start">One per row, by start</option>
+                <option value="end">One per row, by end</option>
+                <option value="ref">One per row, by ref</option>
+                <option value="title">One per row, by title</option>
+                <option value="status">One per row, by RAG</option>
+                <option value="owner">One per row, by owner</option>
+              </select>
+            </label>
+            <div class="pop-field"><span>Order</span><div id="gs-dir" class="pop-seg" role="group" aria-label="Order">
+              <button type="button" data-dir="1">Ascending</button><button type="button" data-dir="-1">Descending</button>
+            </div></div>
+            <button type="button" id="gs-reset" class="link-btn pop-reset">Reset sort</button>
+          </div>
+        </div>
+
+        <div class="tb-menu">
+          <button type="button" class="tb-btn" data-menu="gm-view" aria-haspopup="true" aria-expanded="false">
+            <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h8M15 6h2M3 14h2M9 14h8"/><circle cx="13" cy="6" r="2"/><circle cx="7" cy="14" r="2"/></svg>
+            View
+          </button>
+          <div id="gm-view" class="tb-pop" hidden>
+            <div class="pop-checks">
+              <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Quarter grid</label>
+              <label class="check"><input type="checkbox" id="toggle-months" checked /> Month grid</label>
+              <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
+              <label class="check"><input type="checkbox" id="toggle-links" checked /> Dependencies</label>
+            </div>
+            <label class="pop-field"><span>Row height</span>
+              <input type="range" id="row-slider" min="24" max="60" step="2" value="40" title="Below 40 the dates/owner line is hidden" />
+            </label>
+            <label class="pop-field"><span>Zoom</span>
+              <input type="range" id="zoom-slider" min="1" max="30" step="0.5" value="6" />
+            </label>
+          </div>
+        </div>
+
+        <span class="spacer"></span>
+
+        <div class="tb-menu">
+          <button type="button" class="tb-btn" data-menu="gm-range" aria-haspopup="true" aria-expanded="false" title="Date range">
+            <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5" rx="2"/><path d="M3 8.5h14M7 2.5v4M13 2.5v4"/></svg>
+            <span id="range-label">Range</span>
+          </button>
+          <div id="gm-range" class="tb-pop tb-pop-right" hidden>
+            <label class="pop-field"><span>From</span><input type="date" id="range-start" /></label>
+            <label class="pop-field"><span>To</span><input type="date" id="range-end" /></label>
+            <button type="button" id="range-auto" class="btn btn-sm" title="Fit the range to the items shown">Fit to <span data-term="items">items</span></button>
+          </div>
+        </div>
+
+        <div class="tb-seg" role="group" aria-label="Zoom">
+          <button type="button" id="zoom-out" title="Zoom out">−</button>
+          <button type="button" id="zoom-fit" title="Fit chart to window">Fit</button>
+          <button type="button" id="zoom-in" title="Zoom in">+</button>
+        </div>
+
+        <span class="tb-sep"></span>
         <button id="btn-gantt-add" class="btn">+ Add <span data-term="item">item</span></button>
-        <button id="btn-png" class="btn btn-primary" title="Download the chart as a PNG image">Download PNG</button>
+        <button id="btn-png" class="btn btn-primary" title="Download the chart as a PNG image">
+          <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG
+        </button>
       </div>
+      <div id="gf-chips" class="gbar-chips" hidden></div>
     </div>
     <div id="gantt-scroll" class="gantt-scroll">
       <div id="gantt-container"></div>
@@ -159,7 +231,7 @@
   </main>
 
   <!-- ============ REPORTS VIEW ============ -->
-  <main id="view-reports" class="view hidden">
+  <main id="view-reports" class="view view-fill hidden">
     <div class="toolbar">
       <div class="toolbar-group">
         <button id="btn-new-report" class="btn btn-primary">+ New report</button>
@@ -169,16 +241,21 @@
       <div class="toolbar-group rp-filters">
         <input id="rpf-q" type="search" placeholder="Search report text…" />
         <button id="rpf-clear" class="btn btn-ghost" hidden>Clear filters</button>
+        <label class="check" title="Show the selected report beside the list"><input type="checkbox" id="rp-preview-toggle" /> Preview</label>
       </div>
     </div>
-    <div class="table-wrap">
-      <table id="reports-table">
-        <colgroup></colgroup>
-        <thead></thead>
-        <tbody id="reports-body"></tbody>
-      </table>
+    <div id="rp-split" class="rp-split">
+      <div class="table-wrap rp-list">
+        <table id="reports-table">
+          <colgroup></colgroup>
+          <thead></thead>
+          <tbody id="reports-body"></tbody>
+        </table>
+      </div>
+      <div id="rp-divider" class="rp-divider" title="Drag to resize · double-click to reset"></div>
+      <section id="rp-pane" class="rp-pane" aria-label="Selected report"></section>
     </div>
-    <p class="hint">Click a report to view or edit it. Sort, filter and resize columns as on the Items tab. To report on something, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
+    <p class="hint">Select a report to read it in the preview, and use <b>↑</b> <b>↓</b> to move through the list. Click into the preview to edit the report. Sort, filter and resize columns as on the Items tab. To report on something, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
       Reports are stored in <code>reports.csv</code>, one row per report, linked to what it covers by its ID.</p>
   </main>
   </div>

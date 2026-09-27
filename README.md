@@ -92,7 +92,7 @@ Owners provide a regular status report on any milestone or task. **Click an item
 
 The item's previous report is shown in a panel beside the form while you write the new one, with ‹ › to step back through older reports. Its sections can be copied across: last period's *next steps* into this period's *achievements*, the *exec summary*, or the *get to green plan* (carried forward). You can only have one report per item per period; if one exists, you'll be offered a link to open it.
 
-The **Reports** tab lists every report in the current workspace, newest period first. Like the Items grid, click a header to sort, use the filter row (item, RAG, cadence, text…) to narrow the list, and drag a header edge to resize a column; the toolbar search looks through every report field. **View reports** in the item's edit dialog, the quick update panel and the report form jumps here filtered to that item. Click any report to edit or delete it; edits are tracked with `created` / `updated` timestamps. **Download CSV** saves the reports currently listed (filters applied) with the item's `ref` and `title` added for readability.
+The **Reports** tab lists every report in the current workspace, newest period first. Like the Items grid, click a header to sort, use the filter row (item, RAG, cadence, text…) to narrow the list, and drag a header edge to resize a column; the toolbar search looks through every report field. **View reports** in the item's edit dialog, the quick update panel and the report form jumps here filtered to that item. Select a report to read it in the **preview** beside the list, and use **↑ ↓** to move through the list, like previewing files in a folder. Click into the preview (or press **Enter**, or double-click the row) to edit the report in place: **Save** (⌘/Ctrl+Enter) or **Cancel** (Esc). Moving to another report saves your edits if they're complete, and otherwise asks before discarding them. **Delete** is there too. Drag the divider to resize the list; double-click it to reset. Untick **Preview** to use the full-width list, where clicking a report opens it in the report form. Edits are tracked with `created` / `updated` timestamps. **Download CSV** saves the reports currently listed (filters applied) with the item's `ref` and `title` added for readability.
 
 Reports are stored in [reports.csv](reports.csv), one row per report:
 
@@ -110,11 +110,14 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 - Swimlanes with alternating backgrounds and colour accents
 - Swimlanes with nested sub-swimlanes
 - Milestones drawn as RAG-coloured shapes, tasks as bars, with title, dates and owner; overlapping items stack automatically
-- Dependency arrows and dashed roll-up arrows (toggle with **Dependencies**)
-- **Row height** slider — below 40px the dates/owner line under each item is hidden for a compact view
+- Dependency arrows and dashed roll-up arrows (toggle with **View → Dependencies**)
+- **View → Row height** — below 40px the dates/owner line under each item is hidden for a compact view
 - Hover an item for a summary card (including its last report); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)
 - The chart fills the window below its toolbar and scrolls inside its own panel
-- Zoom: −/+ buttons, slider, and **Fit** (auto-fits until you zoom manually)
-- Date range pickers with **Auto** reset to fit all milestones
-- Toggles for **month grid**, **quarter grid**, and the **today line**
+- One toolbar: **Search**, **Filter**, **Sort** and **View** menus on the left; the date range, zoom and actions on the right
+- Zoom: − **Fit** + (auto-fits until you zoom manually), with a finer slider under **View**
+- The date range button shows the months in view; open it to pick dates, or **Fit to items** to fit the range to everything shown
+- **Search** by ref, title, description, owner or swimlane, and **Filter** by swimlane, owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
+- **Sort** swimlanes as listed, A–Z, by earliest start, by latest end, or most at risk first (most items at an off-track RAG). Items are packed several to a row by date, or choose one per row sorted by start, end, ref, title, RAG or owner, ascending or descending. A dot on **Sort** shows it's changed from the default, and the sort is remembered per browser
+- **View** toggles the **quarter grid**, **month grid** and **today line**
 - **Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the workspace
