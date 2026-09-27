@@ -12,14 +12,14 @@
 const STATUS = {
   'Green':       { base: '#16a34a', light: '#4ade80', dark: '#166534', text: '#ffffff' },
   'Amber':       { base: '#f59e0b', light: '#fcd34d', dark: '#92400e', text: '#422006' },
-  'Red':         { base: '#dc2626', light: '#f87171', dark: '#7f1d1d', text: '#ffffff' },
-  'Complete':    { base: '#2563eb', light: '#60a5fa', dark: '#1e3a8a', text: '#ffffff' },
-  'Not Started': { base: '#94a3b8', light: '#cbd5e1', dark: '#475569', text: '#1e293b' },
+  'Red':         { base: '#e60000', light: '#ff6b6b', dark: '#8a0000', text: '#ffffff' },
+  'Complete':    { base: '#1f6fb2', light: '#5b9bd5', dark: '#134a7a', text: '#ffffff' },
+  'Not Started': { base: '#a8a69c', light: '#cccabc', dark: '#5a5d5c', text: '#262626' },
 };
 const STATUSES = Object.keys(STATUS);
 const statusSlug = (s) => s.replace(/\s+/g, '');
 const SHAPES = ['diamond', 'circle', 'square', 'triangle'];
-const LANE_ACCENTS = ['#4f46e5', '#0891b2', '#c026d3', '#ea580c', '#0d9488', '#7c3aed', '#db2777'];
+const LANE_ACCENTS = ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'];
 const COLUMNS = ['id', 'ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'depends_on'];
 const MS_DAY = 86400000;
 
@@ -569,7 +569,7 @@ function drawLink(svg, a, b, rollup, rm) {
   }
   svg.appendChild(svgEl('path', {
     d, fill: 'none',
-    stroke: rollup ? '#7c3aed' : '#64748b', 'stroke-width': 1.3, 'stroke-opacity': 0.85,
+    stroke: rollup ? '#a43725' : '#7a7870', 'stroke-width': 1.3, 'stroke-opacity': 0.85,
     'stroke-dasharray': rollup ? '4 3' : 'none',
     'marker-end': `url(#arrow-${rollup ? 'roll' : 'dep'})`,
   }));
@@ -616,9 +616,9 @@ function renderGantt() {
     defs.appendChild(g);
   }
   const f = svgEl('filter', { id: 'ms-shadow', x: '-40%', y: '-40%', width: '180%', height: '180%' });
-  f.appendChild(svgEl('feDropShadow', { dx: 0, dy: 1.2, stdDeviation: 1.2, 'flood-color': '#0f172a', 'flood-opacity': '0.30' }));
+  f.appendChild(svgEl('feDropShadow', { dx: 0, dy: 1.2, stdDeviation: 1.2, 'flood-color': '#1c1c1c', 'flood-opacity': '0.30' }));
   defs.appendChild(f);
-  for (const [id, color] of [['dep', '#64748b'], ['roll', '#7c3aed']]) {
+  for (const [id, color] of [['dep', '#7a7870'], ['roll', '#a43725']]) {
     const mk = svgEl('marker', { id: `arrow-${id}`, viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: 'auto' });
     mk.appendChild(svgEl('path', { d: 'M 0 0 L 8 4 L 0 8 Z', fill: color }));
     defs.appendChild(mk);
@@ -631,12 +631,12 @@ function renderGantt() {
   // lane backgrounds (alternating) + lane / sub-lane labels
   let y = headerH;
   lanes.forEach((lane, i) => {
-    if (i % 2 === 1) svg.appendChild(svgEl('rect', { x: 0, y, width, height: lane.h, fill: '#f8fafc' }));
+    if (i % 2 === 1) svg.appendChild(svgEl('rect', { x: 0, y, width, height: lane.h, fill: '#f9f8f5' }));
     const accent = LANE_ACCENTS[i % LANE_ACCENTS.length];
     svg.appendChild(svgEl('rect', { x: 0, y: y + 4, width: 4, height: lane.h - 8, rx: 2, fill: accent }));
     const laneColW = subCol ? LANE_COL_W : LABEL_W;
     svg.appendChild(svgEl('text', {
-      x: 16, y: y + lane.h / 2 + 5, 'font-size': 14, 'font-weight': 700, fill: '#1e293b',
+      x: 16, y: y + lane.h / 2 + 5, 'font-size': 14, 'font-weight': 700, fill: '#262626',
     }, truncate(lane.name, laneColW - 24, 14, 700)));
 
     let sy = y;
@@ -644,25 +644,25 @@ function renderGantt() {
       sub._y = sy;
       if (subCol) {
         if (j > 0) {
-          svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: width, y2: sy, stroke: '#e2e8f0', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+          svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: width, y2: sy, stroke: '#e0ded6', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
         }
         if (sub.name) {
           svg.appendChild(svgEl('text', {
-            x: LANE_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: '#475569',
+            x: LANE_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: '#5a5d5c',
           }, truncate(sub.name, SUB_COL_W - 20, 12, 600)));
         }
       }
       sy += sub.h;
     });
     if (subCol) {
-      svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: y, x2: LANE_COL_W, y2: y + lane.h, stroke: '#e2e8f0', 'stroke-width': 1 }));
+      svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: y, x2: LANE_COL_W, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
     }
-    svg.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: width, y2: y + lane.h, stroke: '#e2e8f0', 'stroke-width': 1 }));
+    svg.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: width, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
     y += lane.h;
   });
 
   // vertical separator between labels and chart
-  svg.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: height, stroke: '#cbd5e1', 'stroke-width': 1 }));
+  svg.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: height, stroke: '#cccabc', 'stroke-width': 1 }));
 
   // ---- month / quarter grid + headers ----
   const gridTop = headerH;
@@ -676,14 +676,14 @@ function renderGantt() {
 
   if (state.showMonths) {
     const bandY = state.showQuarters ? QUARTER_H : 0;
-    svg.appendChild(svgEl('rect', { x: LABEL_W, y: bandY, width: chartW, height: MONTH_H, fill: '#f1f5f9' }));
+    svg.appendChild(svgEl('rect', { x: LABEL_W, y: bandY, width: chartW, height: MONTH_H, fill: '#f4f3ee' }));
     for (const m of months) {
       const x1 = Math.max(LABEL_W, rawX(m));
       const next = new Date(m.getFullYear(), m.getMonth() + 1, 1);
       const x2 = Math.min(width - PAD_RIGHT + 10, rawX(next));
       if (x2 - x1 < 4) continue;
       if (rawX(m) >= LABEL_W) {
-        svg.appendChild(svgEl('line', { x1: rawX(m), y1: bandY, x2: rawX(m), y2: gridBottom, stroke: '#e2e8f0', 'stroke-width': 1 }));
+        svg.appendChild(svgEl('line', { x1: rawX(m), y1: bandY, x2: rawX(m), y2: gridBottom, stroke: '#e0ded6', 'stroke-width': 1 }));
       }
       const label = (x2 - x1) > 58
         ? m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }).replace(' ', ' ’')
@@ -691,15 +691,15 @@ function renderGantt() {
       if (x2 - x1 > 28) {
         svg.appendChild(svgEl('text', {
           x: (x1 + x2) / 2, y: bandY + MONTH_H / 2 + 4, 'text-anchor': 'middle',
-          'font-size': 11.5, 'font-weight': 600, fill: '#475569',
+          'font-size': 11.5, 'font-weight': 600, fill: '#5a5d5c',
         }, label));
       }
     }
-    svg.appendChild(svgEl('line', { x1: LABEL_W, y1: bandY + MONTH_H, x2: width, y2: bandY + MONTH_H, stroke: '#cbd5e1', 'stroke-width': 1 }));
+    svg.appendChild(svgEl('line', { x1: LABEL_W, y1: bandY + MONTH_H, x2: width, y2: bandY + MONTH_H, stroke: '#cccabc', 'stroke-width': 1 }));
   }
 
   if (state.showQuarters) {
-    svg.appendChild(svgEl('rect', { x: LABEL_W, y: 0, width: chartW, height: QUARTER_H, fill: '#e0e7ff' }));
+    svg.appendChild(svgEl('rect', { x: LABEL_W, y: 0, width: chartW, height: QUARTER_H, fill: '#ecebe4' }));
     const qStarts = months.filter(m => m.getMonth() % 3 === 0);
     // ensure the partial quarter at range start gets a label
     const firstQ = new Date(state.rangeStart.getFullYear(), Math.floor(state.rangeStart.getMonth() / 3) * 3, 1);
@@ -711,17 +711,17 @@ function renderGantt() {
       const x2 = Math.min(width - PAD_RIGHT + 10, rawX(next));
       if (x2 - x1 < 8) continue;
       if (qx >= LABEL_W) {
-        svg.appendChild(svgEl('line', { x1: qx, y1: 0, x2: qx, y2: gridBottom, stroke: '#94a3b8', 'stroke-width': 1.2 }));
+        svg.appendChild(svgEl('line', { x1: qx, y1: 0, x2: qx, y2: gridBottom, stroke: '#a8a69c', 'stroke-width': 1.2 }));
       }
       const qNum = Math.floor(q.getMonth() / 3) + 1;
       if (x2 - x1 > 44) {
         svg.appendChild(svgEl('text', {
           x: (x1 + x2) / 2, y: QUARTER_H / 2 + 4.5, 'text-anchor': 'middle',
-          'font-size': 12.5, 'font-weight': 700, fill: '#3730a3',
+          'font-size': 12.5, 'font-weight': 700, fill: '#1c1c1c',
         }, `Q${qNum} ${q.getFullYear()}`));
       }
     }
-    svg.appendChild(svgEl('line', { x1: LABEL_W, y1: QUARTER_H, x2: width, y2: QUARTER_H, stroke: '#cbd5e1', 'stroke-width': 1 }));
+    svg.appendChild(svgEl('line', { x1: LABEL_W, y1: QUARTER_H, x2: width, y2: QUARTER_H, stroke: '#cccabc', 'stroke-width': 1 }));
   }
 
   // ---- today line ----
@@ -730,10 +730,10 @@ function renderGantt() {
     const tx = rawX(today);
     svg.appendChild(svgEl('line', {
       x1: tx, y1: gridTop, x2: tx, y2: gridBottom,
-      stroke: '#ef4444', 'stroke-width': 1.5, 'stroke-dasharray': '5 4',
+      stroke: '#1c1c1c', 'stroke-width': 1.5, 'stroke-dasharray': '5 4',
     }));
     const pill = svgEl('g', {});
-    pill.appendChild(svgEl('rect', { x: tx - 24, y: gridTop + 4, width: 48, height: 17, rx: 8.5, fill: '#ef4444' }));
+    pill.appendChild(svgEl('rect', { x: tx - 24, y: gridTop + 4, width: 48, height: 17, rx: 8.5, fill: '#1c1c1c' }));
     pill.appendChild(svgEl('text', { x: tx, y: gridTop + 16, 'text-anchor': 'middle', 'font-size': 10.5, 'font-weight': 700, fill: '#fff' }, 'TODAY'));
     svg.appendChild(pill);
   }
@@ -773,21 +773,21 @@ function renderGantt() {
       }));
       if (m._side === 'inside') {
         g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text));
-        if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: '#64748b', ...HALO }, m._meta));
+        if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: '#7a7870', ...HALO }, m._meta));
       }
     } else {
       // stem down to sub-lane bottom for readability
       svg.appendChild(svgEl('line', {
         x1, y1: cy + rm.shapeS + 3, x2: x1, y2: m._sub._y + m._sub.h - 4,
-        stroke: '#cbd5e1', 'stroke-width': 1, 'stroke-dasharray': '2 3',
+        stroke: '#cccabc', 'stroke-width': 1, 'stroke-dasharray': '2 3',
       }));
       drawShape(g, m.shape, x1, cy, m.status, rm.shapeS);
     }
     if (m._side !== 'inside') {
       const anchor = m._side === 'left' ? 'end' : 'start';
       const ty = rm.detail ? cy + 1 : cy + 4.5;
-      g.appendChild(titleText({ x: m._lx, y: ty, 'text-anchor': anchor, 'font-size': 12.5, 'font-weight': 600, fill: '#1e293b', ...HALO }, m, '#4f46e5'));
-      if (m._meta) g.appendChild(svgEl('text', { x: m._lx, y: cy + 15, 'text-anchor': anchor, 'font-size': 10.5, fill: '#64748b', ...HALO }, m._meta));
+      g.appendChild(titleText({ x: m._lx, y: ty, 'text-anchor': anchor, 'font-size': 12.5, 'font-weight': 600, fill: '#262626', ...HALO }, m, '#e60000'));
+      if (m._meta) g.appendChild(svgEl('text', { x: m._lx, y: cy + 15, 'text-anchor': anchor, 'font-size': 10.5, fill: '#7a7870', ...HALO }, m._meta));
     }
     svg.appendChild(g);
   }
