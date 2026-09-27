@@ -11,11 +11,11 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATASETS = {
   '/api/milestones': {
     file: path.join(__dirname, 'milestones.csv'),
-    header: 'id,ref,title,description,swimlane,subswimlane,owner,start,end,status,shape,parent,depends_on\n',
+    header: 'id,ref,title,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on\n',
   },
   '/api/reports': {
     file: path.join(__dirname, 'reports.csv'),
-    header: 'id,item_id,cadence,period_start,period_end,status,exec_summary,achievements,next_steps,get_to_green,author,created,updated\n',
+    header: 'id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated\n',
   },
 };
 

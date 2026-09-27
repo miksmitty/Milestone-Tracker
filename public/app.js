@@ -20,7 +20,7 @@ const STATUSES = Object.keys(STATUS);
 const statusSlug = (s) => s.replace(/\s+/g, '');
 const SHAPES = ['diamond', 'circle', 'square', 'triangle'];
 const LANE_ACCENTS = ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'];
-const COLUMNS = ['id', 'ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'depends_on'];
+const COLUMNS = ['id', 'ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on'];
 const MS_DAY = 86400000;
 
 const state = {
@@ -97,7 +97,7 @@ const HEADER_ALIASES = {
   owner: ['owner'],
   start: ['start', 'startdate'],
   end: ['end', 'enddate', 'date'],
-  status: ['status', 'rag'],
+  status: ['rag', 'status'],
   shape: ['shape'],
   parent: ['parent', 'rollsupto', 'rollup'],
   deps: ['dependson', 'dependencies', 'deps'],
@@ -812,7 +812,7 @@ function showTip(m, e) {
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
     ${lastReportLine(m)}
-    <div class="tip-hint">Click to edit · right-click to report</div>`;
+    <div class="tip-hint">Click to update RAG or dates, or to report</div>`;
   tip.classList.add('show');
   moveTip(e);
 }
@@ -857,6 +857,11 @@ function openEditDialog(m) {
   document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : 'New item';
   document.getElementById('ed-delete').hidden = !m;
   document.getElementById('ed-report').hidden = !m;
+  const n = m ? reportsFor(m.id).length : 0;
+  const hist = document.getElementById('ed-history');
+  hist.hidden = !m;
+  hist.disabled = !n;
+  hist.textContent = `View reports (${n})`;
   document.getElementById('ed-error').textContent = '';
   refreshDatalists();
   renderEdDeps();
@@ -956,42 +961,193 @@ function refreshDatalists() {
   setDatalist('owner-list', state.items.map(m => m.owner));
 }
 
-/* ---- grid: columns, sorting, filtering, resizable widths ---- */
+/* ---- sortable, filterable tables with draggable column widths ---- */
+// Shared by the Items grid and the Reports list. A column's `filter` is 'text' (contains) or a
+// function returning [[value, label]] options (exact match). Sort order, widths and the view mode
+// are a per-browser convenience (storage may be unavailable) and never change the CSV order.
 
+function makeTable({ table, store, cols, onChange, mode }) {
+  const t = { table, store, cols, onChange, mode, sort: { key: null, dir: 1 }, filters: {}, widths: {} };
+  try {
+    const saved = JSON.parse(localStorage.getItem(store) || '{}');
+    for (const k of ['sort', 'widths', 'mode']) if (saved[k]) t[k] = saved[k];
+  } catch { /* ignore */ }
+  return t;
+}
+function saveTablePrefs(t) {
+  try { localStorage.setItem(t.store, JSON.stringify({ sort: t.sort, widths: t.widths, mode: t.mode })); } catch { /* ignore */ }
+}
+const tableEl = (t) => document.getElementById(t.table);
+const colWidth = (t, c) => t.widths[c.wkey || c.key] ?? c.w;
+
+function filterOptions(c, value) {
+  return '<option value="">All</option>' + c.filter().map(([v, label]) =>
+    `<option value="${escAttr(v)}" ${v === value ? 'selected' : ''}>${escAttr(label)}</option>`).join('');
+}
+
+function renderTableHead(t) {
+  const cols = t.cols();
+  tableEl(t).querySelector('colgroup').innerHTML = cols.map(c => `<col data-key="${c.key}">`).join('');
+  const filterCell = (c) => {
+    if (!c.filter) return '<th></th>';
+    const v = t.filters[c.key] || '';
+    const ctl = c.filter === 'text'
+      ? `<input data-filter="${c.key}" placeholder="Filter…" value="${escAttr(v)}" />`
+      : `<select data-filter="${c.key}">${filterOptions(c, v)}</select>`;
+    return `<th class="filter-cell">${ctl}</th>`;
+  };
+  tableEl(t).querySelector('thead').innerHTML = `
+    <tr>${cols.map(c => c.fixed ? '<th></th>' : `
+      <th data-sort="${c.key}" class="sortable" title="${escAttr(c.title || 'Click to sort')}">
+        <span>${c.label}</span><span class="sort-ind"></span>
+        <span class="col-resizer" data-resize="${c.key}" title="Drag to resize · double-click to reset"></span>
+      </th>`).join('')}</tr>
+    <tr class="filter-row">${cols.map(filterCell).join('')}</tr>`;
+  applyTableWidths(t);
+  updateSortIndicators(t);
+}
+
+// Option lists that depend on the data (e.g. items with reports) are refreshed on every render.
+function refreshSelectFilters(t) {
+  for (const c of t.cols()) {
+    const el = typeof c.filter === 'function' && tableEl(t).querySelector(`select[data-filter="${c.key}"]`);
+    if (el) el.innerHTML = filterOptions(c, t.filters[c.key] || '');
+  }
+}
+
+function applyTableWidths(t) {
+  let total = 0;
+  for (const c of t.cols()) {
+    const w = colWidth(t, c);
+    tableEl(t).querySelector(`col[data-key="${c.key}"]`).style.width = w + 'px';
+    total += w;
+  }
+  tableEl(t).style.width = total + 'px';
+}
+
+function updateSortIndicators(t) {
+  tableEl(t).querySelectorAll('thead [data-sort]').forEach(th => {
+    const on = th.dataset.sort === t.sort.key;
+    th.classList.toggle('sorted', on);
+    th.querySelector('.sort-ind').textContent = on ? (t.sort.dir > 0 ? '▲' : '▼') : '';
+  });
+}
+
+function clearTableFilters(t) {
+  t.filters = {};
+  tableEl(t).querySelectorAll('thead [data-filter]').forEach(el => { el.value = ''; });
+}
+
+// Rows: sort by the chosen column (blanks last either way); `tie` keeps the default order.
+function sortRows(t, rows, valueOf, tie) {
+  const { key, dir } = t.sort;
+  if (!key) return rows.sort(tie);
+  return rows.sort((a, b) => {
+    const va = valueOf(a, key), vb = valueOf(b, key);
+    const ea = va === '', eb = vb === '';
+    if (ea || eb) return ea - eb || tie(a, b);
+    const c = key === 'status' ? STATUSES.indexOf(va) - STATUSES.indexOf(vb)
+      : typeof va === 'number' ? va - vb
+      : String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' });
+    return c * dir || tie(a, b);
+  });
+}
+
+function wireTable(t) {
+  const head = tableEl(t).querySelector('thead');
+  head.addEventListener('click', (e) => {
+    if (e.target.closest('.col-resizer, [data-filter]')) return;
+    const th = e.target.closest('[data-sort]');
+    if (!th) return;
+    const key = th.dataset.sort;
+    // cycle: ascending → descending → off
+    if (t.sort.key !== key) t.sort = { key, dir: 1 };
+    else if (t.sort.dir > 0) t.sort.dir = -1;
+    else t.sort = { key: null, dir: 1 };
+    saveTablePrefs(t);
+    updateSortIndicators(t);
+    t.onChange();
+  });
+  head.addEventListener('input', (e) => {
+    const key = e.target.dataset.filter;
+    if (!key) return;
+    const v = e.target.value.trim();
+    if (v) t.filters[key] = v; else delete t.filters[key];
+    t.onChange();
+  });
+  head.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('[data-resize]');
+    if (!handle) return;
+    e.preventDefault();
+    const c = t.cols().find(x => x.key === handle.dataset.resize);
+    const startX = e.clientX, startW = colWidth(t, c);
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add('col-resizing');
+    const move = (ev) => {
+      t.widths[c.wkey || c.key] = Math.max(48, Math.round(startW + ev.clientX - startX));
+      applyTableWidths(t);
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      document.body.classList.remove('col-resizing');
+      saveTablePrefs(t);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+  });
+  head.addEventListener('dblclick', (e) => {
+    const handle = e.target.closest('[data-resize]');
+    if (!handle) return;
+    const c = t.cols().find(x => x.key === handle.dataset.resize);
+    delete t.widths[c.wkey || c.key];
+    applyTableWidths(t);
+    saveTablePrefs(t);
+  });
+}
+
+/* ---- items grid ---- */
+
+const opts = (values) => () => values.map(v => [v, v]);
 const GRID_COLS = [
-  { key: 'id', label: 'ID', w: 96, title: 'Primary key — assigned automatically, never changes' },
-  { key: 'ref', label: 'Ref', w: 80 },
-  { key: 'title', label: 'Title', w: 200 },
-  { key: 'description', label: 'Description', w: 220 },
-  { key: 'swimlane', label: 'Swimlane', w: 120 },
-  { key: 'subswimlane', label: 'Sub-swimlane', w: 120 },
-  { key: 'owner', label: 'Owner', w: 120 },
-  { key: 'start', label: 'Start', w: 135 },
-  { key: 'end', label: 'End', w: 135 },
-  { key: 'status', label: 'Status', w: 125, options: STATUSES },
-  { key: 'shape', label: 'Shape', w: 100, options: SHAPES },
-  { key: 'parent', label: 'Rolls up to', w: 170 },
-  { key: 'deps', label: 'Depends on', w: 190 },
+  { key: 'id', label: 'ID', w: 96, title: 'Primary key — assigned automatically, never changes', filter: opts(['Task', 'Milestone']) },
+  { key: 'ref', label: 'Ref', w: 80, filter: 'text' },
+  { key: 'title', label: 'Title', w: 200, filter: 'text' },
+  { key: 'description', label: 'Description', w: 220, filter: 'text' },
+  { key: 'swimlane', label: 'Swimlane', w: 120, filter: 'text' },
+  { key: 'subswimlane', label: 'Sub-swimlane', w: 120, filter: 'text' },
+  { key: 'owner', label: 'Owner', w: 120, filter: 'text' },
+  { key: 'start', label: 'Start', w: 135, filter: 'text' },
+  { key: 'end', label: 'End', w: 135, filter: 'text' },
+  { key: 'status', label: 'RAG', w: 125, filter: opts(STATUSES) },
+  { key: 'shape', label: 'Shape', w: 100, filter: opts(SHAPES) },
+  { key: 'parent', label: 'Rolls up to', w: 170, filter: 'text' },
+  { key: 'deps', label: 'Depends on', w: 190, filter: 'text' },
   { key: 'actions', label: '', w: 40, fixed: true },
 ];
-const GRID_STORE = 'milestone-tracker.grid';
-
-const grid = {
-  sort: { key: null, dir: 1 },
-  filters: {},
-  widths: {},
+// Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
+const QUICK_COLS = {
+  id: {}, ref: {}, title: { w: 220 }, owner: {}, status: { w: 410, wkey: 'status.quick' }, start: {}, end: {},
+  actions: { w: 90, wkey: 'actions.quick' },
 };
 
-// Sort + widths are a per-browser convenience; storage may be unavailable.
-function loadGridPrefs() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(GRID_STORE) || '{}');
-    if (saved.sort) grid.sort = saved.sort;
-    if (saved.widths) grid.widths = saved.widths;
-  } catch { /* ignore */ }
-}
-function saveGridPrefs() {
-  try { localStorage.setItem(GRID_STORE, JSON.stringify({ sort: grid.sort, widths: grid.widths })); } catch { /* ignore */ }
+const grid = makeTable({
+  table: 'editor-table',
+  store: 'milestone-tracker.grid',
+  mode: 'quick',
+  cols: () => (grid.mode === 'quick'
+    ? Object.entries(QUICK_COLS).map(([k, o]) => ({ ...GRID_COLS.find(c => c.key === k), ...o }))
+    : GRID_COLS),
+  onChange: () => { syncEditorToState(); renderEditor(); },
+});
+
+function setGridMode(mode) {
+  syncEditorToState();
+  grid.mode = mode;
+  for (const k of Object.keys(grid.filters)) if (!grid.cols().some(c => c.key === k)) delete grid.filters[k];
+  saveTablePrefs(grid);
+  renderTableHead(grid);
+  renderEditor();
 }
 
 function gridValue(m, key, byId) {
@@ -1007,7 +1163,7 @@ function matchesFilter(m, key, f, byId) {
   if (!f) return true;
   if (key === 'id') return f === (isTask(m) ? 'Task' : 'Milestone');
   const col = GRID_COLS.find(c => c.key === key);
-  if (col.options) return m[key] === f;
+  if (col.filter !== 'text') return m[key] === f;
   let text = String(gridValue(m, key, byId));
   if ((key === 'start' || key === 'end') && m[key]) text += ' ' + fmtNice(m[key]);
   return text.toLowerCase().includes(f.toLowerCase());
@@ -1019,118 +1175,7 @@ function gridRows() {
   const rows = state.items
     .map((m, i) => ({ m, i }))
     .filter(({ m }) => Object.entries(grid.filters).every(([k, f]) => matchesFilter(m, k, f, byId)));
-  const { key, dir } = grid.sort;
-  if (key) {
-    rows.sort((a, b) => {
-      const va = gridValue(a.m, key, byId), vb = gridValue(b.m, key, byId);
-      const ea = va === '', eb = vb === '';
-      if (ea || eb) return ea - eb || a.i - b.i; // blanks last either way
-      const c = key === 'status' ? STATUSES.indexOf(va) - STATUSES.indexOf(vb)
-        : typeof va === 'number' ? va - vb
-        : String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' });
-      return c * dir || a.i - b.i;
-    });
-  }
-  return rows;
-}
-
-function renderGridHead() {
-  document.getElementById('grid-cols').innerHTML = GRID_COLS.map(c => `<col data-key="${c.key}">`).join('');
-  const filterCell = (c) => {
-    if (c.fixed) return '<th></th>';
-    let ctl;
-    if (c.key === 'id') ctl = `<select data-filter="id"><option value="">All</option><option>Task</option><option>Milestone</option></select>`;
-    else if (c.options) ctl = `<select data-filter="${c.key}"><option value="">All</option>${optionList(c.options)}</select>`;
-    else ctl = `<input data-filter="${c.key}" placeholder="Filter…" />`;
-    return `<th class="filter-cell">${ctl}</th>`;
-  };
-  document.getElementById('grid-head').innerHTML = `
-    <tr>${GRID_COLS.map(c => c.fixed ? '<th></th>' : `
-      <th data-sort="${c.key}" class="sortable" title="${escAttr(c.title || 'Click to sort')}">
-        <span>${c.label}</span><span class="sort-ind"></span>
-        <span class="col-resizer" data-resize="${c.key}" title="Drag to resize · double-click to reset"></span>
-      </th>`).join('')}</tr>
-    <tr class="filter-row">${GRID_COLS.map(filterCell).join('')}</tr>`;
-  applyColWidths();
-  updateSortIndicators();
-}
-
-function applyColWidths() {
-  let total = 0;
-  for (const c of GRID_COLS) {
-    const w = grid.widths[c.key] ?? c.w;
-    document.querySelector(`#grid-cols col[data-key="${c.key}"]`).style.width = w + 'px';
-    total += w;
-  }
-  document.getElementById('editor-table').style.width = total + 'px';
-}
-
-function updateSortIndicators() {
-  document.querySelectorAll('#grid-head [data-sort]').forEach(th => {
-    const on = th.dataset.sort === grid.sort.key;
-    th.classList.toggle('sorted', on);
-    th.querySelector('.sort-ind').textContent = on ? (grid.sort.dir > 0 ? '▲' : '▼') : '';
-  });
-}
-
-function onGridHeadClick(e) {
-  if (e.target.closest('.col-resizer, [data-filter]')) return;
-  const th = e.target.closest('[data-sort]');
-  if (!th) return;
-  const key = th.dataset.sort;
-  // cycle: ascending → descending → off
-  if (grid.sort.key !== key) grid.sort = { key, dir: 1 };
-  else if (grid.sort.dir > 0) grid.sort.dir = -1;
-  else grid.sort = { key: null, dir: 1 };
-  saveGridPrefs();
-  updateSortIndicators();
-  syncEditorToState();
-  renderEditor();
-}
-
-function onGridFilter(e) {
-  const key = e.target.dataset.filter;
-  if (!key) return;
-  const v = e.target.value.trim();
-  if (v) grid.filters[key] = v; else delete grid.filters[key];
-  syncEditorToState();
-  renderEditor();
-}
-
-function clearFilters() {
-  grid.filters = {};
-  document.querySelectorAll('#grid-head [data-filter]').forEach(el => { el.value = ''; });
-}
-
-function onResizeStart(e) {
-  const handle = e.target.closest('[data-resize]');
-  if (!handle) return;
-  e.preventDefault();
-  const key = handle.dataset.resize;
-  const startX = e.clientX;
-  const startW = grid.widths[key] ?? GRID_COLS.find(c => c.key === key).w;
-  handle.setPointerCapture(e.pointerId);
-  document.body.classList.add('col-resizing');
-  const move = (ev) => {
-    grid.widths[key] = Math.max(48, Math.round(startW + ev.clientX - startX));
-    applyColWidths();
-  };
-  const up = () => {
-    handle.removeEventListener('pointermove', move);
-    handle.removeEventListener('pointerup', up);
-    document.body.classList.remove('col-resizing');
-    saveGridPrefs();
-  };
-  handle.addEventListener('pointermove', move);
-  handle.addEventListener('pointerup', up);
-}
-
-function onResizeReset(e) {
-  const handle = e.target.closest('[data-resize]');
-  if (!handle) return;
-  delete grid.widths[handle.dataset.resize];
-  applyColWidths();
-  saveGridPrefs();
+  return sortRows(grid, rows, (r, key) => gridValue(r.m, key, byId), (a, b) => a.i - b.i);
 }
 
 function renderEditor(highlight = []) {
@@ -1142,6 +1187,7 @@ function renderEditor(highlight = []) {
   for (const m of state.items) if (m.ref) refCount.set(m.ref, (refCount.get(m.ref) || 0) + 1);
 
   const rows = gridRows();
+  const cols = grid.cols();
   for (const { m, i } of rows) {
     const task = isTask(m);
     const tr = document.createElement('tr');
@@ -1154,25 +1200,31 @@ function renderEditor(highlight = []) {
       <span class="chip" title="${escAttr(byId.get(d)?.title)}">${escAttr(itemLabel(byId.get(d)))}<button data-rmdep="${i}" data-dep="${d}" title="Remove dependency">×</button></span>`).join('');
     const dup = refCount.get(m.ref) > 1;
 
-    tr.innerHTML = `
-      <td class="col-id"><span class="type-badge ${task ? 'task' : 'ms'}" title="${task ? 'Task — has a duration, drawn as a bar' : 'Milestone — start equals end'}">${task ? 'Task' : 'MS'}</span><span class="id" title="Primary key">${m.id}</span></td>
-      <td><input data-i="${i}" data-k="ref" value="${escAttr(m.ref)}" placeholder="e.g. 4.1" ${dup ? 'class="dup" title="Duplicate ref"' : ''} /></td>
-      <td><input data-i="${i}" data-k="title" value="${escAttr(m.title)}" placeholder="Title" /></td>
-      <td><input data-i="${i}" data-k="description" value="${escAttr(m.description)}" placeholder="Description" /></td>
-      <td><input data-i="${i}" data-k="swimlane" value="${escAttr(m.swimlane)}" list="lane-list" placeholder="Swimlane" /></td>
-      <td><input data-i="${i}" data-k="subswimlane" value="${escAttr(m.subswimlane)}" list="sublane-list" placeholder="Sub-swimlane" /></td>
-      <td><input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" /></td>
-      <td><input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}" /></td>
-      <td><input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}" /></td>
-      <td><select data-i="${i}" data-k="status" class="status-${statusSlug(m.status)}">${optionList(STATUSES, m.status)}</select></td>
-      <td><select data-i="${i}" data-k="shape" ${task ? 'disabled title="Tasks are drawn as bars"' : ''}>${optionList(SHAPES, m.shape)}</select></td>
-      <td><select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select></td>
-      <td><div class="deps">${chips}<select data-adddep="${i}" class="add-dep"><option value="">+ add</option>${depOpts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select></div></td>
-      <td><button class="btn-del" data-del="${i}" title="Delete row">✕</button></td>`;
+    const quick = grid.mode === 'quick';
+    const text = (k, extra = '') => `<span class="ro"${extra}>${escAttr(m[k])}</span>`;
+    const cells = {
+      id: `<span class="type-badge ${task ? 'task' : 'ms'}" title="${task ? 'Task — has a duration, drawn as a bar' : 'Milestone — start equals end'}">${task ? 'Task' : 'MS'}</span><span class="id" title="Primary key">${m.id}</span>`,
+      ref: quick ? text('ref', ` class="ro ref"`) : `<input data-i="${i}" data-k="ref" value="${escAttr(m.ref)}" placeholder="e.g. 4.1" ${dup ? 'class="dup" title="Duplicate ref"' : ''} />`,
+      title: quick ? text('title', ` title="${escAttr(m.description)}"`) : `<input data-i="${i}" data-k="title" value="${escAttr(m.title)}" placeholder="Title" />`,
+      description: `<input data-i="${i}" data-k="description" value="${escAttr(m.description)}" placeholder="Description" />`,
+      swimlane: `<input data-i="${i}" data-k="swimlane" value="${escAttr(m.swimlane)}" list="lane-list" placeholder="Swimlane" />`,
+      subswimlane: `<input data-i="${i}" data-k="subswimlane" value="${escAttr(m.subswimlane)}" list="sublane-list" placeholder="Sub-swimlane" />`,
+      owner: quick ? text('owner') : `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
+      start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}" ${quick && !task ? 'disabled title="Milestone — change the end date to move it, or use All fields to make it a task"' : ''} />`,
+      end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}" />`,
+      status: quick ? `<div class="rag-pick sm">${ragButtons(m.status, `data-i="${i}"`)}</div>`
+        : `<select data-i="${i}" data-k="status" class="status-${statusSlug(m.status)}">${optionList(STATUSES, m.status)}</select>`,
+      shape: `<select data-i="${i}" data-k="shape" ${task ? 'disabled title="Tasks are drawn as bars"' : ''}>${optionList(SHAPES, m.shape)}</select>`,
+      parent: `<select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select>`,
+      deps: `<div class="deps">${chips}<select data-adddep="${i}" class="add-dep"><option value="">+ add</option>${depOpts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select></div>`,
+      actions: quick ? `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this item">Report…</button>`
+        : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
+    };
+    tr.innerHTML = cols.map(c => `<td${c.key === 'id' ? ' class="col-id"' : ''}>${cells[c.key]}</td>`).join('');
     body.appendChild(tr);
   }
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="${GRID_COLS.length}" class="grid-empty">No items match the filters.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">No items match the filters.</td></tr>`;
   }
 
   const filtered = Object.keys(grid.filters).length > 0;
@@ -1180,6 +1232,7 @@ function renderEditor(highlight = []) {
     ? `Showing ${rows.length} of ${state.items.length}`
     : `${state.items.length} items`;
   document.getElementById('btn-clear-filters').hidden = !filtered;
+  document.querySelectorAll('[name="grid-mode"]').forEach(r => { r.checked = r.value === grid.mode; });
   refreshDatalists();
 }
 
@@ -1242,6 +1295,19 @@ function onEditorChange(e) {
 }
 
 function onEditorClick(e) {
+  const rag = e.target.closest('[data-rag]');
+  if (rag) {
+    syncEditorToState();
+    if (setRag(state.items[+rag.dataset.i], rag.dataset.rag)) {
+      rag.parentElement.querySelectorAll('[data-rag]').forEach(b => b.setAttribute('aria-pressed', b === rag));
+    }
+    return;
+  }
+  const rpt = e.target.closest('[data-report]');
+  if (rpt) {
+    syncEditorToState();
+    return openReportDialog({ itemId: rpt.dataset.report });
+  }
   const rm = e.target.closest('[data-rmdep]');
   if (rm) {
     syncEditorToState();
@@ -1275,7 +1341,7 @@ function rowsToReports(rows) {
   const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
   const reports = rows.slice(1).map(r => {
     const o = {};
-    for (const k of REPORT_COLUMNS) o[k] = (r[header.indexOf(k)] ?? '').trim();
+    for (const k of REPORT_COLUMNS) o[k] = (r[header.indexOf(csvName(k))] ?? r[header.indexOf(k)] ?? '').trim();
     o.cadence = CADENCES.find(c => c.toLowerCase() === o.cadence.toLowerCase()) || 'Weekly';
     o.status = normaliseStatus(o.status);
     if (o.period_end && !o.period_start) o.period_start = periodStart(o.period_end, o.cadence);
@@ -1291,8 +1357,11 @@ function rowsToReports(rows) {
   return reports;
 }
 
+// Items and reports keep a `status` field in memory; the CSV column is called `rag` (`status` still loads).
+const csvName = (k) => (k === 'status' ? 'rag' : k);
+
 function reportsToCSV(reports) {
-  return [REPORT_COLUMNS.join(','), ...reports.map(r => REPORT_COLUMNS.map(k => csvEscape(r[k])).join(','))].join('\n') + '\n';
+  return [REPORT_COLUMNS.map(csvName).join(','), ...reports.map(r => REPORT_COLUMNS.map(k => csvEscape(r[k])).join(','))].join('\n') + '\n';
 }
 
 function nextReportId() {
@@ -1342,43 +1411,125 @@ function deleteMessage(m) {
     (n ? `\n\nIts ${n} report${n > 1 ? 's are' : ' is'} kept in reports.csv.` : '');
 }
 
-/* ---- right-click menu on the chart ---- */
+/* ---- quick update panel (click or right-click an item on the chart) ---- */
+// RAG and dates change far more often than an item's details, so they are one click away here;
+// everything else lives behind "Edit details".
 
-function showCtxMenu(m, e) {
+let quickId = null;  // item the panel is showing
+let quickMsg = '';   // result of the last change, shown in the panel
+
+function showQuick(m, e) {
   e.preventDefault();
   hideTip();
-  const menu = document.getElementById('ctx-menu');
-  const n = reportsFor(m.id).length;
-  menu.dataset.id = m.id;
-  menu.innerHTML = `
-    <div class="ctx-head">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</div>
-    <button role="menuitem" data-act="report">Provide report…</button>
-    <button role="menuitem" data-act="edit">Edit item…</button>
-    <button role="menuitem" data-act="history" ${n ? '' : 'disabled'}>View reports (${n})</button>`;
-  menu.hidden = false;
-  const x = Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 8);
-  const y = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
-  menu.style.left = x + 'px';
-  menu.style.top = y + 'px';
-  menu.querySelector('button').focus();
+  quickId = m.id;
+  quickMsg = '';
+  renderQuick();
+  const el = document.getElementById('quick');
+  el.hidden = false;
+  el.style.left = Math.max(8, Math.min(e.clientX + 10, window.innerWidth - el.offsetWidth - 8)) + 'px';
+  el.style.top = Math.max(8, Math.min(e.clientY + 10, window.innerHeight - el.offsetHeight - 8)) + 'px';
+  el.querySelector('[aria-pressed="true"]')?.focus();
 }
-function hideCtxMenu() {
-  const menu = document.getElementById('ctx-menu');
-  if (menu) menu.hidden = true;
+
+function hideQuick() {
+  const el = document.getElementById('quick');
+  if (el) el.hidden = true;
+  quickId = null;
 }
-function onCtxMenuClick(e) {
-  const b = e.target.closest('[data-act]');
-  if (!b) return;
-  const m = itemById(document.getElementById('ctx-menu').dataset.id);
-  hideCtxMenu();
-  if (!m) return;
-  if (b.dataset.act === 'report') openReportDialog({ itemId: m.id });
-  else if (b.dataset.act === 'edit') openEditDialog(m);
-  else {
-    clearReportFilters();
-    rptFilter.item = m.id;
-    switchView('reports');
+
+// Items that would move with this one (explicit dependencies, followed transitively).
+function dependentCount(id) {
+  const seen = new Set([id]);
+  const queue = [id];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const m of state.items) if (m.deps.includes(cur) && !seen.has(m.id)) { seen.add(m.id); queue.push(m.id); }
   }
+  return seen.size - 1;
+}
+
+const ragButtons = (current, attrs = '') => STATUSES.map(st => `
+  <button type="button" data-rag="${st}" ${attrs} aria-pressed="${st === current}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${st}</button>`).join('');
+
+function renderQuick() {
+  const m = itemById(quickId);
+  if (!m) return hideQuick();
+  const task = isTask(m);
+  const n = reportsFor(m.id).length;
+  const deps = dependentCount(m.id);
+  document.getElementById('quick').innerHTML = `
+    <div class="q-head">
+      <span class="type-badge ${task ? 'task' : 'ms'}">${task ? 'Task' : 'Milestone'}</span>
+      <span class="q-title">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>
+      <button type="button" class="dlg-close" data-act="close" title="Close">✕</button>
+    </div>
+    <div class="q-label">RAG</div>
+    <div class="rag-pick">${ragButtons(m.status)}</div>
+    <form class="q-dates" novalidate>
+      ${task
+        ? `<label>Start<input type="date" name="start" value="${m.start}" /></label><label>End<input type="date" name="end" value="${m.end}" /></label>`
+        : `<label>Date<input type="date" name="end" value="${m.end}" /></label>`}
+      <button type="submit" class="btn btn-primary" disabled>Update dates</button>
+    </form>
+    ${deps ? `<p class="q-note">${deps} dependent item${deps > 1 ? 's' : ''} will move by the same amount.</p>` : ''}
+    <p class="q-msg">${escAttr(quickMsg)}</p>
+    <div class="q-foot">
+      <button type="button" class="btn" data-act="report">Provide report…</button>
+      <button type="button" class="btn" data-act="history" ${n ? '' : 'disabled'}>Reports (${n})</button>
+      <button type="button" class="btn" data-act="edit">Edit details…</button>
+    </div>`;
+}
+
+function setRag(m, st) {
+  if (m.status === st) return false;
+  m.status = st;
+  saveData(`${itemLabel(m)} RAG is now ${st}`);
+  return true;
+}
+
+function onQuickClick(e) {
+  const m = itemById(quickId);
+  if (!m) return;
+  const rag = e.target.closest('[data-rag]');
+  if (rag) {
+    if (setRag(m, rag.dataset.rag)) {
+      quickMsg = `RAG changed to ${m.status}.`;
+      renderGantt();
+      renderQuick();
+      document.querySelector('#quick [aria-pressed="true"]')?.focus();
+    }
+    return;
+  }
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (!act) return;
+  hideQuick();
+  if (act === 'report') openReportDialog({ itemId: m.id });
+  else if (act === 'edit') openEditDialog(m);
+  else if (act === 'history') showReportsFor(m.id);
+}
+
+function onQuickDateInput(e) {
+  const form = e.target.form;
+  const m = itemById(quickId);
+  if (!form || !m) return;
+  const f = form.elements;
+  const valid = [...form.querySelectorAll('input')].every(i => parseDate(i.value) && +i.value.slice(0, 4) >= 1900);
+  const changed = f.end.value !== m.end || (f.start && f.start.value !== m.start);
+  form.querySelector('[type=submit]').disabled = !(valid && changed);
+}
+
+async function onQuickDateSubmit(e) {
+  e.preventDefault();
+  const m = itemById(quickId);
+  const f = e.target.elements;
+  if (!m || f[f.length - 1].disabled) return;
+  const changes = { end: f.end.value };
+  if (f.start) changes.start = f.start.value;
+  const res = updateItem(m, changes);
+  quickMsg = res.error || [`Dates updated: ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end)}.`, movedMessage(m, res.moved)].filter(Boolean).join(' ');
+  renderGantt();
+  renderQuick();
+  if (!res.error) await saveData(movedMessage(m, res.moved) || `${itemLabel(m)} dates updated`);
 }
 
 /* ---- report dialog ---- */
@@ -1390,7 +1541,7 @@ let rpPrevIdx = 0;         // which earlier report the side panel shows (0 = the
 
 function openReportDialog({ report = null, itemId = '' } = {}) {
   hideTip();
-  hideCtxMenu();
+  hideQuick();
   rpEditing = report;
   rpItemId = report ? report.item_id : itemId;
   rpDateTouched = !!report;
@@ -1434,6 +1585,11 @@ function refreshReportForm() {
   const end = f.period_end.value;
   const st = f.status.value;
 
+  const n = rpItemId ? reportsFor(rpItemId).length : 0;
+  const hist = document.getElementById('rp-history');
+  hist.hidden = !n;
+  hist.textContent = `View all reports (${n})`;
+
   const strip = document.getElementById('rp-item');
   strip.hidden = !rpItemId;
   strip.innerHTML = m
@@ -1448,12 +1604,12 @@ function refreshReportForm() {
   document.getElementById('rp-gtg').hidden = !offTrack;
   f.get_to_green.required = offTrack;
 
-  // Offer to update the item's status, but only from its most recent report.
+  // Offer to update the item's RAG, but only from its most recent report.
   const others = state.reports.filter(r => r.item_id === rpItemId && r !== rpEditing);
   const latest = !others.some(r => r.period_end > end);
   const sync = document.getElementById('rp-sync');
   sync.hidden = !(m && latest && st !== m.status);
-  if (m) sync.querySelector('span').innerHTML = `Also change ${escAttr(itemLabel(m))}’s status on the chart from <b>${m.status}</b> to <b>${st}</b>`;
+  if (m) sync.querySelector('span').innerHTML = `Also change ${escAttr(itemLabel(m))}’s RAG on the chart from <b>${m.status}</b> to <b>${st}</b>`;
 
   renderPrevReport(others.filter(r => r.period_end < end).sort(byPeriodDesc));
 
@@ -1461,6 +1617,13 @@ function refreshReportForm() {
   document.getElementById('rp-error').innerHTML = clash
     ? `There’s already a report for this item for the period ending ${fmtNice(end)}. <button type="button" class="link-btn" data-open-report="${clash.id}">Open it</button>`
     : '';
+}
+
+// Has the user typed anything that isn't saved yet?
+function reportDirty() {
+  const f = document.getElementById('report-form').elements;
+  return ['exec_summary', 'achievements', 'next_steps', 'get_to_green']
+    .some(k => f[k].value.trim() !== (rpEditing ? rpEditing[k] : '').trim());
 }
 
 function onReportFormInput(e) {
@@ -1561,7 +1724,7 @@ async function submitReport(e) {
   document.getElementById('report-dialog').close();
   if (syncStatus) {
     m.status = v.status;
-    saveData(`${itemLabel(m)} is now ${v.status}`);
+    saveData(`${itemLabel(m)} RAG is now ${v.status}`);
   }
   rerenderCurrentView();
   await saveReports(isNew ? 'Report submitted' : 'Report updated');
@@ -1584,40 +1747,79 @@ function rerenderCurrentView() {
 
 /* ---- reports list ---- */
 
-const rptFilter = { item: '', status: '', cadence: '', q: '' };
+const itemName = (id) => { const m = itemById(id); return m ? fullLabel(m) : `Deleted item #${id}`; };
+
+// The item filter lists everything that has reports (plus a filtered-on item without any), in ref order.
+function reportItemOptions() {
+  const ids = new Set(state.reports.map(r => r.item_id));
+  if (rptTable.filters.item_id) ids.add(rptTable.filters.item_id);
+  return [...ids]
+    .sort((a, b) => { const ma = itemById(a), mb = itemById(b); return ma && mb ? cmpRef(ma, mb) : !ma - !mb; })
+    .map(id => [id, itemName(id)]);
+}
+
+// `text` is what a text filter searches; `sort` is the value the column sorts by.
+const RPT_COLS = [
+  { key: 'period_end', label: 'Period ending', w: 150, filter: 'text', text: r => `${r.period_end} ${fmtNice(r.period_end)} ${periodText(r)}` },
+  { key: 'item_id', label: 'Item', w: 230, filter: reportItemOptions, sort: r => itemById(r.item_id) || null },
+  { key: 'cadence', label: 'Cadence', w: 115, filter: opts(CADENCES), sort: r => CADENCES.indexOf(r.cadence) },
+  { key: 'status', label: 'RAG', w: 120, filter: opts(STATUSES) },
+  { key: 'exec_summary', label: 'Exec summary', w: 420, filter: 'text', text: r => `${r.exec_summary} ${r.get_to_green ? 'get to green' : ''}` },
+  { key: 'author', label: 'Author', w: 130, filter: 'text' },
+  { key: 'updated', label: 'Last updated', w: 150, filter: 'text', text: r => fmtStamp(r.updated) },
+];
+
+const rptTable = makeTable({ table: 'reports-table', store: 'milestone-tracker.reports-grid', cols: () => RPT_COLS, onChange: () => renderReports() });
+let rptSearch = ''; // free-text search across every report field, from the toolbar
 
 function clearReportFilters() {
-  Object.assign(rptFilter, { item: '', status: '', cadence: '', q: '' });
+  clearTableFilters(rptTable);
+  rptSearch = '';
+}
+
+function showReportsFor(itemId) {
+  clearReportFilters();
+  rptTable.filters.item_id = itemId;
+  switchView('reports');
+}
+
+// Newest period first, then by item ref.
+const reportDefaultOrder = (a, b) => b.period_end.localeCompare(a.period_end)
+  || ((ma, mb) => (ma && mb ? cmpRef(ma, mb) : 0))(itemById(a.item_id), itemById(b.item_id));
+
+// Reports matching the filters on the Reports tab, in the table's sort order.
+function filteredReports() {
+  const q = rptSearch.trim().toLowerCase();
+  const rows = state.reports.filter(r =>
+    Object.entries(rptTable.filters).every(([k, f]) => {
+      const c = RPT_COLS.find(x => x.key === k);
+      if (c.filter !== 'text') return r[k] === f;
+      return (c.text ? c.text(r) : r[k]).toLowerCase().includes(f.toLowerCase());
+    })
+    && (!q || [itemName(r.item_id), r.exec_summary, r.achievements, r.next_steps, r.get_to_green, r.author].join(' ').toLowerCase().includes(q)));
+  const valueOf = (r, key) => {
+    const c = RPT_COLS.find(x => x.key === key);
+    return c.sort ? c.sort(r) : r[key];
+  };
+  if (rptTable.sort.key === 'item_id') { // items sort by ref, not by id
+    const dir = rptTable.sort.dir;
+    return rows.sort((a, b) => {
+      const ma = itemById(a.item_id), mb = itemById(b.item_id);
+      return ((ma && mb ? cmpRef(ma, mb) : !ma - !mb) * dir) || reportDefaultOrder(a, b);
+    });
+  }
+  return sortRows(rptTable, rows, valueOf, reportDefaultOrder);
 }
 
 function renderReports() {
-  const byId = new Map(state.items.map(m => [m.id, m]));
-  const itemName = (id) => (byId.has(id) ? fullLabel(byId.get(id)) : `Deleted item #${id}`);
-
-  // item filter lists everything that has reports, in ref order
-  const withReports = [...new Set(state.reports.map(r => r.item_id))]
-    .sort((a, b) => (byId.has(a) && byId.has(b) ? cmpRef(byId.get(a), byId.get(b)) : !byId.has(a) - !byId.has(b)));
-  if (rptFilter.item && !withReports.includes(rptFilter.item)) withReports.unshift(rptFilter.item);
-  const sel = document.getElementById('rpf-item');
-  sel.innerHTML = '<option value="">All items</option>' + withReports.map(id => `<option value="${id}">${escAttr(itemName(id))}</option>`).join('');
-  sel.value = rptFilter.item;
-  document.getElementById('rpf-status').value = rptFilter.status;
-  document.getElementById('rpf-cadence').value = rptFilter.cadence;
+  refreshSelectFilters(rptTable);
   const qEl = document.getElementById('rpf-q');
-  if (document.activeElement !== qEl) qEl.value = rptFilter.q; // don't disturb the caret while typing
+  if (document.activeElement !== qEl) qEl.value = rptSearch; // don't disturb the caret while typing
 
-  const q = rptFilter.q.trim().toLowerCase();
-  const rows = state.reports
-    .filter(r => (!rptFilter.item || r.item_id === rptFilter.item)
-      && (!rptFilter.status || r.status === rptFilter.status)
-      && (!rptFilter.cadence || r.cadence === rptFilter.cadence)
-      && (!q || [itemName(r.item_id), r.exec_summary, r.achievements, r.next_steps, r.get_to_green, r.author].join(' ').toLowerCase().includes(q)))
-    .sort((a, b) => b.period_end.localeCompare(a.period_end)
-      || (byId.has(a.item_id) && byId.has(b.item_id) ? cmpRef(byId.get(a.item_id), byId.get(b.item_id)) : 0));
-
+  const rows = filteredReports();
   const body = document.getElementById('reports-body');
   body.innerHTML = rows.map(r => {
-    const m = byId.get(r.item_id);
+    const m = itemById(r.item_id);
     return `<tr data-rid="${r.id}" tabindex="0" title="Click to view or edit">
       <td class="rc-period"><b>${fmtNice(r.period_end)}</b><small>${periodText(r)}</small></td>
       <td class="rc-item">${m ? `${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted item #${escAttr(r.item_id)}</i>`}</td>
@@ -1628,11 +1830,11 @@ function renderReports() {
       <td class="rc-upd">${fmtStamp(r.updated)}</td>
     </tr>`;
   }).join('');
-  const filtered = Object.values(rptFilter).some(v => v.trim());
+  const filtered = Object.keys(rptTable.filters).length > 0 || !!rptSearch.trim();
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="7" class="grid-empty">${state.reports.length
+    body.innerHTML = `<tr><td colspan="${RPT_COLS.length}" class="grid-empty">${state.reports.length
       ? 'No reports match the filters.'
-      : 'No reports yet. Right-click an item on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.'}</td></tr>`;
+      : 'No reports yet. Click an item on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.'}</td></tr>`;
   }
   document.getElementById('rp-count').textContent = filtered
     ? `Showing ${rows.length} of ${state.reports.length}`
@@ -1643,17 +1845,17 @@ function renderReports() {
 function initReports() {
   document.getElementById('rp-status').innerHTML = STATUSES.map(st => `
     <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${st}" /><span>${st}</span></label>`).join('');
-  document.getElementById('rpf-status').innerHTML = '<option value="">All statuses</option>' + optionList(STATUSES);
-  document.getElementById('rpf-cadence').innerHTML = '<option value="">All cadences</option>' + optionList(CADENCES);
 }
 
 function wireReports() {
-  const menu = document.getElementById('ctx-menu');
-  menu.addEventListener('click', onCtxMenuClick);
-  document.addEventListener('mousedown', (e) => { if (!menu.hidden && !menu.contains(e.target)) hideCtxMenu(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
-  document.addEventListener('scroll', hideCtxMenu, true);
-  window.addEventListener('resize', hideCtxMenu);
+  const quick = document.getElementById('quick');
+  quick.addEventListener('click', onQuickClick);
+  quick.addEventListener('input', onQuickDateInput);
+  quick.addEventListener('submit', onQuickDateSubmit);
+  document.addEventListener('mousedown', (e) => { if (!quick.hidden && !quick.contains(e.target)) hideQuick(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideQuick(); });
+  document.getElementById('gantt-scroll').addEventListener('scroll', hideQuick);
+  window.addEventListener('resize', hideQuick);
 
   const dlg = document.getElementById('report-dialog');
   const form = document.getElementById('report-form');
@@ -1662,6 +1864,11 @@ function wireReports() {
   document.getElementById('rp-cancel').onclick = () => dlg.close();
   document.getElementById('rp-close').onclick = () => dlg.close();
   document.getElementById('rp-delete').onclick = deleteReport;
+  document.getElementById('rp-history').onclick = () => {
+    if (reportDirty() && !confirm('Discard what you’ve written in this report?')) return;
+    dlg.close();
+    showReportsFor(rpItemId);
+  };
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   document.getElementById('rp-prev').addEventListener('click', onPrevPanelClick);
   document.getElementById('rp-error').addEventListener('click', (e) => {
@@ -1669,7 +1876,8 @@ function wireReports() {
     if (b) openReportDialog({ report: state.reports.find(r => r.id === b.dataset.openReport) });
   });
 
-  document.getElementById('btn-new-report').onclick = () => openReportDialog({ itemId: rptFilter.item });
+  document.getElementById('btn-reports-csv').onclick = downloadReportsCSV;
+  document.getElementById('btn-new-report').onclick = () => openReportDialog({ itemId: rptTable.filters.item_id || '' });
   const openRow = (e) => {
     const tr = e.target.closest('[data-rid]');
     if (tr) openReportDialog({ report: state.reports.find(r => r.id === tr.dataset.rid) });
@@ -1677,10 +1885,27 @@ function wireReports() {
   const body = document.getElementById('reports-body');
   body.addEventListener('click', openRow);
   body.addEventListener('keydown', (e) => { if (e.key === 'Enter') openRow(e); });
-  for (const [id, key] of [['rpf-item', 'item'], ['rpf-status', 'status'], ['rpf-cadence', 'cadence'], ['rpf-q', 'q']]) {
-    document.getElementById(id).addEventListener('input', (e) => { rptFilter[key] = e.target.value; renderReports(); });
-  }
+  wireTable(rptTable);
+  document.getElementById('rpf-q').addEventListener('input', (e) => { rptSearch = e.target.value; renderReports(); });
   document.getElementById('rpf-clear').onclick = () => { clearReportFilters(); renderReports(); };
+}
+
+// Downloads the reports currently listed (filters applied). item_ref / item_title are added for
+// readability; the file still loads as reports.csv because unknown columns are ignored.
+function downloadReportsCSV() {
+  const byId = new Map(state.items.map(m => [m.id, m]));
+  const cols = [...REPORT_COLUMNS.slice(0, 2), 'item_ref', 'item_title', ...REPORT_COLUMNS.slice(2)];
+  const header = cols.map(csvName).join(',');
+  const lines = filteredReports().map(r => {
+    const m = byId.get(r.item_id);
+    return cols.map(k => csvEscape(k === 'item_ref' ? m?.ref : k === 'item_title' ? m?.title : r[k])).join(',');
+  });
+  const blob = new Blob(['\ufeff' + [header, ...lines].join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.download = `reports-${fmtISO(new Date())}.csv`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
 
 /* ================= PNG export ================= */
@@ -1715,7 +1940,7 @@ const VIEWS = ['gantt', 'editor', 'reports'];
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 
 function switchView(view) {
-  hideCtxMenu();
+  hideQuick();
   if (view !== 'editor') {
     syncEditorToState();
     // Clear the hidden table so a later sync can't overwrite edits made elsewhere.
@@ -1759,20 +1984,19 @@ function wireEvents() {
   document.getElementById('btn-png').onclick = downloadPNG;
   document.getElementById('btn-gantt-add').onclick = () => openEditDialog(null);
 
-  // gantt: hover card + click to edit
+  // gantt: hover card + click for the quick update panel
   const gc = document.getElementById('gantt-container');
   const itemAt = (e) => {
     const g = e.target.closest('[data-id]');
     return g && state.items.find(m => m.id === g.dataset.id);
   };
   gc.addEventListener('mouseover', (e) => {
-    const m = !document.getElementById('edit-dialog').open && itemAt(e);
+    const m = !document.getElementById('edit-dialog').open && document.getElementById('quick').hidden && itemAt(e);
     if (m) showTip(m, e); else hideTip();
   });
   gc.addEventListener('mousemove', (e) => { if (document.getElementById('tip').classList.contains('show')) moveTip(e); });
   gc.addEventListener('mouseleave', hideTip);
-  gc.addEventListener('click', (e) => { const m = itemAt(e); if (m) openEditDialog(m); });
-  gc.addEventListener('contextmenu', (e) => { const m = itemAt(e); if (m) showCtxMenu(m, e); });
+  for (const type of ['click', 'contextmenu']) gc.addEventListener(type, (e) => { const m = itemAt(e); if (m) showQuick(m, e); });
 
   // edit dialog
   const dlg = document.getElementById('edit-dialog');
@@ -1784,6 +2008,7 @@ function wireEvents() {
   document.getElementById('ed-close').onclick = () => dlg.close();
   document.getElementById('ed-delete').onclick = deleteFromDialog;
   document.getElementById('ed-report').onclick = () => { const m = editing; dlg.close(); openReportDialog({ itemId: m.id }); };
+  document.getElementById('ed-history').onclick = () => { const m = editing; dlg.close(); showReportsFor(m.id); };
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   document.getElementById('ed-deps').addEventListener('click', (e) => {
     const rm = e.target.closest('[data-edrm]');
@@ -1803,7 +2028,8 @@ function wireEvents() {
       swimlane: last?.swimlane || 'General', subswimlane: last?.subswimlane || '', owner: last?.owner || '',
       start: today, end: today, status: 'Not Started', shape: 'diamond', parent: '', deps: [],
     });
-    clearFilters(); // so the new row is visible
+    clearTableFilters(grid); // so the new row is visible
+    if (grid.mode === 'quick') setGridMode('full'); // a new item needs its details filled in
     renderEditor();
     const input = document.querySelector(`#editor-body [data-i="${state.items.length - 1}"][data-k="title"]`);
     input?.scrollIntoView({ block: 'center' });
@@ -1811,14 +2037,10 @@ function wireEvents() {
     scheduleSave('Item added');
   };
 
-  // grid header: sort, filter, resize
-  const head = document.getElementById('grid-head');
-  head.addEventListener('click', onGridHeadClick);
-  head.addEventListener('input', onGridFilter);
-  head.addEventListener('pointerdown', onResizeStart);
-  head.addEventListener('dblclick', onResizeReset);
+  wireTable(grid);
+  document.querySelectorAll('[name="grid-mode"]').forEach(r => r.addEventListener('change', () => setGridMode(r.value)));
   document.getElementById('btn-clear-filters').onclick = () => {
-    clearFilters();
+    clearTableFilters(grid);
     syncEditorToState();
     renderEditor();
   };
@@ -1855,8 +2077,8 @@ function wireEvents() {
   f.shape.innerHTML = optionList(SHAPES);
   initReports();
   document.getElementById('row-slider').value = state.rowH;
-  loadGridPrefs();
-  renderGridHead();
+  renderTableHead(grid);
+  renderTableHead(rptTable);
   wireEvents();
   await loadData();
   fitZoom(); // also renders; the ResizeObserver keeps it fitted as layout settles

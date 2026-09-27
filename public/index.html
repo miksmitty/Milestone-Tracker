@@ -61,7 +61,7 @@
       <div id="gantt-container"></div>
     </div>
     <div class="legend">
-      <span class="legend-title">Status</span>
+      <span class="legend-title">RAG</span>
       <span class="legend-item"><i class="dot" style="background:#16a34a"></i> Green — on track</span>
       <span class="legend-item"><i class="dot" style="background:#f59e0b"></i> Amber — at risk</span>
       <span class="legend-item"><i class="dot" style="background:#e60000"></i> Red — off track</span>
@@ -78,6 +78,10 @@
   <main id="view-editor" class="view hidden">
     <div class="toolbar">
       <div class="toolbar-group">
+        <div class="mode-seg" role="radiogroup" aria-label="Columns shown">
+          <label title="Just RAG and dates — the things that change week to week"><input type="radio" name="grid-mode" value="quick" /><span>Quick update</span></label>
+          <label title="Every field, including title, lanes, links and shape"><input type="radio" name="grid-mode" value="full" /><span>All fields</span></label>
+        </div>
         <button id="btn-add" class="btn btn-primary">+ Add item</button>
         <span id="grid-count" class="grid-count"></span>
         <button id="btn-clear-filters" class="btn btn-ghost" hidden>Clear filters</button>
@@ -89,12 +93,13 @@
     </div>
     <div class="table-wrap">
       <table id="editor-table">
-        <colgroup id="grid-cols"></colgroup>
-        <thead id="grid-head"></thead>
+        <colgroup></colgroup>
+        <thead></thead>
         <tbody id="editor-body"></tbody>
       </table>
     </div>
-    <p class="hint">Click a column header to sort, use the filter row to narrow the list, and drag a header edge to resize (double-click to reset). <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
+    <p class="hint"><b>Quick update</b> shows just RAG and dates: click a RAG to change it, or edit a date. Switch to <b>All fields</b> to change titles, lanes, links and the rest.
+      Click a column header to sort, use the filter row to narrow the list, and drag a header edge to resize (double-click to reset). <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
       Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.
       An item whose start is before its end is a <b>task</b> (bar); set start = end for a <b>milestone</b> (changing a milestone's end date moves it; set an earlier start to turn it into a task).
       Changing an end date shifts everything that depends on it by the same amount.</p>
@@ -105,31 +110,28 @@
     <div class="toolbar">
       <div class="toolbar-group">
         <button id="btn-new-report" class="btn btn-primary">+ New report</button>
+        <button id="btn-reports-csv" class="btn" title="Download the reports shown (filters applied) as a CSV">Download CSV</button>
         <span id="rp-count" class="grid-count"></span>
       </div>
       <div class="toolbar-group rp-filters">
-        <select id="rpf-item" title="Filter by item"></select>
-        <select id="rpf-status" title="Filter by status"></select>
-        <select id="rpf-cadence" title="Filter by cadence"></select>
         <input id="rpf-q" type="search" placeholder="Search report text…" />
         <button id="rpf-clear" class="btn btn-ghost" hidden>Clear filters</button>
       </div>
     </div>
     <div class="table-wrap">
       <table id="reports-table">
-        <thead>
-          <tr><th class="rc-period">Period ending</th><th class="rc-item">Item</th><th class="rc-cad">Cadence</th><th class="rc-status">Status</th><th>Exec summary</th><th class="rc-author">Author</th><th class="rc-upd">Last updated</th></tr>
-        </thead>
+        <colgroup></colgroup>
+        <thead></thead>
         <tbody id="reports-body"></tbody>
       </table>
     </div>
-    <p class="hint">Click a report to view or edit it. To report on an item, <b>right-click it on the Gantt chart</b> and choose <b>Provide report</b>, or open it and use the <b>Provide report</b> button.
+    <p class="hint">Click a report to view or edit it. Sort, filter and resize columns as on the Items tab. To report on an item, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
       Reports are stored in <code>reports.csv</code>, one row per report, linked to the item by its ID.</p>
   </main>
 
-  <!-- ============ HOVER CARD + CONTEXT MENU + EDIT DIALOG ============ -->
+  <!-- ============ HOVER CARD + QUICK UPDATE + EDIT DIALOG ============ -->
   <div id="tip" class="tip" role="tooltip"></div>
-  <div id="ctx-menu" class="ctx-menu" role="menu" hidden></div>
+  <div id="quick" class="quick" role="dialog" aria-label="Quick update" hidden></div>
 
   <dialog id="edit-dialog" class="edit-dialog">
     <form id="edit-form" novalidate>
@@ -147,7 +149,7 @@
         <label>Owner<input name="owner" list="owner-list" /></label>
         <label>Start<input name="start" type="date" /></label>
         <label>End<input name="end" type="date" /></label>
-        <label>Status<select name="status"></select></label>
+        <label>RAG<select name="status"></select></label>
         <label>Shape<select name="shape"></select></label>
         <label class="span2">Rolls up to<select name="parent"></select></label>
         <div class="span3 field"><span class="field-label">Depends on</span><div id="ed-deps" class="deps"></div></div>
@@ -157,6 +159,7 @@
       <footer class="dlg-foot">
         <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
         <button type="button" id="ed-report" class="btn">Provide report</button>
+        <button type="button" id="ed-history" class="btn">View reports</button>
         <span class="spacer"></span>
         <button type="button" id="ed-cancel" class="btn">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>
@@ -185,7 +188,7 @@
         </div>
         <label>Period ending<input name="period_end" type="date" /></label>
         <p id="rp-range" class="span3 rp-range"></p>
-        <div class="span3 field"><span class="field-label">Status this period</span><div id="rp-status" class="rag"></div></div>
+        <div class="span3 field"><span class="field-label">RAG this period</span><div id="rp-status" class="rag"></div></div>
         <label id="rp-sync" class="span3 rp-sync"><input type="checkbox" name="sync_status" checked /> <span></span></label>
         <label class="span3">Exec summary<textarea name="exec_summary" rows="3" placeholder="Two or three sentences for the exec audience: where this stands and anything they need to know or decide."></textarea></label>
         <label class="span3">Achievements last period<textarea name="achievements" rows="3" placeholder="What was delivered or progressed since the last report."></textarea></label>
@@ -199,6 +202,7 @@
       <p id="rp-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="rp-delete" class="btn btn-danger">Delete report</button>
+        <button type="button" id="rp-history" class="btn">View reports</button>
         <span class="spacer"></span>
         <button type="button" id="rp-cancel" class="btn">Cancel</button>
         <button type="submit" id="rp-submit" class="btn btn-primary">Submit report</button>

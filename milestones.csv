@@ -1,16 +1,16 @@
-id,ref,title,description,swimlane,subswimlane,owner,start,end,status,shape,parent,depends_on
+id,ref,title,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on
 1,1.1,Project Kickoff,Initial mobilisation and team onboarding,Programme,Governance,Sarah Patel,2026-01-12,2026-01-12,Complete,diamond,,
 2,1.2,Requirements Gathering,Workshops with business stakeholders,Programme,Governance,Sarah Patel,2026-01-13,2026-02-05,Complete,diamond,3,1
 3,1.3,Requirements Signed Off,Business requirements baselined with stakeholders,Programme,Governance,Sarah Patel,2026-02-06,2026-02-06,Complete,square,,
 4,2.1,Solution Architecture,Design the target solution architecture,Design,Architecture,Tom Reed,2026-02-09,2026-02-27,Complete,diamond,5,3
-5,2.2,Architecture Approved,Solution architecture through design authority,Design,Architecture,Tom Reed,2026-03-02,2026-03-02,Complete,triangle,,
+5,2.2,Architecture Approved,Solution architecture through design authority,Design,Architecture,Tom Reed,2026-03-07,2026-03-07,Complete,triangle,,
 6,2.3,UX Prototyping,Design and test a clickable prototype,Design,UX,Priya Shah,2026-02-16,2026-03-19,Complete,diamond,7,3
 7,2.4,UX Prototype Complete,Clickable prototype validated with user panel,Design,UX,Priya Shah,2026-03-20,2026-03-20,Complete,circle,,
 8,3.1,Vendor Negotiation,Commercial negotiation with implementation partner,Commercial,Procurement,James Okoro,2026-02-09,2026-03-31,Complete,diamond,9,3
 9,3.2,Vendor Contract Signed,Commercial terms agreed with implementation partner,Commercial,Procurement,James Okoro,2026-04-01,2026-04-01,Complete,square,,
-10,4.1,Build Phase 1,Core platform features,Delivery,Build,Lucy Chen,2026-04-02,2026-05-14,Complete,diamond,11,5;9
-11,4.2,Build Phase 1 Complete,Core platform features code complete,Delivery,Build,Lucy Chen,2026-05-15,2026-05-15,Complete,diamond,,
-12,4.3,Build Phase 2,Integrations and reporting,Delivery,Build,Lucy Chen,2026-05-18,2026-07-24,Complete,diamond,13,11
+10,4.1,Build Phase 1,Core platform features,Delivery,Build,Lucy Chen,2026-04-07,2026-05-19,Red,diamond,11,5;9
+11,4.2,Build Phase 1 Complete,Core platform features code complete,Delivery,Build,Lucy Chen,2026-05-19,2026-05-19,Complete,diamond,,
+12,4.3,Build Phase 2,Integrations and reporting,Delivery,Build,Lucy Chen,2026-05-19,2026-07-25,Red,diamond,13,11
 13,4.4,Build Phase 2 Complete,All features code complete,Delivery,Build,Lucy Chen,2026-07-27,2026-07-27,Complete,diamond,,
 14,4.5,Integration Testing,End-to-end integration testing,Delivery,Test,Mark Evans,2026-06-01,2026-07-31,Complete,diamond,16,11
 15,4.6,Security Pen Test,Independent penetration test of the platform,Delivery,Test,Mark Evans,2026-07-06,2026-07-17,Complete,diamond,16,11
@@ -21,7 +21,7 @@ id,ref,title,description,swimlane,subswimlane,owner,start,end,status,shape,paren
 20,4.9,Data Migration Rehearsal,Full dress rehearsal of production data migration,Delivery,Data,Raj Mehta,2026-09-01,2026-10-02,Red,diamond,21,19
 21,4.10,Migration Ready,Migration rehearsed and signed off,Delivery,Data,Raj Mehta,2026-10-05,2026-10-05,Red,square,,
 22,5.3,Training Delivery,End-user training sessions,Business,Change,Anita Gomez,2026-09-14,2026-10-09,Green,diamond,24,18
-23,4.11,Cutover Preparation,Cutover runbook and dress rehearsal,Delivery,Cutover,Lucy Chen,2026-10-06,2026-10-16,Not Started,diamond,24,21
+23,4.11,Cutover Preparation,Cutover runbook and dress rehearsal,Delivery,Cutover,Lucy Chen,2026-10-06,2026-10-16,Green,diamond,24,21
 24,1.4,Go-Live,Production cutover and service go-live,Programme,Governance,Sarah Patel,2026-10-19,2026-10-19,Amber,diamond,,18
 25,4.12,Hypercare,Heightened post go-live support,Delivery,Support,Mark Evans,2026-10-20,2026-11-12,Not Started,diamond,26,24
 26,1.5,Hypercare Exit,Transition from hypercare to business as usual,Programme,Governance,Sarah Patel,2026-11-13,2026-11-13,Not Started,circle,,
