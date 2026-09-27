@@ -1,7 +1,7 @@
-id,program_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on
-1,1,1.1,Project Kickoff,milestone,Initial mobilisation and team onboarding,Programme,Governance,Sarah Patel,2026-01-12,2026-01-12,Complete,diamond,,
-2,1,1.2,Requirements Gathering,task,Workshops with business stakeholders,Programme,Governance,Sarah Patel,2026-01-13,2026-02-05,Complete,diamond,3,1
-3,1,1.3,Requirements Signed Off,milestone,Business requirements baselined with stakeholders,Programme,Governance,Sarah Patel,2026-02-06,2026-02-06,Complete,square,,
+id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on
+1,1,1.1,Project Kickoff,milestone,Initial mobilisation and team onboarding,Leadership,Governance,Sarah Patel,2026-01-12,2026-01-12,Complete,diamond,,
+2,1,1.2,Requirements Gathering,task,Workshops with business stakeholders,Leadership,Governance,Sarah Patel,2026-01-13,2026-02-05,Complete,diamond,3,1
+3,1,1.3,Requirements Signed Off,milestone,Business requirements baselined with stakeholders,Leadership,Governance,Sarah Patel,2026-02-06,2026-02-06,Complete,square,,
 4,1,2.1,Solution Architecture,task,Design the target solution architecture,Design,Architecture,Tom Reed,2026-02-09,2026-02-27,Complete,diamond,5,3
 5,1,2.2,Architecture Approved,milestone,Solution architecture through design authority,Design,Architecture,Tom Reed,2026-03-07,2026-03-07,Complete,triangle,,
 6,1,2.3,UX Prototyping,task,Design and test a clickable prototype,Design,UX,Priya Shah,2026-02-16,2026-03-19,Complete,diamond,7,3
@@ -22,9 +22,9 @@ id,program_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,ra
 21,1,4.10,Migration Ready,milestone,Migration rehearsed and signed off,Delivery,Data,Raj Mehta,2026-10-05,2026-10-05,Red,square,,
 22,1,5.3,Training Delivery,task,End-user training sessions,Business,Change,Anita Gomez,2026-09-14,2026-10-09,Green,diamond,24,18
 23,1,4.11,Cutover Preparation,task,Cutover runbook and dress rehearsal,Delivery,Cutover,Lucy Chen,2026-10-06,2026-10-16,Green,diamond,24,21
-24,1,1.4,Go-Live,milestone,Production cutover and service go-live,Programme,Governance,Sarah Patel,2026-10-19,2026-10-19,Amber,diamond,,18
+24,1,1.4,Go-Live,milestone,Production cutover and service go-live,Leadership,Governance,Sarah Patel,2026-10-19,2026-10-19,Amber,diamond,,18
 25,1,4.12,Hypercare,task,Heightened post go-live support,Delivery,Support,Mark Evans,2026-10-20,2026-11-12,Not Started,diamond,26,24
-26,1,1.5,Hypercare Exit,milestone,Transition from hypercare to business as usual,Programme,Governance,Sarah Patel,2026-11-13,2026-11-13,Not Started,circle,,
+26,1,1.5,Hypercare Exit,milestone,Transition from hypercare to business as usual,Leadership,Governance,Sarah Patel,2026-11-13,2026-11-13,Not Started,circle,,
 27,2,1.1,Lease Signed,milestone,Lease agreed for the new building,Property,Legal,Daniel Wright,2026-06-30,2026-06-30,Complete,square,,
 28,2,1.2,Space Planning,task,"Desk, meeting room and storage plans with each team",Property,Design,Nadia Hussain,2026-07-01,2026-08-14,Complete,diamond,29,27
 29,2,1.3,Floor Plan Approved,milestone,Final floor plan signed off by the leadership team,Property,Design,Nadia Hussain,2026-08-17,2026-08-17,Complete,diamond,,

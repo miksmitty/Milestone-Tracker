@@ -1,3 +1,0 @@
-id,name,code,description,sponsor,manager,start,end,rag,item_term,milestone_term,task_term,created,updated
-1,Platform Replacement,PLT,Replace the legacy customer platform with a modern cloud service and migrate all customer data,Helen Carter,Sarah Patel,2026-01-12,2026-11-13,Amber,Item,Milestone,Task,2026-09-27T10:00:00.000Z,2026-09-27T10:00:00.000Z
-2,Head Office Move,HOM,Move head office staff to the new building with IT and services ready on day one,Helen Carter,Daniel Wright,,,Green,Work item,Deliverable,Task,2026-09-27T10:00:00.000Z,2026-09-27T10:00:00.000Z

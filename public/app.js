@@ -10,16 +10,16 @@
  * Periodic status reports live in a second record set (reports.csv); each report
  * points at the item it covers through `item_id`.
  *
- * Items and reports belong to a programme (programs.csv) through `program_id`. Only the
- * current programme's records are held in state.items / state.reports; the rest wait in
+ * Items and reports belong to a workspace (workspaces.csv) through `workspace_id`. Only the
+ * current workspace's records are held in state.items / state.reports; the rest wait in
  * state.otherItems / state.otherReports and are written back alongside them. Ids stay
- * unique across every programme. Each programme can rename its items, milestones and tasks. */
+ * unique across every workspace. Each workspace can rename its items, milestones and tasks. */
 
 /* ---- RAG options ---- */
-// Each programme has its own list of RAG statuses (statuses.csv): a name, a colour, what it
+// Each workspace has its own list of RAG statuses (statuses.csv): a name, a colour, what it
 // means, whether a report at that status needs a get to green plan, and which one new items
-// start at. Programmes without their own list use DEFAULT_STATUSES. Items and reports store
-// the status name. STATUS / STATUSES / OFF_TRACK describe the programme being viewed.
+// start at. Workspaces without their own list use DEFAULT_STATUSES. Items and reports store
+// the status name. STATUS / STATUSES / OFF_TRACK describe the workspace being viewed.
 const DEFAULT_STATUSES = [
   { name: 'Green', color: '#16a34a', description: 'on track', get_to_green: false, is_default: false },
   { name: 'Amber', color: '#f59e0b', description: 'at risk', get_to_green: true, is_default: false },
@@ -35,7 +35,7 @@ const PRESET_PALETTES = {
   '#1f6fb2': { light: '#5b9bd5', dark: '#134a7a', text: '#ffffff' },
   '#a8a69c': { light: '#cccabc', dark: '#5a5d5c', text: '#262626' },
 };
-const STATUS_COLUMNS = ['program_id', 'position', 'name', 'color', 'description', 'get_to_green', 'is_default'];
+const STATUS_COLUMNS = ['workspace_id', 'position', 'name', 'color', 'description', 'get_to_green', 'is_default'];
 
 function mixHex(hex, target, t) {
   const a = hex.match(/\w\w/g).map(x => parseInt(x, 16)), b = target.match(/\w\w/g).map(x => parseInt(x, 16));
@@ -51,14 +51,14 @@ function paletteOf(color) {
 }
 const UNKNOWN_PALETTE = paletteOf('#a8a69c');
 
-// A programme's status list, in order.
-function statusesFor(programId) {
-  const own = state.statuses.filter(s => s.program_id === programId).sort((a, b) => a.position - b.position);
+// A workspace's status list, in order.
+function statusesFor(workspaceId) {
+  const own = state.statuses.filter(s => s.workspace_id === workspaceId).sort((a, b) => a.position - b.position);
   return own.length ? own : DEFAULT_STATUSES;
 }
-// { list, names, map: name → palette, offTrack, def } for a programme.
-function ragOf(programId) {
-  const list = statusesFor(programId);
+// { list, names, map: name → palette, offTrack, def } for a workspace.
+function ragOf(workspaceId) {
+  const list = statusesFor(workspaceId);
   return {
     list,
     names: list.map(s => s.name),
@@ -69,8 +69,8 @@ function ragOf(programId) {
 }
 
 let STATUS = {}, STATUSES = [], OFF_TRACK = [], DEFAULT_STATUS = 'Not Started';
-function useStatuses(programId) {
-  const r = ragOf(programId);
+function useStatuses(workspaceId) {
+  const r = ragOf(workspaceId);
   STATUS = r.map; STATUSES = r.names; OFF_TRACK = r.offTrack; DEFAULT_STATUS = r.def;
 }
 const pal = (st, map = STATUS) => map[st] || UNKNOWN_PALETTE;
@@ -80,19 +80,19 @@ const statusOptions = (selected, names = STATUSES) =>
   optionList(selected && !names.includes(selected) ? [...names, selected] : names, selected);
 const SHAPES = ['diamond', 'circle', 'square', 'triangle'];
 const LANE_ACCENTS = ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'];
-const COLUMNS = ['id', 'program_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on'];
+const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on'];
 const MS_DAY = 86400000;
 
 const state = {
-  statuses: [],         // RAG options: {program_id, position, name, color, description, get_to_green, is_default}
-  programs: [],         // {id, name, code, description, sponsor, manager, start, end, status, item_term, milestone_term, task_term, created, updated}
-  lastProgramId: 0,
-  programId: '',        // the programme being viewed
-  otherItems: [],       // items of every other programme, kept so saves write the whole file
+  statuses: [],         // RAG options: {workspace_id, position, name, color, description, get_to_green, is_default}
+  workspaces: [],       // {id, name, code, description, owner, lead, start, end, status, item_term, milestone_term, task_term, created, updated}
+  lastWorkspaceId: 0,
+  workspaceId: '',        // the workspace being viewed
+  otherItems: [],       // items of every other workspace, kept so saves write the whole file
   otherReports: [],
-  items: [],            // {id, program_id, ref, title, type, description, swimlane, subswimlane, owner, start, end, status, shape, parent, deps[]}
+  items: [],            // {id, workspace_id, ref, title, type, description, swimlane, subswimlane, owner, start, end, status, shape, parent, deps[]}
   lastId: 0,            // highest id ever issued this session, so ids are never reused
-  reports: [],          // {id, program_id, item_id, cadence, period_start, period_end, status, exec_summary, achievements, next_steps, get_to_green, author, created, updated}
+  reports: [],          // {id, workspace_id, item_id, cadence, period_start, period_end, status, exec_summary, achievements, next_steps, get_to_green, author, created, updated}
   lastReportId: 0,
   pxPerDay: 6,
   rowH: 40,
@@ -108,8 +108,8 @@ const state = {
 const TYPES = ['milestone', 'task'];
 const isTask = (m) => m.type === 'task';
 
-/* ---- programme terminology ---- */
-// Each programme names its things: the generic word (Item), the point-in-time kind (Milestone)
+/* ---- workspace terminology ---- */
+// Each workspace names its things: the generic word (Item), the point-in-time kind (Milestone)
 // and the kind with a duration (Task). T.item etc. are lower case for use mid-sentence.
 const DEFAULT_TERMS = { item_term: 'Item', milestone_term: 'Milestone', task_term: 'Task' };
 function plural(w) {
@@ -173,7 +173,7 @@ function csvEscape(v) {
 function toCSV(items) {
   const lines = [COLUMNS.join(',')];
   for (const m of items) {
-    lines.push([m.id, m.program_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
+    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
       m.status, m.shape, m.parent, m.deps.join(';')].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
@@ -182,7 +182,7 @@ function toCSV(items) {
 // Header names are matched loosely; legacy columns (name, date, rag) still load.
 const HEADER_ALIASES = {
   id: ['id'],
-  program_id: ['programid', 'programmeid', 'program', 'programme'],
+  workspace_id: ['workspaceid', 'workspace', 'programid', 'programmeid', 'program', 'programme'], // earlier files said programme
   ref: ['ref', 'reference'],
   title: ['title', 'name'],
   type: ['type', 'kind', 'itemtype'],
@@ -217,7 +217,7 @@ function rowsToItems(rows) {
     return {
       type,
       id: get(r, 'id'),
-      program_id: get(r, 'program_id'),
+      workspace_id: get(r, 'workspace_id'),
       ref: get(r, 'ref'),
       title: get(r, 'title'),
       description: get(r, 'description'),
@@ -225,7 +225,7 @@ function rowsToItems(rows) {
       subswimlane: get(r, 'subswimlane'),
       owner: get(r, 'owner'),
       start, end,
-      status: get(r, 'status'), // normalised once the programme is known
+      status: get(r, 'status'), // normalised once the workspace is known
       shape: normaliseShape(get(r, 'shape')),
       parent: get(r, 'parent'),
       deps: get(r, 'deps').split(/[;|\s]+/).filter(Boolean),
@@ -240,17 +240,17 @@ function rowsToItems(rows) {
     seen.add(m.id);
   }
   state.lastId = last;
-  // Items from before programmes existed (or pointing at a missing one) join the first programme.
-  const programIds = new Set(state.programs.map(p => p.id));
+  // Items from before workspaces existed (or pointing at a missing one) join the first workspace.
+  const workspaceIds = new Set(state.workspaces.map(p => p.id));
   for (const m of items) {
-    if (!programIds.has(m.program_id)) m.program_id = state.programs[0].id;
-    m.status = normaliseStatus(m.status, m.program_id);
+    if (!workspaceIds.has(m.workspace_id)) m.workspace_id = state.workspaces[0].id;
+    m.status = normaliseStatus(m.status, m.workspace_id);
   }
-  // Links only work within a programme.
-  const progOf = new Map(items.map(m => [m.id, m.program_id]));
+  // Links only work within a workspace.
+  const progOf = new Map(items.map(m => [m.id, m.workspace_id]));
   for (const m of items) {
-    m.deps = [...new Set(m.deps)].filter(d => progOf.get(d) === m.program_id && d !== m.id);
-    if (progOf.get(m.parent) !== m.program_id || m.parent === m.id) m.parent = '';
+    m.deps = [...new Set(m.deps)].filter(d => progOf.get(d) === m.workspace_id && d !== m.id);
+    if (progOf.get(m.parent) !== m.workspace_id || m.parent === m.id) m.parent = '';
   }
   return items;
 }
@@ -260,11 +260,11 @@ function nextId() {
   return String(state.lastId);
 }
 
-// Match a stored status to the programme's list (ignoring case). Blank gets the default
+// Match a stored status to the workspace's list (ignoring case). Blank gets the default
 // status; the old shorthand (G, A, Y, R, B, done…) still maps onto the standard names.
 // Anything else is kept as written and shown in grey.
-function normaliseStatus(v, programId) {
-  const r = ragOf(programId);
+function normaliseStatus(v, workspaceId) {
+  const r = ragOf(workspaceId);
   const raw = (v ?? '').trim(), s = raw.toLowerCase();
   if (!s) return r.def;
   const exact = r.names.find(n => n.toLowerCase() === s);
@@ -281,9 +281,9 @@ function rowsToStatuses(rows) {
   const yes = (v) => /^(y|yes|true|1)$/i.test(v);
   return rows.slice(1).map(r => {
     const o = {};
-    for (const k of STATUS_COLUMNS) o[k] = (r[header.indexOf(k)] ?? '').trim();
+    for (const k of STATUS_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
     return { ...o, position: +o.position || 0, color: paletteOf(o.color).base, get_to_green: yes(o.get_to_green), is_default: yes(o.is_default) };
-  }).filter(s => s.program_id && s.name);
+  }).filter(s => s.workspace_id && s.name);
 }
 function statusesToCSV(statuses) {
   return [STATUS_COLUMNS.join(','), ...statuses.map(s => STATUS_COLUMNS.map(k =>
@@ -297,50 +297,51 @@ function normaliseShape(v) {
 /* ================= data load/save ================= */
 
 async function loadData() {
-  const [programs, statuses, items, reports] = await Promise.all(['/api/programs', '/api/statuses', '/api/milestones', '/api/reports'].map(async (u) => {
+  const [workspaces, statuses, items, reports] = await Promise.all(['/api/workspaces', '/api/statuses', '/api/milestones', '/api/reports'].map(async (u) => {
     const r = await fetch(u);
-    // e.g. a server started before programmes existed: stop rather than save items under the wrong programme
+    // e.g. a server started before workspaces existed: stop rather than save items under the wrong workspace
     if (!r.ok) throw new Error(`${u} returned ${r.status} — restart the server (node server.js)`);
     return r.text();
   }));
-  state.programs = rowsToPrograms(parseCSV(programs));
+  state.workspaces = rowsToWorkspaces(parseCSV(workspaces));
   state.statuses = rowsToStatuses(parseCSV(statuses));
-  for (const p of state.programs) p.status = normaliseStatus(p.status, p.id);
-  const created = !state.programs.length;
-  if (created) state.programs.push(newProgram({ name: 'My programme' }));
+  for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
+  const created = !state.workspaces.length;
+  if (created) state.workspaces.push(newWorkspace({ name: 'My workspace' }));
   const allItems = rowsToItems(parseCSV(items));
   const allReports = rowsToReports(parseCSV(reports), allItems);
-  if (created) await saveCSV('/api/programs', programsToCSV(state.programs));
+  if (created) await saveCSV('/api/workspaces', workspacesToCSV(state.workspaces));
   state.items = allItems;
   state.reports = allReports;
   state.otherItems = [];
   state.otherReports = [];
-  const want = state.programId || loadAppPrefs().programId;
-  selectProgram(state.programs.some(p => p.id === want) ? want : state.programs[0].id);
+  const prefs = loadAppPrefs();
+  const want = state.workspaceId || prefs.workspaceId || prefs.programId; // programId: saved by earlier versions
+  selectWorkspace(state.workspaces.some(p => p.id === want) ? want : state.workspaces[0].id);
 }
 
-// Hold the chosen programme's items and reports in state.items / state.reports.
-function selectProgram(id) {
+// Hold the chosen workspace's items and reports in state.items / state.reports.
+function selectWorkspace(id) {
   const items = [...state.otherItems, ...state.items];
   const reports = [...state.otherReports, ...state.reports];
-  state.programId = id;
-  state.items = items.filter(m => m.program_id === id);
-  state.otherItems = items.filter(m => m.program_id !== id);
-  state.reports = reports.filter(r => r.program_id === id);
-  state.otherReports = reports.filter(r => r.program_id !== id);
-  T = makeTerms(currentProgram());
+  state.workspaceId = id;
+  state.items = items.filter(m => m.workspace_id === id);
+  state.otherItems = items.filter(m => m.workspace_id !== id);
+  state.reports = reports.filter(r => r.workspace_id === id);
+  state.otherReports = reports.filter(r => r.workspace_id !== id);
+  T = makeTerms(currentWorkspace());
   useStatuses(id);
-  saveAppPrefs({ programId: id });
+  saveAppPrefs({ workspaceId: id });
   autoRange();
 }
 
-const currentProgram = () => state.programs.find(p => p.id === state.programId);
-const programById = (id) => state.programs.find(p => p.id === id);
+const currentWorkspace = () => state.workspaces.find(p => p.id === state.workspaceId);
+const workspaceById = (id) => state.workspaces.find(p => p.id === id);
 
-// Every programme's records, grouped by programme (in programme order) for a stable file.
+// Every workspace's records, grouped by workspace (in workspace order) for a stable file.
 function allRecords(current, others) {
-  const order = new Map(state.programs.map((p, i) => [p.id, i]));
-  return [...others, ...current].sort((a, b) => order.get(a.program_id) - order.get(b.program_id));
+  const order = new Map(state.workspaces.map((p, i) => [p.id, i]));
+  return [...others, ...current].sort((a, b) => order.get(a.workspace_id) - order.get(b.workspace_id));
 }
 const allItems = () => allRecords(state.items, state.otherItems);
 const allReports = () => allRecords(state.reports, state.otherReports);
@@ -360,8 +361,8 @@ function saveReports(msg) {
 function saveStatuses(msg) {
   return saveCSV('/api/statuses', statusesToCSV(state.statuses), msg);
 }
-function savePrograms(msg) {
-  return saveCSV('/api/programs', programsToCSV(state.programs), msg);
+function saveWorkspaces(msg) {
+  return saveCSV('/api/workspaces', workspacesToCSV(state.workspaces), msg);
 }
 
 function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if the queue is busy
@@ -788,7 +789,7 @@ function renderGantt() {
 
   // defs: status gradients, drop shadow, arrowheads
   const defs = svgEl('defs', {});
-  for (const st of [...STATUSES, null]) { // null: a status that isn't in the programme's list
+  for (const st of [...STATUSES, null]) { // null: a status that isn't in the workspace's list
     const c = pal(st);
     const g = svgEl('linearGradient', { id: gradId(st), x1: 0, y1: 0, x2: 0, y2: 1 });
     g.appendChild(svgEl('stop', { offset: '0%', 'stop-color': c.light }));
@@ -1088,7 +1089,7 @@ async function submitEditDialog(e) {
 
   let m = editing;
   if (!m) {
-    m = { id: nextId(), program_id: state.programId, ...changes, parent: '', deps: [] };
+    m = { id: nextId(), workspace_id: state.workspaceId, ...changes, parent: '', deps: [] };
     state.items.push(m);
   }
   const res = updateItem(m, changes);
@@ -1145,7 +1146,7 @@ function refreshDatalists() {
   setDatalist('lane-list', state.items.map(m => m.swimlane));
   setDatalist('sublane-list', state.items.map(m => m.subswimlane));
   setDatalist('owner-list', state.items.map(m => m.owner));
-  setDatalist('people-list', [...allItems().map(m => m.owner), ...state.programs.flatMap(p => [p.manager, p.sponsor])].sort());
+  setDatalist('people-list', [...allItems().map(m => m.owner), ...state.workspaces.flatMap(p => [p.owner, p.lead])].sort());
 }
 
 /* ---- sortable, filterable tables with draggable column widths ---- */
@@ -1413,7 +1414,7 @@ function renderEditor(highlight = []) {
     body.appendChild(tr);
   }
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">${state.items.length ? `No ${escAttr(T.items)} match the filters.` : `No ${escAttr(T.items)} in this programme yet. Use <b>+ Add ${escAttr(T.item)}</b> to create one.`}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">${state.items.length ? `No ${escAttr(T.items)} match the filters.` : `No ${escAttr(T.items)} in this workspace yet. Use <b>+ Add ${escAttr(T.item)}</b> to create one.`}</td></tr>`;
   }
 
   const filtered = Object.keys(grid.filters).length > 0;
@@ -1526,22 +1527,22 @@ function onEditorClick(e) {
 // or monthly; the period runs up to and including `period_end`.
 
 const CADENCES = ['Weekly', 'Fortnightly', 'Monthly'];
-const REPORT_COLUMNS = ['id', 'program_id', 'item_id', 'cadence', 'period_start', 'period_end', 'status',
+const REPORT_COLUMNS = ['id', 'workspace_id', 'item_id', 'cadence', 'period_start', 'period_end', 'status',
   'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author', 'created', 'updated'];
 
-// Reports saved before programmes existed take their item's programme.
+// Reports saved before workspaces existed take their item's workspace.
 function rowsToReports(rows, items) {
   if (!rows.length) return [];
-  const progOf = new Map(items.map(m => [m.id, m.program_id]));
-  const programIds = new Set(state.programs.map(p => p.id));
+  const progOf = new Map(items.map(m => [m.id, m.workspace_id]));
+  const workspaceIds = new Set(state.workspaces.map(p => p.id));
   const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
   const reports = rows.slice(1).map(r => {
     const o = {};
-    for (const k of REPORT_COLUMNS) o[k] = (r[header.indexOf(csvName(k))] ?? r[header.indexOf(k)] ?? '').trim();
+    for (const k of REPORT_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
     o.cadence = CADENCES.find(c => c.toLowerCase() === o.cadence.toLowerCase()) || 'Weekly';
     if (o.period_end && !o.period_start) o.period_start = periodStart(o.period_end, o.cadence);
-    if (!programIds.has(o.program_id)) o.program_id = progOf.get(o.item_id) || state.programs[0].id;
-    o.status = normaliseStatus(o.status, o.program_id);
+    if (!workspaceIds.has(o.workspace_id)) o.workspace_id = progOf.get(o.item_id) || state.workspaces[0].id;
+    o.status = normaliseStatus(o.status, o.workspace_id);
     return o;
   });
   const seen = new Set();
@@ -1556,6 +1557,16 @@ function rowsToReports(rows, items) {
 
 // Items and reports keep a `status` field in memory; the CSV column is called `rag` (`status` still loads).
 const csvName = (k) => (k === 'status' ? 'rag' : k);
+
+// Column position in a (lower-cased, underscored) header, also accepting names used by earlier files.
+const OLD_COLUMN_NAMES = { workspace_id: ['program_id', 'programme_id'], owner: ['manager'], lead: ['sponsor'] };
+function colIndex(header, k) {
+  for (const name of [csvName(k), k, ...(OLD_COLUMN_NAMES[k] || [])]) {
+    const i = header.indexOf(name);
+    if (i >= 0) return i;
+  }
+  return -1;
+}
 
 function reportsToCSV(reports) {
   return [REPORT_COLUMNS.map(csvName).join(','), ...reports.map(r => REPORT_COLUMNS.map(k => csvEscape(r[k])).join(','))].join('\n') + '\n';
@@ -1928,7 +1939,7 @@ async function submitReport(e) {
   const now = new Date().toISOString();
   const isNew = !rpEditing;
   if (rpEditing) Object.assign(rpEditing, v, { updated: now });
-  else state.reports.push({ id: nextReportId(), program_id: state.programId, item_id: rpItemId, ...v, created: now, updated: now });
+  else state.reports.push({ id: nextReportId(), workspace_id: state.workspaceId, item_id: rpItemId, ...v, created: now, updated: now });
 
   const m = itemById(rpItemId);
   const syncStatus = !document.getElementById('rp-sync').hidden && f.sync_status.checked;
@@ -1954,7 +1965,7 @@ async function deleteReport() {
 function rerenderCurrentView() {
   if (isShown('gantt')) renderGantt();
   if (isShown('reports')) renderReports();
-  if (isShown('programs')) renderPrograms();
+  if (isShown('workspaces')) renderWorkspaces();
 }
 
 /* ---- reports list ---- */
@@ -2046,7 +2057,7 @@ function renderReports() {
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="${RPT_COLS.length}" class="grid-empty">${state.reports.length
       ? 'No reports match the filters.'
-      : `No reports in this programme yet. Click ${escAttr(withArticle(T.item))} on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.`}</td></tr>`;
+      : `No reports in this workspace yet. Click ${escAttr(withArticle(T.item))} on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.`}</td></tr>`;
   }
   document.getElementById('rp-count').textContent = filtered
     ? `Showing ${rows.length} of ${state.reports.length}`
@@ -2054,7 +2065,7 @@ function renderReports() {
   document.getElementById('rpf-clear').hidden = !filtered;
 }
 
-// The report form's RAG choices follow the current programme's options.
+// The report form's RAG choices follow the current workspace's options.
 function renderReportRagChoices() {
   document.getElementById('rp-status').innerHTML = STATUSES.map(st => `
     <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('');
@@ -2121,46 +2132,46 @@ function downloadReportsCSV() {
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
 
-/* ================= programmes ================= */
-// A programme groups a set of items and their reports. The Programmes screen lists them all
+/* ================= workspaces ================= */
+// A workspace groups a set of items and their reports. The Workspaces screen lists them all
 // with a summary of each; the one being viewed drives the Gantt chart, Items and Reports.
 
-const PROGRAM_COLUMNS = ['id', 'name', 'code', 'description', 'sponsor', 'manager', 'start', 'end', 'status',
+const WORKSPACE_COLUMNS = ['id', 'name', 'code', 'description', 'owner', 'lead', 'start', 'end', 'status',
   'item_term', 'milestone_term', 'task_term', 'created', 'updated'];
-const PROGRAM_FIELDS = PROGRAM_COLUMNS.slice(1, -2);
+const WORKSPACE_FIELDS = WORKSPACE_COLUMNS.slice(1, -2);
 
-function rowsToPrograms(rows) {
+function rowsToWorkspaces(rows) {
   if (!rows.length) return [];
   const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
-  const programs = rows.slice(1).map(r => {
+  const workspaces = rows.slice(1).map(r => {
     const o = {};
-    for (const k of PROGRAM_COLUMNS) o[k] = (r[header.indexOf(csvName(k))] ?? r[header.indexOf(k)] ?? '').trim();
-    if (!o.name) o.name = 'Untitled programme';
+    for (const k of WORKSPACE_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
+    if (!o.name) o.name = 'Untitled workspace';
     return o;
   });
   const seen = new Set();
-  let last = Math.max(0, ...programs.map(p => (/^\d+$/.test(p.id) ? +p.id : 0)));
-  for (const p of programs) {
+  let last = Math.max(0, ...workspaces.map(p => (/^\d+$/.test(p.id) ? +p.id : 0)));
+  for (const p of workspaces) {
     if (!/^\d+$/.test(p.id) || seen.has(p.id)) p.id = String(++last);
     seen.add(p.id);
   }
-  state.lastProgramId = last;
-  return programs;
+  state.lastWorkspaceId = last;
+  return workspaces;
 }
 
-function programsToCSV(programs) {
-  return [PROGRAM_COLUMNS.map(csvName).join(','), ...programs.map(p => PROGRAM_COLUMNS.map(k => csvEscape(p[k])).join(','))].join('\n') + '\n';
+function workspacesToCSV(workspaces) {
+  return [WORKSPACE_COLUMNS.map(csvName).join(','), ...workspaces.map(p => WORKSPACE_COLUMNS.map(k => csvEscape(p[k])).join(','))].join('\n') + '\n';
 }
 
-function newProgram(values = {}) {
-  state.lastProgramId = Math.max(state.lastProgramId, ...state.programs.map(p => +p.id || 0)) + 1;
+function newWorkspace(values = {}) {
+  state.lastWorkspaceId = Math.max(state.lastWorkspaceId, ...state.workspaces.map(p => +p.id || 0)) + 1;
   const now = new Date().toISOString();
-  const p = { id: String(state.lastProgramId), created: now, updated: now, status: 'Not Started', ...DEFAULT_TERMS };
-  for (const k of PROGRAM_FIELDS) p[k] ??= '';
+  const p = { id: String(state.lastWorkspaceId), created: now, updated: now, status: 'Not Started', ...DEFAULT_TERMS };
+  for (const k of WORKSPACE_FIELDS) p[k] ??= '';
   return Object.assign(p, values);
 }
 
-// Which programme and view were open, and whether the sidebar is collapsed — per browser.
+// Which workspace and view were open, and whether the sidebar is collapsed — per browser.
 const APP_PREFS = 'milestone-tracker.app';
 function loadAppPrefs() {
   try { return JSON.parse(localStorage.getItem(APP_PREFS) || '{}'); } catch { return {}; }
@@ -2169,30 +2180,30 @@ function saveAppPrefs(changes) {
   try { localStorage.setItem(APP_PREFS, JSON.stringify({ ...loadAppPrefs(), ...changes })); } catch { /* ignore */ }
 }
 
-async function switchProgram(id, view) {
-  if (id !== state.programId) {
+async function switchWorkspace(id, view) {
+  if (id !== state.workspaceId) {
     hideQuick();
-    syncEditorToState(); // table edits belong to the programme being left
+    syncEditorToState(); // table edits belong to the workspace being left
     document.getElementById('editor-body').innerHTML = '';
     await flushSave();
-    selectProgram(id);
+    selectWorkspace(id);
     clearTableFilters(grid);
     clearReportFilters();
     state.userZoomed = false;
-    applyProgramChrome();
+    applyWorkspaceChrome();
   }
-  switchView(view || (currentView() === 'programs' ? 'gantt' : currentView()));
+  switchView(view || (currentView() === 'workspaces' ? 'gantt' : currentView()));
 }
 
-// Sidebar, headings and every label that uses the programme's own terms.
-function applyProgramChrome() {
-  const p = currentProgram();
+// Sidebar, headings and every label that uses the workspace's own terms.
+function applyWorkspaceChrome() {
+  const p = currentWorkspace();
   document.querySelectorAll('[data-term]').forEach(el => { el.textContent = T[el.dataset.term]; });
   document.getElementById('nav-editor').title = T.Items;
-  document.getElementById('program-select').innerHTML = state.programs
+  document.getElementById('workspace-select').innerHTML = state.workspaces
     .map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${escAttr(x.name)}</option>`).join('');
-  document.getElementById('program-dot').style.background = pal(p.status).base;
-  document.getElementById('program-dot').title = `Programme RAG: ${p.status}`;
+  document.getElementById('workspace-dot').style.background = pal(p.status).base;
+  document.getElementById('workspace-dot').title = `Workspace RAG: ${p.status}`;
   renderTableHead(grid);
   renderTableHead(rptTable);
   renderReportRagChoices();
@@ -2200,28 +2211,28 @@ function applyProgramChrome() {
   updatePageHead();
 }
 
-// The Gantt key lists the programme's own RAG options.
+// The Gantt key lists the workspace's own RAG options.
 function renderRagLegend() {
-  const list = statusesFor(state.programId);
+  const list = statusesFor(state.workspaceId);
   document.getElementById('legend-rag').innerHTML = list.map(s => `
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { programs: () => 'Programmes', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports' };
+const VIEW_TITLES = { workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports' };
 function updatePageHead() {
   const view = currentView();
-  const p = currentProgram();
-  const inProgram = view !== 'programs';
+  const p = currentWorkspace();
+  const inWorkspace = view !== 'workspaces';
   document.getElementById('page-title').textContent = VIEW_TITLES[view]();
-  const crumb = document.getElementById('page-program');
-  crumb.hidden = !inProgram;
-  crumb.innerHTML = inProgram ? `${p.code ? `<b>${escAttr(p.code)}</b> ` : ''}${escAttr(p.name)}` : '';
-  document.title = inProgram ? `${VIEW_TITLES[view]()} · ${p.name} — Tracker` : 'Programmes — Tracker';
+  const crumb = document.getElementById('page-workspace');
+  crumb.hidden = !inWorkspace;
+  crumb.innerHTML = inWorkspace ? `${p.code ? `<b>${escAttr(p.code)}</b> ` : ''}${escAttr(p.name)}` : '';
+  document.title = inWorkspace ? `${VIEW_TITLES[view]()} · ${p.name} — Tracker` : 'Workspaces — Tracker';
 }
 
-function programStats(p) {
-  const items = allItems().filter(m => m.program_id === p.id);
-  const reports = allReports().filter(r => r.program_id === p.id);
+function workspaceStats(p) {
+  const items = allItems().filter(m => m.workspace_id === p.id);
+  const reports = allReports().filter(r => r.workspace_id === p.id);
   const rag = {};
   for (const m of items) rag[m.status] = (rag[m.status] || 0) + 1;
   const dates = items.flatMap(m => [m.start, m.end]).filter(Boolean).sort();
@@ -2233,14 +2244,14 @@ function programStats(p) {
   };
 }
 
-function renderPrograms() {
-  const cards = state.programs.map(p => {
-    const st = programStats(p);
+function renderWorkspaces() {
+  const cards = state.workspaces.map(p => {
+    const st = workspaceStats(p);
     const t = makeTerms(p);
     const rg = ragOf(p.id);
     const shown = [...rg.names, ...Object.keys(st.rag).filter(k => !rg.names.includes(k))]; // unlisted statuses last
     const n = st.items.length;
-    const current = p.id === state.programId;
+    const current = p.id === state.workspaceId;
     const start = p.start || st.first, end = p.end || st.last;
     const span = start && end ? `${fmtShort(start)} – ${fmtNice(end)}` : start ? `From ${fmtNice(start)}` : '—';
     const spanNote = !(p.start || p.end) && st.first ? ` <span class="muted">(from ${escAttr(t.items)})</span>` : '';
@@ -2248,7 +2259,7 @@ function renderPrograms() {
       ? shown.filter(s => st.rag[s]).map(s => `<i style="flex:${st.rag[s]};background:${pal(s, rg.map).base}" title="${escAttr(s)}: ${st.rag[s]}"></i>`).join('')
       : '<i class="empty"></i>';
     const ragList = shown.filter(s => st.rag[s]).map(s => `<span><i class="dot" style="background:${pal(s, rg.map).base}"></i>${st.rag[s]} ${escAttr(s)}</span>`).join('');
-    const meta = [['Manager', p.manager], ['Sponsor', p.sponsor]].filter(([, v]) => v)
+    const meta = [['Owner', p.owner], ['Lead', p.lead]].filter(([, v]) => v)
       .map(([k, v]) => `<div><dt>${k}</dt><dd>${escAttr(v)}</dd></div>`).join('');
     return `
       <article class="prog-card${current ? ' current' : ''}" data-pid="${p.id}" style="--rag:${pal(p.status, rg.map).base}">
@@ -2256,7 +2267,7 @@ function renderPrograms() {
           ${statusPill(p.status, rg.map)}
           ${p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : ''}
           ${current ? '<span class="prog-current">Open</span>' : ''}
-          <button type="button" class="btn btn-sm prog-edit" data-edit-program="${p.id}" title="Edit programme settings">Edit</button>
+          <button type="button" class="btn btn-sm prog-edit" data-edit-workspace="${p.id}" title="Edit workspace settings">Edit</button>
         </div>
         <h3>${escAttr(p.name)}</h3>
         ${p.description ? `<p class="prog-desc">${escAttr(p.description)}</p>` : ''}
@@ -2271,43 +2282,43 @@ function renderPrograms() {
         </div>
         <footer class="prog-foot">
           <span class="prog-counts">${count(n, t.item, t.items)} · ${count(n - st.tasks, t.milestone, t.milestones)} · ${count(st.tasks, t.task, t.tasks)} · ${count(st.reports.length, 'report', 'reports')}</span>
-          <button type="button" class="btn ${current ? '' : 'btn-primary'}" data-open-program="${p.id}">${current ? 'Continue' : 'Open'} →</button>
+          <button type="button" class="btn ${current ? '' : 'btn-primary'}" data-open-workspace="${p.id}">${current ? 'Continue' : 'Open'} →</button>
         </footer>
       </article>`;
   }).join('');
-  document.getElementById('program-cards').innerHTML = cards + `
-    <button type="button" class="prog-card prog-new" data-new-program>
-      <span class="prog-new-plus">+</span><span>New programme</span>
+  document.getElementById('workspace-cards').innerHTML = cards + `
+    <button type="button" class="prog-card prog-new" data-new-workspace>
+      <span class="prog-new-plus">+</span><span>New workspace</span>
     </button>`;
-  const total = state.programs.length;
-  const offTrack = state.programs.filter(p => ragOf(p.id).offTrack.includes(p.status)).length;
-  document.getElementById('program-count').textContent =
-    `${count(total, 'programme', 'programmes')}${offTrack ? ` · ${offTrack} at risk or off track` : ''}`;
+  const total = state.workspaces.length;
+  const offTrack = state.workspaces.filter(p => ragOf(p.id).offTrack.includes(p.status)).length;
+  document.getElementById('workspace-count').textContent =
+    `${count(total, 'workspace', 'workspaces')}${offTrack ? ` · ${offTrack} at risk or off track` : ''}`;
 }
 
-/* ---- programme dialog ---- */
+/* ---- workspace dialog ---- */
 
-let pgEditing = null; // programme being edited; null for a new one
+let pgEditing = null; // workspace being edited; null for a new one
 
-function openProgramDialog(p) {
+function openWorkspaceDialog(p) {
   hideQuick();
   pgEditing = p;
-  const f = document.getElementById('program-form').elements;
-  const v = p || { ...newProgramDefaults() };
+  const f = document.getElementById('workspace-form').elements;
+  const v = p || { ...newWorkspaceDefaults() };
   // Default terms show as placeholders, so a new word can be typed straight in.
-  for (const k of PROGRAM_FIELDS) if (k !== 'status') f[k].value = (v[k] === DEFAULT_TERMS[k] ? '' : v[k]) ?? '';
+  for (const k of WORKSPACE_FIELDS) if (k !== 'status') f[k].value = (v[k] === DEFAULT_TERMS[k] ? '' : v[k]) ?? '';
   loadPgStatuses(p);
   showPgTab('details');
-  document.getElementById('pg-heading').textContent = p ? `Edit ${p.name}` : 'New programme';
-  document.getElementById('pg-submit').textContent = p ? 'Save' : 'Create programme';
+  document.getElementById('pg-heading').textContent = p ? `Edit ${p.name}` : 'New workspace';
+  document.getElementById('pg-submit').textContent = p ? 'Save' : 'Create workspace';
   const del = document.getElementById('pg-delete');
   del.hidden = !p;
-  del.disabled = state.programs.length < 2;
-  del.title = del.disabled ? 'You need at least one programme' : '';
+  del.disabled = state.workspaces.length < 2;
+  del.title = del.disabled ? 'You need at least one workspace' : '';
   document.getElementById('pg-error').textContent = '';
   refreshDatalists();
   updateTermPreview();
-  document.getElementById('program-dialog').showModal();
+  document.getElementById('workspace-dialog').showModal();
   f.name.focus();
 }
 
@@ -2318,9 +2329,9 @@ function openProgramDialog(p) {
 
 let pgStatuses = [];
 
-function statusUsage(programId) {
+function statusUsage(workspaceId) {
   const used = {};
-  for (const x of [...allItems(), ...allReports()]) if (x.program_id === programId) used[x.status] = (used[x.status] || 0) + 1;
+  for (const x of [...allItems(), ...allReports()]) if (x.workspace_id === workspaceId) used[x.status] = (used[x.status] || 0) + 1;
   return used;
 }
 
@@ -2330,13 +2341,13 @@ function loadPgStatuses(p) {
     orig: p ? st.name : null, name: st.name, color: st.color, description: st.description,
     get_to_green: st.get_to_green, is_default: st.is_default, used: used[st.name] || 0, deleted: false, replace: null,
   }));
-  // A status the programme is using but isn't in its list: offer to keep it by adding it.
+  // A status the workspace is using but isn't in its list: offer to keep it by adding it.
   pgStatusesSelected = pgStatuses.find(r => r.name === (p?.status ?? DEFAULT_STATUSES.find(d => d.is_default).name)) || null;
   pgStrayStatus = p && !pgStatusesSelected ? p.status : '';
   renderPgStatuses();
 }
-let pgStatusesSelected = null; // the row chosen as the programme's own RAG
-let pgStrayStatus = '';        // programme RAG that isn't in the list
+let pgStatusesSelected = null; // the row chosen as the workspace's own RAG
+let pgStrayStatus = '';        // workspace RAG that isn't in the list
 
 const activePgStatuses = () => pgStatuses.filter(r => !r.deleted);
 
@@ -2366,12 +2377,12 @@ function renderPgStatuses() {
   updatePgStatusPreview();
 }
 
-// Key preview, plus the programme's own RAG choice, which uses the list being edited.
+// Key preview, plus the workspace's own RAG choice, which uses the list being edited.
 function updatePgStatusPreview() {
   const active = activePgStatuses();
   document.getElementById('pg-rag-preview').innerHTML = active.map(r => `
     <span class="legend-item"><i class="dot" style="background:${r.color}"></i> ${escAttr(r.name || '(unnamed)')}${r.description ? ` — ${escAttr(r.description)}` : ''}</span>`).join('');
-  const sel = document.getElementById('program-form').elements.status;
+  const sel = document.getElementById('workspace-form').elements.status;
   if (pgStatusesSelected?.deleted) pgStatusesSelected = pgStatusesSelected.replace;
   if (pgStatusesSelected && !active.includes(pgStatusesSelected)) pgStatusesSelected = active.at(-1);
   if (!pgStatusesSelected && !pgStrayStatus) pgStatusesSelected = active[0];
@@ -2448,7 +2459,7 @@ function showPgTab(tab) {
   document.querySelectorAll('[data-pg-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.pgTab === tab));
   document.getElementById('pg-panel-details').hidden = tab !== 'details';
   document.getElementById('pg-panel-rag').hidden = tab !== 'rag';
-  document.getElementById('program-dialog').classList.toggle('wide', tab === 'rag');
+  document.getElementById('workspace-dialog').classList.toggle('wide', tab === 'rag');
 }
 
 // Check the edited list; returns an error message or null.
@@ -2466,9 +2477,9 @@ function checkPgStatuses() {
   return null;
 }
 
-// Save the edited list for a programme and rename/move its items and reports to match.
+// Save the edited list for a workspace and rename/move its items and reports to match.
 // Returns which files changed.
-function applyPgStatuses(programId) {
+function applyPgStatuses(workspaceId) {
   const active = activePgStatuses();
   const rename = new Map();
   for (const r of pgStatuses) if (r.orig != null) rename.set(r.orig, r.deleted ? r.replace.name : r.name);
@@ -2476,108 +2487,108 @@ function applyPgStatuses(programId) {
   if (isShown('editor')) syncEditorToState(); // don't let the grid write back old names
   for (const list of [state.items, state.otherItems, state.reports, state.otherReports]) {
     for (const x of list) {
-      if (x.program_id === programId && rename.has(x.status) && rename.get(x.status) !== x.status) {
+      if (x.workspace_id === workspaceId && rename.has(x.status) && rename.get(x.status) !== x.status) {
         x.status = rename.get(x.status);
         records = true;
       }
     }
   }
   const next = active.map((r, i) => ({
-    program_id: programId, position: i + 1, name: r.name, color: r.color, description: r.description.trim(),
+    workspace_id: workspaceId, position: i + 1, name: r.name, color: r.color, description: r.description.trim(),
     get_to_green: !!r.get_to_green, is_default: !!r.is_default,
   }));
   const key = (l) => JSON.stringify(l.map(s => [s.name, s.color, s.description, !!s.get_to_green, !!s.is_default]));
-  const listChanged = key(next) !== key(statusesFor(programId));
+  const listChanged = key(next) !== key(statusesFor(workspaceId));
   if (listChanged) {
-    state.statuses = state.statuses.filter(s => s.program_id !== programId);
+    state.statuses = state.statuses.filter(s => s.workspace_id !== workspaceId);
     if (key(next) !== key(DEFAULT_STATUSES)) state.statuses.push(...next); // the standard list needs no rows
   }
   return { records, listChanged };
 }
 
-function newProgramDefaults() {
-  return { name: '', code: '', description: '', sponsor: '', manager: '', start: '', end: '', status: 'Not Started', ...DEFAULT_TERMS };
+function newWorkspaceDefaults() {
+  return { name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', ...DEFAULT_TERMS };
 }
 
 function updateTermPreview() {
-  const f = document.getElementById('program-form').elements;
+  const f = document.getElementById('workspace-form').elements;
   const t = makeTerms({ item_term: f.item_term.value, milestone_term: f.milestone_term.value, task_term: f.task_term.value });
   document.getElementById('pg-term-preview').innerHTML =
     `The app will say <b>+ Add ${escAttr(t.item)}</b>, <b>${escAttr(t.Items)}</b> in the menu, and “12 ${escAttr(t.items)} · 4 ${escAttr(t.milestones)} · 8 ${escAttr(t.tasks)}”.`;
 }
 
-async function submitProgramDialog(e) {
+async function submitWorkspaceDialog(e) {
   e.preventDefault();
-  const f = document.getElementById('program-form').elements;
+  const f = document.getElementById('workspace-form').elements;
   const err = document.getElementById('pg-error');
   const v = {};
-  for (const k of PROGRAM_FIELDS) v[k] = f[k].value.trim();
-  if (!v.name) return (err.textContent = 'Give the programme a name.');
-  const clash = state.programs.find(p => p !== pgEditing && p.name.toLowerCase() === v.name.toLowerCase());
-  if (clash) return (err.textContent = `There’s already a programme called “${clash.name}”.`);
+  for (const k of WORKSPACE_FIELDS) v[k] = f[k].value.trim();
+  if (!v.name) return (err.textContent = 'Give the workspace a name.');
+  const clash = state.workspaces.find(p => p !== pgEditing && p.name.toLowerCase() === v.name.toLowerCase());
+  if (clash) return (err.textContent = `There’s already a workspace called “${clash.name}”.`);
   if (v.start && v.end && v.end < v.start) return (err.textContent = 'The end date is before the start date.');
   for (const k of Object.keys(DEFAULT_TERMS)) v[k] ||= DEFAULT_TERMS[k];
   const ragErr = checkPgStatuses();
   if (ragErr) { showPgTab('rag'); return (err.textContent = ragErr); }
   v.status = f.status.value === 'stray' ? pgStrayStatus : pgStatusesSelected?.name ?? activePgStatuses()[0].name;
 
-  document.getElementById('program-dialog').close();
-  const p = pgEditing || newProgram();
-  if (!pgEditing) state.programs.push(p);
+  document.getElementById('workspace-dialog').close();
+  const p = pgEditing || newWorkspace();
+  if (!pgEditing) state.workspaces.push(p);
   const res = applyPgStatuses(p.id);
   Object.assign(p, v, { updated: new Date().toISOString() });
-  const saves = [savePrograms(pgEditing ? 'Programme saved' : 'Programme created')];
+  const saves = [saveWorkspaces(pgEditing ? 'Workspace saved' : 'Workspace created')];
   if (res.listChanged) saves.push(saveStatuses());
   if (res.records) saves.push(saveData(), saveReports());
   if (!pgEditing) {
     await Promise.all(saves);
-    return switchProgram(p.id, 'editor'); // an empty programme starts on its items
+    return switchWorkspace(p.id, 'editor'); // an empty workspace starts on its items
   }
-  if (p.id === state.programId) {
+  if (p.id === state.workspaceId) {
     T = makeTerms(p);
     useStatuses(p.id);
   }
-  applyProgramChrome();
+  applyWorkspaceChrome();
   rerenderCurrentView();
   if (isShown('editor')) renderEditor(); // new terms / RAG options in the grid
   await Promise.all(saves);
 }
 
-async function deleteProgram() {
+async function deleteWorkspace() {
   const p = pgEditing;
-  if (!p || state.programs.length < 2) return;
-  const st = programStats(p);
+  if (!p || state.workspaces.length < 2) return;
+  const st = workspaceStats(p);
   const t = makeTerms(p);
   const lost = [st.items.length && count(st.items.length, t.item, t.items), st.reports.length && count(st.reports.length, 'report', 'reports')].filter(Boolean);
-  if (!confirm(`Delete the programme “${p.name}”?` + (lost.length ? `\n\nThis also permanently deletes its ${lost.join(' and ')}.` : ''))) return;
-  document.getElementById('program-dialog').close();
-  const leaving = p.id === state.programId;
-  if (leaving) await switchProgram(state.programs.find(x => x !== p).id, 'programs');
-  state.programs = state.programs.filter(x => x !== p);
-  state.otherItems = state.otherItems.filter(m => m.program_id !== p.id);
-  state.otherReports = state.otherReports.filter(r => r.program_id !== p.id);
-  const hadStatuses = state.statuses.some(s => s.program_id === p.id);
-  state.statuses = state.statuses.filter(s => s.program_id !== p.id);
-  applyProgramChrome();
-  renderPrograms();
-  await Promise.all([saveData(), saveReports(), savePrograms('Programme deleted'), hadStatuses && saveStatuses()]);
+  if (!confirm(`Delete the workspace “${p.name}”?` + (lost.length ? `\n\nThis also permanently deletes its ${lost.join(' and ')}.` : ''))) return;
+  document.getElementById('workspace-dialog').close();
+  const leaving = p.id === state.workspaceId;
+  if (leaving) await switchWorkspace(state.workspaces.find(x => x !== p).id, 'workspaces');
+  state.workspaces = state.workspaces.filter(x => x !== p);
+  state.otherItems = state.otherItems.filter(m => m.workspace_id !== p.id);
+  state.otherReports = state.otherReports.filter(r => r.workspace_id !== p.id);
+  const hadStatuses = state.statuses.some(s => s.workspace_id === p.id);
+  state.statuses = state.statuses.filter(s => s.workspace_id !== p.id);
+  applyWorkspaceChrome();
+  renderWorkspaces();
+  await Promise.all([saveData(), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses()]);
 }
 
-function wirePrograms() {
-  document.getElementById('program-select').onchange = (e) => switchProgram(e.target.value);
-  document.getElementById('btn-new-program').onclick = () => openProgramDialog(null);
-  document.getElementById('nav-settings').onclick = () => openProgramDialog(currentProgram());
-  document.getElementById('program-cards').addEventListener('click', (e) => {
-    const edit = e.target.closest('[data-edit-program]');
-    if (edit) return openProgramDialog(programById(edit.dataset.editProgram));
-    if (e.target.closest('[data-new-program]')) return openProgramDialog(null);
+function wireWorkspaces() {
+  document.getElementById('workspace-select').onchange = (e) => switchWorkspace(e.target.value);
+  document.getElementById('btn-new-workspace').onclick = () => openWorkspaceDialog(null);
+  document.getElementById('nav-settings').onclick = () => openWorkspaceDialog(currentWorkspace());
+  document.getElementById('workspace-cards').addEventListener('click', (e) => {
+    const edit = e.target.closest('[data-edit-workspace]');
+    if (edit) return openWorkspaceDialog(workspaceById(edit.dataset.editWorkspace));
+    if (e.target.closest('[data-new-workspace]')) return openWorkspaceDialog(null);
     const card = e.target.closest('[data-pid]');
-    if (card) switchProgram(card.dataset.pid, 'gantt');
+    if (card) switchWorkspace(card.dataset.pid, 'gantt');
   });
 
-  const dlg = document.getElementById('program-dialog');
-  const form = document.getElementById('program-form');
-  form.addEventListener('submit', submitProgramDialog);
+  const dlg = document.getElementById('workspace-dialog');
+  const form = document.getElementById('workspace-form');
+  form.addEventListener('submit', submitWorkspaceDialog);
   form.addEventListener('input', (e) => { if (/_term$/.test(e.target.name)) updateTermPreview(); });
   form.elements.status.addEventListener('change', (e) => { pgStatusesSelected = e.target.value === 'stray' ? null : pgStatuses[+e.target.value]; });
   document.querySelector('.pg-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-pg-tab]'); if (b) showPgTab(b.dataset.pgTab); });
@@ -2589,7 +2600,7 @@ function wirePrograms() {
   document.getElementById('pg-reset-statuses').onclick = resetPgStatuses;
   document.getElementById('pg-cancel').onclick = () => dlg.close();
   document.getElementById('pg-close').onclick = () => dlg.close();
-  document.getElementById('pg-delete').onclick = deleteProgram;
+  document.getElementById('pg-delete').onclick = deleteWorkspace;
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
@@ -2612,8 +2623,8 @@ function downloadPNG() {
     ctx.drawImage(img, 0, 0);
     URL.revokeObjectURL(url);
     const a = document.createElement('a');
-    const p = currentProgram();
-    a.download = `${(p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'programme'}-gantt.png`;
+    const p = currentWorkspace();
+    a.download = `${(p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace'}-gantt.png`;
     a.href = canvas.toDataURL('image/png');
     a.click();
   };
@@ -2622,7 +2633,7 @@ function downloadPNG() {
 
 /* ================= wiring ================= */
 
-const VIEWS = ['programs', 'gantt', 'editor', 'reports'];
+const VIEWS = ['workspaces', 'gantt', 'editor', 'reports'];
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 const currentView = () => VIEWS.find(isShown) || 'gantt';
 
@@ -2636,7 +2647,7 @@ function switchView(view) {
   if (view === 'gantt') renderGantt();
   else if (view === 'editor') renderEditor();
   else if (view === 'reports') renderReports();
-  else renderPrograms();
+  else renderWorkspaces();
   for (const v of VIEWS) {
     document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
     document.getElementById(`nav-${v}`).classList.toggle('active', v === view);
@@ -2659,7 +2670,7 @@ function wireEvents() {
   for (const v of VIEWS) document.getElementById(`nav-${v}`).onclick = () => switchView(v);
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
   document.getElementById('app-main').addEventListener('scroll', () => { hideQuick(); hideTip(); });
-  wirePrograms();
+  wireWorkspaces();
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
@@ -2725,7 +2736,7 @@ function wireEvents() {
     const last = state.items.at(-1);
     const today = fmtISO(new Date());
     state.items.push({
-      id: nextId(), program_id: state.programId, type: 'milestone', ref: '', title: `New ${T.item}`, description: '',
+      id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: `New ${T.item}`, description: '',
       swimlane: last?.swimlane || 'General', subswimlane: last?.subswimlane || '', owner: last?.owner || '',
       start: today, end: today, status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
     });
@@ -2748,7 +2759,7 @@ function wireEvents() {
   document.getElementById('btn-reload').onclick = async () => {
     await flushSave(); // don't lose a pending edit
     await loadData();
-    applyProgramChrome();
+    applyWorkspaceChrome();
     renderEditor();
     flashStatus('Reloaded', true);
   };
@@ -2786,7 +2797,7 @@ function wireEvents() {
     flashStatus(`Couldn’t load data: ${err.message}`, false, true);
     return;
   }
-  applyProgramChrome();
+  applyWorkspaceChrome();
   switchView(VIEWS.includes(prefs.view) ? prefs.view : 'gantt');
   if (isShown('gantt')) fitZoom(); // the ResizeObserver keeps it fitted as layout settles
 })();

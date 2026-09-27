@@ -1,5 +1,5 @@
 // Tracker — zero-dependency Node server.
-// Serves the static frontend and reads/writes programs.csv, statuses.csv, milestones.csv and reports.csv.
+// Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv and reports.csv.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -9,21 +9,22 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // Each API path is backed by one CSV file; the header is served when the file doesn't exist yet.
 const DATASETS = {
-  '/api/programs': {
-    file: path.join(__dirname, 'programs.csv'),
-    header: 'id,name,code,description,sponsor,manager,start,end,rag,item_term,milestone_term,task_term,created,updated\n',
+  '/api/workspaces': {
+    file: path.join(__dirname, 'workspaces.csv'),
+    legacy: path.join(__dirname, 'programs.csv'), // read until workspaces.csv is first saved
+    header: 'id,name,code,description,owner,lead,start,end,rag,item_term,milestone_term,task_term,created,updated\n',
   },
   '/api/statuses': {
     file: path.join(__dirname, 'statuses.csv'),
-    header: 'program_id,position,name,color,description,get_to_green,is_default\n',
+    header: 'workspace_id,position,name,color,description,get_to_green,is_default\n',
   },
   '/api/milestones': {
     file: path.join(__dirname, 'milestones.csv'),
-    header: 'id,program_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on\n',
+    header: 'id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on\n',
   },
   '/api/reports': {
     file: path.join(__dirname, 'reports.csv'),
-    header: 'id,program_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated\n',
+    header: 'id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated\n',
   },
 };
 
@@ -60,9 +61,13 @@ const server = http.createServer((req, res) => {
   const ds = DATASETS[new URL(req.url, 'http://x').pathname];
   if (ds) {
     if (req.method === 'GET') {
-      fs.readFile(ds.file, 'utf8', (err, data) => {
+      const send = (err, data) => {
         res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8' });
         res.end(err ? ds.header : data);
+      };
+      fs.readFile(ds.file, 'utf8', (err, data) => {
+        if (err && ds.legacy) fs.readFile(ds.legacy, 'utf8', send);
+        else send(err, data);
       });
       return;
     }

@@ -19,16 +19,16 @@
     </div>
 
     <nav class="nav">
-      <button id="nav-programs" class="nav-item" title="Programmes">
+      <button id="nav-workspaces" class="nav-item" title="Workspaces">
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>
-        <span class="nav-text">All programmes</span>
+        <span class="nav-text">All workspaces</span>
       </button>
 
       <div class="nav-section">
-        <label class="nav-label nav-text" for="program-select">Programme</label>
-        <div class="program-pick" title="Switch programme">
-          <i id="program-dot" class="program-dot"></i>
-          <select id="program-select" class="nav-text" aria-label="Current programme"></select>
+        <label class="nav-label nav-text" for="workspace-select">Workspace</label>
+        <div class="workspace-pick" title="Switch workspace">
+          <i id="workspace-dot" class="workspace-dot"></i>
+          <select id="workspace-select" class="nav-text" aria-label="Current workspace"></select>
         </div>
       </div>
 
@@ -44,9 +44,9 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5.5M7.5 13h5.5"/></svg>
         <span class="nav-text">Reports</span>
       </button>
-      <button id="nav-settings" class="nav-item" title="Programme settings">
+      <button id="nav-settings" class="nav-item" title="Workspace settings">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
-        <span class="nav-text">Programme settings</span>
+        <span class="nav-text">Workspace settings</span>
       </button>
     </nav>
 
@@ -59,26 +59,26 @@
   <div id="app-main" class="app-main">
   <header class="page-head">
     <div class="page-titles">
-      <span id="page-program" class="page-program"></span>
+      <span id="page-workspace" class="page-workspace"></span>
       <h1 id="page-title">Gantt chart</h1>
     </div>
     <span id="save-status" class="save-status"></span>
   </header>
 
-  <!-- ============ PROGRAMMES VIEW ============ -->
-  <main id="view-programs" class="view hidden">
+  <!-- ============ WORKSPACES VIEW ============ -->
+  <main id="view-workspaces" class="view hidden">
     <div class="toolbar">
       <div class="toolbar-group">
-        <button id="btn-new-program" class="btn btn-primary">+ New programme</button>
-        <span id="program-count" class="grid-count"></span>
+        <button id="btn-new-workspace" class="btn btn-primary">+ New workspace</button>
+        <span id="workspace-count" class="grid-count"></span>
       </div>
       <div class="toolbar-group toolbar-right">
-        <span class="autosave-note">Open a programme to see its Gantt chart, items and reports</span>
+        <span class="autosave-note">Open a workspace to see its Gantt chart, items and reports</span>
       </div>
     </div>
-    <div id="program-cards" class="prog-grid"></div>
-    <p class="hint">Each programme has its own items and reports. Use <b>Edit</b> to rename a programme, set its RAG, dates and people, or choose what it calls its items — for example <i>Deliverables</i> and <i>Work packages</i> instead of milestones and tasks.
-      Programmes are stored in <code>programs.csv</code>; items and reports carry the <code>program_id</code> they belong to.</p>
+    <div id="workspace-cards" class="prog-grid"></div>
+    <p class="hint">Each workspace has its own items and reports. Use <b>Edit</b> to rename a workspace, set its RAG, dates and people, or choose what it calls its items — for example <i>Checkpoints</i> and <i>Activities</i> instead of milestones and tasks.
+      Workspaces are stored in <code>workspaces.csv</code>; items and reports carry the <code>workspace_id</code> they belong to.</p>
   </main>
 
   <!-- ============ GANTT VIEW ============ -->
@@ -266,12 +266,12 @@
     </form>
   </dialog>
 
-  <!-- ============ PROGRAMME DIALOG ============ -->
-  <dialog id="program-dialog" class="edit-dialog program-dialog">
-    <form id="program-form" novalidate>
+  <!-- ============ WORKSPACE DIALOG ============ -->
+  <dialog id="workspace-dialog" class="edit-dialog workspace-dialog">
+    <form id="workspace-form" novalidate>
       <header class="dlg-head">
-        <span class="type-badge prog">Programme</span>
-        <h2 id="pg-heading">New programme</h2>
+        <span class="type-badge prog">Workspace</span>
+        <h2 id="pg-heading">New workspace</h2>
         <button type="button" id="pg-close" class="dlg-close" title="Close">✕</button>
       </header>
       <div class="pg-tabs" role="tablist">
@@ -281,15 +281,15 @@
       <div id="pg-panel-details" class="form-grid" role="tabpanel">
         <label class="span2">Name<input name="name" placeholder="e.g. Platform Replacement" /></label>
         <label>Code<input name="code" placeholder="e.g. PLT" maxlength="12" /></label>
-        <label class="span3">Description<textarea name="description" rows="2" placeholder="What the programme will deliver and why"></textarea></label>
-        <label>Programme manager<input name="manager" list="people-list" /></label>
-        <label>Sponsor<input name="sponsor" list="people-list" /></label>
-        <label>Programme RAG<select name="status"></select></label>
+        <label class="span3">Description<textarea name="description" rows="2" placeholder="What this workspace is for"></textarea></label>
+        <label>Owner<input name="owner" list="people-list" /></label>
+        <label>Lead<input name="lead" list="people-list" /></label>
+        <label>Workspace RAG<select name="status"></select></label>
         <label>Planned start<input name="start" type="date" /></label>
         <label>Planned end<input name="end" type="date" /></label>
         <p class="pg-date-note">Leave blank to use the dates of its items.</p>
         <fieldset class="span3 pg-terms">
-          <legend>What does this programme call things?</legend>
+          <legend>What does this workspace call things?</legend>
           <label>Everything<input name="item_term" list="term-item" placeholder="Item" /><small>generic name</small></label>
           <label>A single date<input name="milestone_term" list="term-milestone" placeholder="Milestone" /><small>drawn as a shape</small></label>
           <label>A date range<input name="task_term" list="term-task" placeholder="Task" /><small>drawn as a bar</small></label>
@@ -297,7 +297,7 @@
         </fieldset>
       </div>
       <div id="pg-panel-rag" class="pg-rag" role="tabpanel" hidden>
-        <p class="pg-rag-intro">The RAG statuses this programme uses, in order. They set the colours on the Gantt chart and in its key, the RAG buttons, filters and report form.</p>
+        <p class="pg-rag-intro">The RAG statuses this workspace uses, in order. They set the colours on the Gantt chart and in its key, the RAG buttons, filters and report form.</p>
         <table class="pg-rag-table">
           <thead><tr><th></th><th>Colour</th><th>Name</th><th>Meaning <small>(shown in the key)</small></th><th title="Reports at this status must include a get to green plan">Get to green plan</th><th title="The status new items start at">Default</th><th></th></tr></thead>
           <tbody id="pg-statuses"></tbody>
@@ -310,7 +310,7 @@
       </div>
       <p id="pg-error" class="dlg-error"></p>
       <footer class="dlg-foot">
-        <button type="button" id="pg-delete" class="btn btn-danger">Delete programme</button>
+        <button type="button" id="pg-delete" class="btn btn-danger">Delete workspace</button>
         <span class="spacer"></span>
         <button type="button" id="pg-cancel" class="btn">Cancel</button>
         <button type="submit" id="pg-submit" class="btn btn-primary">Save</button>

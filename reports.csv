@@ -1,4 +1,4 @@
-id,program_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated
+id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated
 1,1,10,Weekly,2026-09-19,2026-09-25,Complete,"kjfdskjfsdb sdfsdf
 ds
 sdf
@@ -87,7 +87,7 @@ Updated the plan and RAID log for Requirements Signed Off.","Run a lessons-learn
 Walk through progress with Sarah Patel at the weekly checkpoint.",,Sarah Patel,2026-01-25T08:15:00.000Z,2026-01-25T08:15:00.000Z
 30,1,3,Weekly,2026-01-24,2026-01-30,Amber,1.3 Requirements Signed Off: Resource constraints are putting pressure on the timeline.,"Held a checkpoint review with Sarah Patel and key stakeholders.
 Agreed acceptance criteria with the business leads.","Confirm dependencies with upstream workstreams.
-Continue delivery against the Requirements Signed Off plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Sarah Patel,2026-01-31T08:28:00.000Z,2026-01-31T08:28:00.000Z
+Continue delivery against the Requirements Signed Off plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Sarah Patel,2026-01-31T08:28:00.000Z,2026-01-31T08:28:00.000Z
 31,1,3,Weekly,2026-01-31,2026-02-06,Complete,1.3 Requirements Signed Off: Completed as planned; handover done and actions closed.,"Resolved outstanding queries raised by the design authority.
 Progressed 3 of the scheduled work packages.",None — item closed.,,Sarah Patel,2026-02-08T08:41:00.000Z,2026-02-08T08:41:00.000Z
 32,1,4,Weekly,2025-12-20,2025-12-26,Not Started,2.1 Solution Architecture: Awaiting predecessor activities; no issues to report.,,"Run a lessons-learned session with the team.
@@ -106,7 +106,7 @@ Confirm dependencies with upstream workstreams.",,Tom Reed,2026-02-01T09:46:00.0
 Walk through progress with Tom Reed at the weekly checkpoint.",,Tom Reed,2026-02-07T09:59:00.000Z,2026-02-07T09:59:00.000Z
 39,1,4,Weekly,2026-02-07,2026-02-13,Amber,2.1 Solution Architecture: Resource constraints are putting pressure on the timeline.,"Held a checkpoint review with Tom Reed and key stakeholders.
 Agreed acceptance criteria with the business leads.","Confirm dependencies with upstream workstreams.
-Continue delivery against the Solution Architecture plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Tom Reed,2026-02-15T09:22:00.000Z,2026-02-15T09:22:00.000Z
+Continue delivery against the Solution Architecture plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Tom Reed,2026-02-15T09:22:00.000Z,2026-02-15T09:22:00.000Z
 40,1,4,Weekly,2026-02-14,2026-02-20,Green,2.1 Solution Architecture: Delivery on plan; risks are being managed within tolerance.,"Resolved outstanding queries raised by the design authority.
 Progressed 3 of the scheduled work packages.","Walk through progress with Tom Reed at the weekly checkpoint.
 Close the remaining 4 actions and re-baseline if needed.",,Tom Reed,2026-02-21T09:35:00.000Z,2026-02-21T09:35:00.000Z
@@ -132,7 +132,7 @@ Updated the plan and RAID log for Architecture Approved.","Run a lessons-learned
 Walk through progress with Tom Reed at the weekly checkpoint.",,Tom Reed,2026-02-08T08:53:00.000Z,2026-02-08T08:53:00.000Z
 48,1,5,Weekly,2026-02-07,2026-02-13,Amber,2.2 Architecture Approved: Resource constraints are putting pressure on the timeline.,"Held a checkpoint review with Tom Reed and key stakeholders.
 Agreed acceptance criteria with the business leads.","Confirm dependencies with upstream workstreams.
-Continue delivery against the Architecture Approved plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Tom Reed,2026-02-14T08:16:00.000Z,2026-02-14T08:16:00.000Z
+Continue delivery against the Architecture Approved plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Tom Reed,2026-02-14T08:16:00.000Z,2026-02-14T08:16:00.000Z
 49,1,5,Weekly,2026-02-14,2026-02-20,Green,2.2 Architecture Approved: Delivery on plan; risks are being managed within tolerance.,"Resolved outstanding queries raised by the design authority.
 Progressed 3 of the scheduled work packages.","Walk through progress with Tom Reed at the weekly checkpoint.
 Close the remaining 4 actions and re-baseline if needed.",,Tom Reed,2026-02-22T08:29:00.000Z,2026-02-22T08:29:00.000Z
@@ -153,7 +153,7 @@ Confirm dependencies with upstream workstreams.",,Priya Shah,2026-02-08T09:34:00
 Walk through progress with Priya Shah at the weekly checkpoint.",,Priya Shah,2026-02-14T09:47:00.000Z,2026-02-14T09:47:00.000Z
 57,1,6,Weekly,2026-02-14,2026-02-20,Amber,2.3 UX Prototyping: Resource constraints are putting pressure on the timeline.,"Held a checkpoint review with Priya Shah and key stakeholders.
 Agreed acceptance criteria with the business leads.","Confirm dependencies with upstream workstreams.
-Continue delivery against the UX Prototyping plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Priya Shah,2026-02-22T09:10:00.000Z,2026-02-22T09:10:00.000Z
+Continue delivery against the UX Prototyping plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Priya Shah,2026-02-22T09:10:00.000Z,2026-02-22T09:10:00.000Z
 58,1,6,Weekly,2026-02-21,2026-02-27,Green,2.3 UX Prototyping: Delivery on plan; risks are being managed within tolerance.,"Resolved outstanding queries raised by the design authority.
 Progressed 3 of the scheduled work packages.","Walk through progress with Priya Shah at the weekly checkpoint.
 Close the remaining 4 actions and re-baseline if needed.",,Priya Shah,2026-02-28T09:23:00.000Z,2026-02-28T09:23:00.000Z
@@ -179,7 +179,7 @@ Updated the plan and RAID log for UX Prototype Complete.","Run a lessons-learned
 Walk through progress with Priya Shah at the weekly checkpoint.",,Priya Shah,2025-12-28T08:41:00.000Z,2025-12-28T08:41:00.000Z
 66,1,7,Fortnightly,2025-12-27,2026-01-09,Amber,2.4 UX Prototype Complete: Resource constraints are putting pressure on the timeline.,"Held a checkpoint review with Priya Shah and key stakeholders.
 Agreed acceptance criteria with the business leads.","Confirm dependencies with upstream workstreams.
-Continue delivery against the UX Prototype Complete plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Priya Shah,2026-01-10T08:54:00.000Z,2026-01-10T08:54:00.000Z
+Continue delivery against the UX Prototype Complete plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Priya Shah,2026-01-10T08:54:00.000Z,2026-01-10T08:54:00.000Z
 67,1,7,Fortnightly,2026-01-10,2026-01-23,Green,2.4 UX Prototype Complete: Delivery on plan; risks are being managed within tolerance.,"Resolved outstanding queries raised by the design authority.
 Progressed 3 of the scheduled work packages.","Walk through progress with Priya Shah at the weekly checkpoint.
 Close the remaining 4 actions and re-baseline if needed.",,Priya Shah,2026-01-25T08:17:00.000Z,2026-01-25T08:17:00.000Z
@@ -203,7 +203,7 @@ Updated the plan and RAID log for Vendor Negotiation.","Run a lessons-learned se
 Walk through progress with James Okoro at the weekly checkpoint.",,James Okoro,2026-02-14T09:35:00.000Z,2026-02-14T09:35:00.000Z
 75,1,8,Weekly,2026-02-14,2026-02-20,Amber,3.1 Vendor Negotiation: Resource constraints are putting pressure on the timeline.,"Held a checkpoint review with James Okoro and key stakeholders.
 Agreed acceptance criteria with the business leads.","Confirm dependencies with upstream workstreams.
-Continue delivery against the Vendor Negotiation plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,James Okoro,2026-02-22T09:48:00.000Z,2026-02-22T09:48:00.000Z
+Continue delivery against the Vendor Negotiation plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,James Okoro,2026-02-22T09:48:00.000Z,2026-02-22T09:48:00.000Z
 76,1,8,Weekly,2026-02-21,2026-02-27,Green,3.1 Vendor Negotiation: Delivery on plan; risks are being managed within tolerance.,"Resolved outstanding queries raised by the design authority.
 Progressed 3 of the scheduled work packages.","Walk through progress with James Okoro at the weekly checkpoint.
 Close the remaining 4 actions and re-baseline if needed.",,James Okoro,2026-02-28T09:11:00.000Z,2026-02-28T09:11:00.000Z
@@ -229,7 +229,7 @@ Updated the plan and RAID log for Vendor Contract Signed.","Run a lessons-learne
 Walk through progress with James Okoro at the weekly checkpoint.",,James Okoro,2026-02-08T08:29:00.000Z,2026-02-08T08:29:00.000Z
 84,1,9,Weekly,2026-02-07,2026-02-13,Amber,3.2 Vendor Contract Signed: Resource constraints are putting pressure on the timeline.,"Held a checkpoint review with James Okoro and key stakeholders.
 Agreed acceptance criteria with the business leads.","Confirm dependencies with upstream workstreams.
-Continue delivery against the Vendor Contract Signed plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,James Okoro,2026-02-14T08:42:00.000Z,2026-02-14T08:42:00.000Z
+Continue delivery against the Vendor Contract Signed plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,James Okoro,2026-02-14T08:42:00.000Z,2026-02-14T08:42:00.000Z
 85,1,9,Weekly,2026-02-14,2026-02-20,Green,3.2 Vendor Contract Signed: Delivery on plan; risks are being managed within tolerance.,"Resolved outstanding queries raised by the design authority.
 Progressed 3 of the scheduled work packages.","Walk through progress with James Okoro at the weekly checkpoint.
 Close the remaining 4 actions and re-baseline if needed.",,James Okoro,2026-02-22T08:55:00.000Z,2026-02-22T08:55:00.000Z
@@ -261,7 +261,7 @@ Confirmed resourcing for the next phase.","Continue delivery against the Build P
 Prepare evidence pack for the next governance board.",,Lucy Chen,2026-04-05T09:12:00.000Z,2026-04-05T09:12:00.000Z
 96,1,10,Weekly,2026-04-04,2026-04-10,Amber,4.1 Build Phase 1: Resource constraints are putting pressure on the timeline.,"Agreed acceptance criteria with the business leads.
 Completed the planned activities for Build Phase 1 on schedule.","Close the remaining 6 actions and re-baseline if needed.
-Run a lessons-learned session with the team.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Lucy Chen,2026-04-11T09:25:00.000Z,2026-04-11T09:25:00.000Z
+Run a lessons-learned session with the team.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Lucy Chen,2026-04-11T09:25:00.000Z,2026-04-11T09:25:00.000Z
 97,1,10,Weekly,2026-04-11,2026-04-17,Amber,4.1 Build Phase 1: A dependency is running late and may affect the end date.,"Progressed 6 of the scheduled work packages.
 Closed out 6 open actions from the previous period.","Prepare evidence pack for the next governance board.
 Confirm dependencies with upstream workstreams.",Descope non-critical items to the next release to protect the milestone date.,Lucy Chen,2026-04-19T09:38:00.000Z,2026-04-19T09:38:00.000Z
@@ -271,15 +271,15 @@ Walk through progress with Lucy Chen at the weekly checkpoint.",Add contingency 
 99,1,10,Weekly,2026-04-25,2026-05-01,Red,4.1 Build Phase 1: Significant delays this period; recovery plan in progress.,"Completed the planned activities for Build Phase 1 on schedule.
 Resolved outstanding queries raised by the design authority.","Confirm dependencies with upstream workstreams.
 Continue delivery against the Build Phase 1 plan.",Critical path re-planned; parallelise remaining work and seek approval to move the downstream date by one week.,Lucy Chen,2026-05-03T09:14:00.000Z,2026-05-03T09:14:00.000Z
-100,1,10,Weekly,2026-05-02,2026-05-08,Red,4.1 Build Phase 1: Key blocker unresolved; escalated to the programme board.,"Closed out 4 open actions from the previous period.
+100,1,10,Weekly,2026-05-02,2026-05-08,Red,4.1 Build Phase 1: Key blocker unresolved; escalated to the leadership team.,"Closed out 4 open actions from the previous period.
 Updated the plan and RAID log for Build Phase 1.","Walk through progress with Lucy Chen at the weekly checkpoint.
-Close the remaining 5 actions and re-baseline if needed.",Programme-level escalation raised; vendor to supply extra engineers and a named delivery lead.,Lucy Chen,2026-05-09T09:27:00.000Z,2026-05-09T09:27:00.000Z
+Close the remaining 5 actions and re-baseline if needed.",Escalation raised with the leadership team; vendor to supply extra engineers and a named delivery lead.,Lucy Chen,2026-05-09T09:27:00.000Z,2026-05-09T09:27:00.000Z
 101,1,10,Weekly,2026-05-09,2026-05-15,Red,4.1 Build Phase 1: Off track. The current forecast misses the planned date without intervention.,"Held a checkpoint review with Lucy Chen and key stakeholders.
 Agreed acceptance criteria with the business leads.","Continue delivery against the Build Phase 1 plan.
 Prepare evidence pack for the next governance board.","Recovery plan agreed: additional contractor capacity from next week, twice-weekly recovery reviews with the SRO.",Lucy Chen,2026-05-17T09:40:00.000Z,2026-05-17T09:40:00.000Z
 102,1,11,Weekly,2026-03-07,2026-03-13,Amber,4.2 Build Phase 1 Complete: Resource constraints are putting pressure on the timeline.,"Held a checkpoint review with Lucy Chen and key stakeholders.
 Agreed acceptance criteria with the business leads.","Confirm dependencies with upstream workstreams.
-Continue delivery against the Build Phase 1 Complete plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Lucy Chen,2026-03-14T08:30:00.000Z,2026-03-14T08:30:00.000Z
+Continue delivery against the Build Phase 1 Complete plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Lucy Chen,2026-03-14T08:30:00.000Z,2026-03-14T08:30:00.000Z
 103,1,11,Weekly,2026-03-14,2026-03-20,Green,4.2 Build Phase 1 Complete: Delivery on plan; risks are being managed within tolerance.,"Resolved outstanding queries raised by the design authority.
 Progressed 3 of the scheduled work packages.","Walk through progress with Lucy Chen at the weekly checkpoint.
 Close the remaining 4 actions and re-baseline if needed.",,Lucy Chen,2026-03-22T08:43:00.000Z,2026-03-22T08:43:00.000Z
@@ -323,7 +323,7 @@ Held a checkpoint review with Lucy Chen and key stakeholders.","Run a lessons-le
 Walk through progress with Lucy Chen at the weekly checkpoint.",Add contingency resource for two weeks and hold a daily stand-up until back on track.,Lucy Chen,2026-06-20T09:39:00.000Z,2026-06-20T09:39:00.000Z
 117,1,12,Weekly,2026-06-20,2026-06-26,Amber,4.3 Build Phase 2: Resource constraints are putting pressure on the timeline.,"Completed the planned activities for Build Phase 2 on schedule.
 Resolved outstanding queries raised by the design authority.","Confirm dependencies with upstream workstreams.
-Continue delivery against the Build Phase 2 plan.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Lucy Chen,2026-06-28T09:52:00.000Z,2026-06-28T09:52:00.000Z
+Continue delivery against the Build Phase 2 plan.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Lucy Chen,2026-06-28T09:52:00.000Z,2026-06-28T09:52:00.000Z
 118,1,12,Weekly,2026-06-27,2026-07-03,Amber,4.3 Build Phase 2: A dependency is running late and may affect the end date.,"Closed out 4 open actions from the previous period.
 Updated the plan and RAID log for Build Phase 2.","Walk through progress with Lucy Chen at the weekly checkpoint.
 Close the remaining 5 actions and re-baseline if needed.",Descope non-critical items to the next release to protect the milestone date.,Lucy Chen,2026-07-04T09:15:00.000Z,2026-07-04T09:15:00.000Z
@@ -333,9 +333,9 @@ Prepare evidence pack for the next governance board.","Recovery plan agreed: add
 120,1,12,Weekly,2026-07-11,2026-07-17,Red,4.3 Build Phase 2: Significant delays this period; recovery plan in progress.,"Resolved outstanding queries raised by the design authority.
 Progressed 6 of the scheduled work packages.","Close the remaining 2 actions and re-baseline if needed.
 Run a lessons-learned session with the team.",Critical path re-planned; parallelise remaining work and seek approval to move the downstream date by one week.,Lucy Chen,2026-07-18T09:41:00.000Z,2026-07-18T09:41:00.000Z
-121,1,12,Weekly,2026-07-18,2026-07-24,Red,4.3 Build Phase 2: Key blocker unresolved; escalated to the programme board.,"Updated the plan and RAID log for Build Phase 2.
+121,1,12,Weekly,2026-07-18,2026-07-24,Red,4.3 Build Phase 2: Key blocker unresolved; escalated to the leadership team.,"Updated the plan and RAID log for Build Phase 2.
 Confirmed resourcing for the next phase.","Prepare evidence pack for the next governance board.
-Confirm dependencies with upstream workstreams.",Programme-level escalation raised; vendor to supply extra engineers and a named delivery lead.,Lucy Chen,2026-07-26T09:54:00.000Z,2026-07-26T09:54:00.000Z
+Confirm dependencies with upstream workstreams.",Escalation raised with the leadership team; vendor to supply extra engineers and a named delivery lead.,Lucy Chen,2026-07-26T09:54:00.000Z,2026-07-26T09:54:00.000Z
 122,1,13,Fortnightly,2026-03-14,2026-03-27,Green,4.4 Build Phase 2 Complete: On track. Work is progressing to plan with no significant issues.,"Updated the plan and RAID log for Build Phase 2 Complete.
 Confirmed resourcing for the next phase.","Continue delivery against the Build Phase 2 Complete plan.
 Prepare evidence pack for the next governance board.",,Lucy Chen,2026-03-28T08:44:00.000Z,2026-03-28T08:44:00.000Z
@@ -535,10 +535,10 @@ Close the remaining 6 actions and re-baseline if needed.",,Raj Mehta,2026-08-22T
 Prepare evidence pack for the next governance board.",,Raj Mehta,2026-08-30T09:58:00.000Z,2026-08-30T09:58:00.000Z
 198,1,20,Weekly,2026-08-29,2026-09-04,Amber,4.9 Data Migration Rehearsal: Resource constraints are putting pressure on the timeline.,"Closed out 2 open actions from the previous period.
 Updated the plan and RAID log for Data Migration Rehearsal.","Close the remaining 3 actions and re-baseline if needed.
-Run a lessons-learned session with the team.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Raj Mehta,2026-09-05T09:21:00.000Z,2026-09-05T09:21:00.000Z
-199,1,20,Weekly,2026-09-05,2026-09-11,Red,4.9 Data Migration Rehearsal: Key blocker unresolved; escalated to the programme board.,"Held a checkpoint review with Raj Mehta and key stakeholders.
+Run a lessons-learned session with the team.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Raj Mehta,2026-09-05T09:21:00.000Z,2026-09-05T09:21:00.000Z
+199,1,20,Weekly,2026-09-05,2026-09-11,Red,4.9 Data Migration Rehearsal: Key blocker unresolved; escalated to the leadership team.,"Held a checkpoint review with Raj Mehta and key stakeholders.
 Agreed acceptance criteria with the business leads.","Prepare evidence pack for the next governance board.
-Confirm dependencies with upstream workstreams.",Programme-level escalation raised; vendor to supply extra engineers and a named delivery lead.,Raj Mehta,2026-09-13T09:34:00.000Z,2026-09-13T09:34:00.000Z
+Confirm dependencies with upstream workstreams.",Escalation raised with the leadership team; vendor to supply extra engineers and a named delivery lead.,Raj Mehta,2026-09-13T09:34:00.000Z,2026-09-13T09:34:00.000Z
 200,1,20,Weekly,2026-09-12,2026-09-18,Red,4.9 Data Migration Rehearsal: Off track. The current forecast misses the planned date without intervention.,"Resolved outstanding queries raised by the design authority.
 Progressed 4 of the scheduled work packages.","Run a lessons-learned session with the team.
 Walk through progress with Raj Mehta at the weekly checkpoint.","Recovery plan agreed: additional contractor capacity from next week, twice-weekly recovery reviews with the SRO.",Raj Mehta,2026-09-19T09:47:00.000Z,2026-09-19T09:47:00.000Z
@@ -562,7 +562,7 @@ Resolved outstanding queries raised by the design authority.","Continue delivery
 Prepare evidence pack for the next governance board.",Add contingency resource for two weeks and hold a daily stand-up until back on track.,Raj Mehta,2026-08-22T08:52:00.000Z,2026-08-22T08:52:00.000Z
 207,1,21,Weekly,2026-08-22,2026-08-28,Amber,4.10 Migration Ready: Resource constraints are putting pressure on the timeline.,"Closed out 2 open actions from the previous period.
 Updated the plan and RAID log for Migration Ready.","Close the remaining 3 actions and re-baseline if needed.
-Run a lessons-learned session with the team.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Raj Mehta,2026-08-30T08:15:00.000Z,2026-08-30T08:15:00.000Z
+Run a lessons-learned session with the team.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Raj Mehta,2026-08-30T08:15:00.000Z,2026-08-30T08:15:00.000Z
 208,1,21,Weekly,2026-08-29,2026-09-04,Amber,4.10 Migration Ready: A dependency is running late and may affect the end date.,"Held a checkpoint review with Raj Mehta and key stakeholders.
 Agreed acceptance criteria with the business leads.","Prepare evidence pack for the next governance board.
 Confirm dependencies with upstream workstreams.",Descope non-critical items to the next release to protect the milestone date.,Raj Mehta,2026-09-05T08:28:00.000Z,2026-09-05T08:28:00.000Z
@@ -572,9 +572,9 @@ Walk through progress with Raj Mehta at the weekly checkpoint.","Recovery plan a
 210,1,21,Weekly,2026-09-12,2026-09-18,Red,4.10 Migration Ready: Significant delays this period; recovery plan in progress.,"Updated the plan and RAID log for Migration Ready.
 Confirmed resourcing for the next phase.","Confirm dependencies with upstream workstreams.
 Continue delivery against the Migration Ready plan.",Critical path re-planned; parallelise remaining work and seek approval to move the downstream date by one week.,Raj Mehta,2026-09-19T08:54:00.000Z,2026-09-19T08:54:00.000Z
-211,1,21,Weekly,2026-09-19,2026-09-25,Red,4.10 Migration Ready: Key blocker unresolved; escalated to the programme board.,"Agreed acceptance criteria with the business leads.
+211,1,21,Weekly,2026-09-19,2026-09-25,Red,4.10 Migration Ready: Key blocker unresolved; escalated to the leadership team.,"Agreed acceptance criteria with the business leads.
 Completed the planned activities for Migration Ready on schedule.","Walk through progress with Raj Mehta at the weekly checkpoint.
-Close the remaining 2 actions and re-baseline if needed.",Programme-level escalation raised; vendor to supply extra engineers and a named delivery lead.,Raj Mehta,2026-09-27T08:17:00.000Z,2026-09-27T08:17:00.000Z
+Close the remaining 2 actions and re-baseline if needed.",Escalation raised with the leadership team; vendor to supply extra engineers and a named delivery lead.,Raj Mehta,2026-09-27T08:17:00.000Z,2026-09-27T08:17:00.000Z
 212,1,22,Weekly,2026-07-18,2026-07-24,Not Started,5.3 Training Delivery: Awaiting predecessor activities; no issues to report.,,"Run a lessons-learned session with the team.
 Walk through progress with Anita Gomez at the weekly checkpoint.",,Anita Gomez,2026-07-25T09:57:00.000Z,2026-07-25T09:57:00.000Z
 213,1,22,Weekly,2026-07-25,2026-07-31,Not Started,5.3 Training Delivery: Not yet started. Preparation and planning under way ahead of the start date.,,"Confirm dependencies with upstream workstreams.
@@ -643,7 +643,7 @@ Closed out 2 open actions from the previous period.","Continue delivery against 
 Prepare evidence pack for the next governance board.",Add contingency resource for two weeks and hold a daily stand-up until back on track.,Sarah Patel,2026-09-13T09:12:00.000Z,2026-09-13T09:12:00.000Z
 240,1,24,Weekly,2026-09-12,2026-09-18,Amber,1.4 Go-Live: Resource constraints are putting pressure on the timeline.,"Confirmed resourcing for the next phase.
 Held a checkpoint review with Sarah Patel and key stakeholders.","Close the remaining 4 actions and re-baseline if needed.
-Run a lessons-learned session with the team.",Escalate the dependency blocker to the programme board; agree a revised date for the handover.,Sarah Patel,2026-09-19T09:25:00.000Z,2026-09-19T09:25:00.000Z
+Run a lessons-learned session with the team.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Sarah Patel,2026-09-19T09:25:00.000Z,2026-09-19T09:25:00.000Z
 241,1,24,Weekly,2026-09-19,2026-09-25,Amber,1.4 Go-Live: A dependency is running late and may affect the end date.,"Completed the planned activities for Go-Live on schedule.
 Resolved outstanding queries raised by the design authority.","Prepare evidence pack for the next governance board.
 Confirm dependencies with upstream workstreams.",Descope non-critical items to the next release to protect the milestone date.,Sarah Patel,2026-09-27T09:38:00.000Z,2026-09-27T09:38:00.000Z
@@ -687,5 +687,5 @@ Confirm dependencies with upstream workstreams.",,Sarah Patel,2026-09-13T09:26:0
 Walk through progress with Sarah Patel at the weekly checkpoint.",,Sarah Patel,2026-09-19T09:39:00.000Z,2026-09-19T09:39:00.000Z
 261,1,26,Weekly,2026-09-19,2026-09-25,Not Started,1.5 Hypercare Exit: Not yet started. Preparation and planning under way ahead of the start date.,,"Confirm dependencies with upstream workstreams.
 Continue delivery against the Hypercare Exit plan.",,Sarah Patel,2026-09-27T09:52:00.000Z,2026-09-27T09:52:00.000Z
-262,2,30,Weekly,2026-09-19,2026-09-25,Green,Fit-out on programme. First and second floor partitioning complete.,Partitioning finished on floors 1 and 2; first fix electrics started.,Start third floor partitioning; kitchen units delivered.,,Owen Price,2026-09-25T16:00:00.000Z,2026-09-25T16:00:00.000Z
+262,2,30,Weekly,2026-09-19,2026-09-25,Green,Fit-out on schedule. First and second floor partitioning complete.,Partitioning finished on floors 1 and 2; first fix electrics started.,Start third floor partitioning; kitchen units delivered.,,Owen Price,2026-09-25T16:00:00.000Z,2026-09-25T16:00:00.000Z
 263,2,31,Weekly,2026-09-19,2026-09-25,Amber,"Chair supplier has a six week lead time, putting the end of October delivery at risk.",Desks ordered and delivery slot booked.,Confirm alternative chair supplier.,Source chairs from the second framework supplier by 2 Oct (Owen Price); agree a phased delivery if needed.,Owen Price,2026-09-25T16:00:00.000Z,2026-09-25T16:00:00.000Z
