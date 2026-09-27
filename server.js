@@ -1,21 +1,29 @@
-// Milestone Tracker — zero-dependency Node server.
-// Serves the static frontend and reads/writes milestones.csv and reports.csv.
+// Tracker — zero-dependency Node server.
+// Serves the static frontend and reads/writes programs.csv, statuses.csv, milestones.csv and reports.csv.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3100;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // Each API path is backed by one CSV file; the header is served when the file doesn't exist yet.
 const DATASETS = {
+  '/api/programs': {
+    file: path.join(__dirname, 'programs.csv'),
+    header: 'id,name,code,description,sponsor,manager,start,end,rag,item_term,milestone_term,task_term,created,updated\n',
+  },
+  '/api/statuses': {
+    file: path.join(__dirname, 'statuses.csv'),
+    header: 'program_id,position,name,color,description,get_to_green,is_default\n',
+  },
   '/api/milestones': {
     file: path.join(__dirname, 'milestones.csv'),
-    header: 'id,ref,title,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on\n',
+    header: 'id,program_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on\n',
   },
   '/api/reports': {
     file: path.join(__dirname, 'reports.csv'),
-    header: 'id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated\n',
+    header: 'id,program_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated\n',
   },
 };
 
@@ -83,5 +91,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Milestone Tracker running at http://localhost:${PORT}`);
+  console.log(`Tracker running at http://localhost:${PORT}`);
 });

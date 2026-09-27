@@ -1,7 +1,7 @@
 {
   "name": "milestone-tracker",
   "version": "1.0.0",
-  "description": "CSV-backed milestone tracker with a rich SVG gantt chart",
+  "description": "CSV-backed programme tracker for milestones, tasks and status reports, with a rich SVG gantt chart",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

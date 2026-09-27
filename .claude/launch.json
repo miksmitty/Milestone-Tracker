@@ -5,8 +5,8 @@
       "name": "milestone-tracker",
       "runtimeExecutable": "node",
       "runtimeArgs": ["server.js"],
-      "port": 3000,
-      "autoPort": true
+      "port": 3100,
+      "autoPort": false
     }
   ]
 }

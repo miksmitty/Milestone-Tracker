@@ -1,6 +1,6 @@
-# Milestone Tracker
+# Tracker
 
-A simple, zero-dependency milestone tracker: define milestones in a CSV-backed editor and view them on a visually rich Gantt-style timeline.
+A simple, zero-dependency tracker for one or more programmes of work: define milestones and tasks in a CSV-backed editor, view them on a visually rich Gantt-style timeline, and collect periodic status reports.
 
 ## Run
 
@@ -8,22 +8,63 @@ A simple, zero-dependency milestone tracker: define milestones in a CSV-backed e
 node server.js
 ```
 
-Then open http://localhost:3000 (set `PORT=xxxx` to use another port).
+Then open http://localhost:3100 (set `PORT=xxxx` to use another port).
 
 No `npm install` needed — plain Node (18+) and vanilla JS.
+
+## Programmes
+
+Everything belongs to a **programme**. The left-hand menu has **All programmes**, a programme switcher, and the current programme's **Gantt chart**, **Items**, **Reports** and **Programme settings**. Collapse the menu to icons with **Collapse** at the bottom; the app remembers the open programme, view and menu state per browser.
+
+**All programmes** shows a card per programme: its RAG, code, manager and sponsor, timeline, last report, a RAG breakdown of its items and counts. Click a card to open it, **Edit** to change it, or **+ New programme**. A programme has:
+
+- **Name** (required, unique), **Code** (e.g. `PLT`, shown beside the name), **Description**
+- **Programme manager**, **Sponsor** and **Programme RAG**
+- **Planned start / end**: optional; if blank, the card shows the span of the programme's items
+- **What does this programme call things?**: the word for everything (default *Item*), for a single-date item (default *Milestone*) and for one with a date range (default *Task*). For example *Work item*, *Deliverable* and *Task*. The menu, buttons, badges, filters, legend and messages use these words; plurals are worked out automatically
+
+### RAG options
+
+**Programme settings → RAG options** sets the RAG statuses a programme uses. Every programme starts with the standard five: Green (on track), Amber (at risk), Red (off track), Complete and Not Started, with Amber and Red needing a get to green plan and new items starting at Not Started. For each status you can set:
+
+- **Colour**: used for the Gantt chart shapes and bars, the RAG buttons, pills and the programme cards
+- **Name** and **Meaning**: shown in the **Gantt key** as “Name — meaning”
+- **Get to green plan**: reports at this status must include one
+- **Default**: the status new items start at
+
+Reorder statuses with ↑ ↓ (the order is used in the key, the RAG buttons and when sorting by RAG), **+ Add status**, remove one with ✕, or **Reset to the standard RAG**. Renaming a status renames it on every item and report in the programme. Removing a status that's in use asks which status to move those items and reports to. A key preview shows the result before you save, and the programme's own RAG is chosen from the same list.
+
+RAG options are stored in [statuses.csv](statuses.csv), created the first time a programme changes them. Programmes without rows there use the standard five:
+
+```
+program_id,position,name,color,description,get_to_green,is_default
+```
+
+Deleting a programme also deletes its items and reports (you're told how many first). There must always be at least one programme.
+
+Programmes live in [programs.csv](programs.csv):
+
+```
+id,name,code,description,sponsor,manager,start,end,rag,item_term,milestone_term,task_term,created,updated
+```
+
+Items and reports carry a `program_id`. Ids stay unique across all programmes, and dependencies and roll-ups only link items in the same programme. Files from before programmes existed still load: rows without a `program_id` join the first programme (reports follow their item), and if `programs.csv` is missing one is created.
 
 ## Data
 
 Items live in [milestones.csv](milestones.csv) with columns:
 
 ```
-id,ref,title,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on
+id,program_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on
 ```
+
+- **program_id**: the programme the item belongs to (`id` in programs.csv)
 
 - **id**: the **primary key** — a positive integer assigned automatically, unique, never changed and never reused. `parent` and `depends_on` reference ids, so they map directly onto a foreign key / join table when the data moves to a database
 - **ref**: your own human-facing reference, e.g. `4.1`, `5.6` (shown on the chart; duplicates are flagged; "Sort by ref" orders 4.2 before 4.10)
-- **start / end**: `YYYY-MM-DD`. If start = end the item is a **milestone** (drawn as a shape); if start < end it is a **task** (drawn as a bar)
-- **rag**: `Green` | `Amber` | `Red` | `Complete` (blue) | `Not Started` (grey). Files with the older `status` column still load
+- **type**: `milestone` (one date, drawn as a shape) or `task` (a start and end date, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to its end date. Files without a type column still load: a start before the end makes a task, otherwise a milestone
+- **start / end**: `YYYY-MM-DD`. A milestone's start and end are always the same, and **changing either one moves the milestone**. A task's dates are inclusive, so its bar runs to the end of its end date, and a one-day task can start and end on the same day
+- **rag**: one of the programme's RAG options (by default `Green` | `Amber` | `Red` | `Complete` | `Not Started`). Matching ignores case; a status that isn't in the list is kept and shown in grey. Files with the older `status` column still load
 - **shape**: `diamond` | `circle` | `square` | `triangle` (milestones only)
 - **swimlane / subswimlane**: free text — each distinct value becomes a lane / nested sub-lane
 - **parent**: id of the milestone this item rolls up to (the milestone can't fall before it finishes)
@@ -34,7 +75,8 @@ Changing an item's end date in the **Items** screen shifts everything downstream
 RAG and dates change far more often than anything else, so they are the quickest to update:
 
 - **Gantt chart**: click (or right-click) an item to open the quick update panel. Click a RAG to change it; change the dates and hit *Update dates* (the panel says how many dependent items will move). From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
-- **Items tab → Quick update** (the default view): just ref, title, owner, RAG and dates. Click a RAG to set it, or edit a date. Switch to **All fields** to change titles, lanes, links, shape and so on.
+- **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. Click a RAG to set it, or edit any cell. Switch to **All fields** for lanes, links, shape and so on.
+- The quick update panel on the chart also has a **Type** switch.
 
 Edit items in the app — in the **Items** table or by clicking an item on the chart. Every change saves to the CSV automatically. In the table, click a column header to sort (▲ / ▼ / off), use the filter row to narrow the list, and drag a header edge to resize a column (double-click to reset); sort and column widths are remembered per browser and never change the CSV order. You can also edit the CSV in a spreadsheet tool; hit *Reload* in the app afterwards.
 
@@ -50,13 +92,15 @@ Owners provide a regular status report on any milestone or task. **Click an item
 
 The item's previous report is shown in a panel beside the form while you write the new one, with ‹ › to step back through older reports. Its sections can be copied across: last period's *next steps* into this period's *achievements*, the *exec summary*, or the *get to green plan* (carried forward). You can only have one report per item per period; if one exists, you'll be offered a link to open it.
 
-The **Reports** tab lists every report, newest period first. Like the Items grid, click a header to sort, use the filter row (item, RAG, cadence, text…) to narrow the list, and drag a header edge to resize a column; the toolbar search looks through every report field. **View reports** in the item's edit dialog, the quick update panel and the report form jumps here filtered to that item. Click any report to edit or delete it; edits are tracked with `created` / `updated` timestamps. **Download CSV** saves the reports currently listed (filters applied) with the item's `ref` and `title` added for readability.
+The **Reports** tab lists every report in the current programme, newest period first. Like the Items grid, click a header to sort, use the filter row (item, RAG, cadence, text…) to narrow the list, and drag a header edge to resize a column; the toolbar search looks through every report field. **View reports** in the item's edit dialog, the quick update panel and the report form jumps here filtered to that item. Click any report to edit or delete it; edits are tracked with `created` / `updated` timestamps. **Download CSV** saves the reports currently listed (filters applied) with the item's `ref` and `title` added for readability.
 
 Reports are stored in [reports.csv](reports.csv), one row per report:
 
 ```
-id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated
+id,program_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated
 ```
+
+- **program_id**: the programme the report belongs to
 
 - **id**: the report's primary key (never reused)
 - **item_id**: foreign key to the item's `id` in milestones.csv. Deleting an item keeps its reports.
@@ -69,7 +113,8 @@ id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_st
 - Dependency arrows and dashed roll-up arrows (toggle with **Dependencies**)
 - **Row height** slider — below 40px the dates/owner line under each item is hidden for a compact view
 - Hover an item for a summary card (including its last report); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)
+- The chart fills the window below its toolbar and scrolls inside its own panel
 - Zoom: −/+ buttons, slider, and **Fit** (auto-fits until you zoom manually)
 - Date range pickers with **Auto** reset to fit all milestones
 - Toggles for **month grid**, **quarter grid**, and the **today line**
-- **Download PNG** exports the chart at 2× resolution for slide decks / screenshots
+- **Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the programme

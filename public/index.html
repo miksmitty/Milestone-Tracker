@@ -3,30 +3,86 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Milestone Tracker</title>
+  <title>Tracker</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="app-header">
+<div class="app">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar" aria-label="Main menu">
     <div class="brand">
-      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+      <svg class="brand-mark" width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
         <rect x="2" y="2" width="22" height="22" rx="5" fill="#e60000"/>
         <path d="M13 6.5 L19.5 13 L13 19.5 L6.5 13 Z" fill="#fff"/>
       </svg>
-      <h1>Milestone Tracker</h1>
+      <span class="brand-name nav-text">Tracker</span>
     </div>
-    <nav class="tabs">
-      <button id="tab-gantt" class="tab active">Gantt Chart</button>
-      <button id="tab-editor" class="tab">Items</button>
-      <button id="tab-reports" class="tab">Reports</button>
+
+    <nav class="nav">
+      <button id="nav-programs" class="nav-item" title="Programmes">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>
+        <span class="nav-text">All programmes</span>
+      </button>
+
+      <div class="nav-section">
+        <label class="nav-label nav-text" for="program-select">Programme</label>
+        <div class="program-pick" title="Switch programme">
+          <i id="program-dot" class="program-dot"></i>
+          <select id="program-select" class="nav-text" aria-label="Current programme"></select>
+        </div>
+      </div>
+
+      <button id="nav-gantt" class="nav-item" title="Gantt chart">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3v14h14"/><rect x="5.5" y="5" width="6" height="2.6" rx="1"/><rect x="8.5" y="9" width="7" height="2.6" rx="1"/><rect x="6.5" y="13" width="4" height="2.6" rx="1"/></svg>
+        <span class="nav-text">Gantt chart</span>
+      </button>
+      <button id="nav-editor" class="nav-item" title="Items">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5h9.5M7.5 10h9.5M7.5 15h9.5"/><circle cx="4" cy="5" r="1.2"/><circle cx="4" cy="10" r="1.2"/><circle cx="4" cy="15" r="1.2"/></svg>
+        <span class="nav-text" data-term="Items">Items</span>
+      </button>
+      <button id="nav-reports" class="nav-item" title="Reports">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5.5M7.5 13h5.5"/></svg>
+        <span class="nav-text">Reports</span>
+      </button>
+      <button id="nav-settings" class="nav-item" title="Programme settings">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
+        <span class="nav-text">Programme settings</span>
+      </button>
     </nav>
-    <div class="header-right">
-      <span id="save-status" class="save-status"></span>
+
+    <button id="nav-collapse" class="nav-collapse" title="Collapse menu" aria-expanded="true">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5 7.5 10l5 5"/></svg>
+      <span class="nav-text">Collapse</span>
+    </button>
+  </aside>
+
+  <div id="app-main" class="app-main">
+  <header class="page-head">
+    <div class="page-titles">
+      <span id="page-program" class="page-program"></span>
+      <h1 id="page-title">Gantt chart</h1>
     </div>
+    <span id="save-status" class="save-status"></span>
   </header>
 
+  <!-- ============ PROGRAMMES VIEW ============ -->
+  <main id="view-programs" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="btn-new-program" class="btn btn-primary">+ New programme</button>
+        <span id="program-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-group toolbar-right">
+        <span class="autosave-note">Open a programme to see its Gantt chart, items and reports</span>
+      </div>
+    </div>
+    <div id="program-cards" class="prog-grid"></div>
+    <p class="hint">Each programme has its own items and reports. Use <b>Edit</b> to rename a programme, set its RAG, dates and people, or choose what it calls its items — for example <i>Deliverables</i> and <i>Work packages</i> instead of milestones and tasks.
+      Programmes are stored in <code>programs.csv</code>; items and reports carry the <code>program_id</code> they belong to.</p>
+  </main>
+
   <!-- ============ GANTT VIEW ============ -->
-  <main id="view-gantt" class="view">
+  <main id="view-gantt" class="view view-fill">
     <div class="toolbar">
       <div class="toolbar-group">
         <label class="toolbar-label">Range</label>
@@ -53,7 +109,7 @@
         <label class="check"><input type="checkbox" id="toggle-links" checked /> Dependencies</label>
       </div>
       <div class="toolbar-group toolbar-right">
-        <button id="btn-gantt-add" class="btn" title="Add a milestone or task">+ Add</button>
+        <button id="btn-gantt-add" class="btn">+ Add <span data-term="item">item</span></button>
         <button id="btn-png" class="btn btn-primary" title="Download the chart as a PNG image">Download PNG</button>
       </div>
     </div>
@@ -62,13 +118,10 @@
     </div>
     <div class="legend">
       <span class="legend-title">RAG</span>
-      <span class="legend-item"><i class="dot" style="background:#16a34a"></i> Green — on track</span>
-      <span class="legend-item"><i class="dot" style="background:#f59e0b"></i> Amber — at risk</span>
-      <span class="legend-item"><i class="dot" style="background:#e60000"></i> Red — off track</span>
-      <span class="legend-item"><i class="dot" style="background:#1f6fb2"></i> Blue — complete</span>
-      <span class="legend-item"><i class="dot" style="background:#a8a69c"></i> Grey — not started</span>
+      <span id="legend-rag" class="legend-group"></span>
       <span class="legend-title legend-gap">Key</span>
-      <span class="legend-item"><i class="bar"></i> Task</span>
+      <span class="legend-item"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1 L13 7 L7 13 L1 7 Z" fill="#7a7870"/></svg> <span data-term="Milestone">Milestone</span></span>
+      <span class="legend-item"><i class="bar"></i> <span data-term="Task">Task</span></span>
       <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7a7870" stroke-width="1.5"/><path d="M18 1 L25 5 L18 9 Z" fill="#7a7870"/></svg> Depends on</span>
       <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#a43725" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#a43725"/></svg> Rolls up to</span>
     </div>
@@ -82,7 +135,7 @@
           <label title="Just RAG and dates — the things that change week to week"><input type="radio" name="grid-mode" value="quick" /><span>Quick update</span></label>
           <label title="Every field, including title, lanes, links and shape"><input type="radio" name="grid-mode" value="full" /><span>All fields</span></label>
         </div>
-        <button id="btn-add" class="btn btn-primary">+ Add item</button>
+        <button id="btn-add" class="btn btn-primary">+ Add <span data-term="item">item</span></button>
         <span id="grid-count" class="grid-count"></span>
         <button id="btn-clear-filters" class="btn btn-ghost" hidden>Clear filters</button>
       </div>
@@ -98,10 +151,10 @@
         <tbody id="editor-body"></tbody>
       </table>
     </div>
-    <p class="hint"><b>Quick update</b> shows just RAG and dates: click a RAG to change it, or edit a date. Switch to <b>All fields</b> to change titles, lanes, links and the rest.
+    <p class="hint"><b>Quick update</b> shows the fields that change most — ref, title, type, owner, RAG and dates: click a RAG to change it, or edit any cell. Switch to <b>All fields</b> for lanes, links, shape and the rest.
       Click a column header to sort, use the filter row to narrow the list, and drag a header edge to resize (double-click to reset). <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
       Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.
-      An item whose start is before its end is a <b>task</b> (bar); set start = end for a <b>milestone</b> (changing a milestone's end date moves it; set an earlier start to turn it into a task).
+      <b>Type</b> says whether something is a <b data-term="milestone">milestone</b> (one date, drawn as a shape: changing either date moves it) or a <b data-term="task">task</b> (a start and end, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to one date.
       Changing an end date shifts everything that depends on it by the same amount.</p>
   </main>
 
@@ -125,9 +178,11 @@
         <tbody id="reports-body"></tbody>
       </table>
     </div>
-    <p class="hint">Click a report to view or edit it. Sort, filter and resize columns as on the Items tab. To report on an item, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
-      Reports are stored in <code>reports.csv</code>, one row per report, linked to the item by its ID.</p>
+    <p class="hint">Click a report to view or edit it. Sort, filter and resize columns as on the Items tab. To report on something, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
+      Reports are stored in <code>reports.csv</code>, one row per report, linked to what it covers by its ID.</p>
   </main>
+  </div>
+</div>
 
   <!-- ============ HOVER CARD + QUICK UPDATE + EDIT DIALOG ============ -->
   <div id="tip" class="tip" role="tooltip"></div>
@@ -137,7 +192,7 @@
     <form id="edit-form" novalidate>
       <header class="dlg-head">
         <span id="ed-type" class="type-badge ms">Milestone</span>
-        <h2 id="ed-heading">Edit item</h2>
+        <h2 id="ed-heading">Edit</h2>
         <button type="button" id="ed-close" class="dlg-close" title="Close">✕</button>
       </header>
       <div class="form-grid">
@@ -147,14 +202,15 @@
         <label>Swimlane<input name="swimlane" list="lane-list" /></label>
         <label>Sub-swimlane<input name="subswimlane" list="sublane-list" /></label>
         <label>Owner<input name="owner" list="owner-list" /></label>
-        <label>Start<input name="start" type="date" /></label>
-        <label>End<input name="end" type="date" /></label>
+        <label>Type<select name="type"></select></label>
+        <label id="ed-start">Start<input name="start" type="date" /></label>
+        <label><span id="ed-end-label">End</span><input name="end" type="date" /></label>
         <label>RAG<select name="status"></select></label>
         <label>Shape<select name="shape"></select></label>
-        <label class="span2">Rolls up to<select name="parent"></select></label>
+        <label>Rolls up to<select name="parent"></select></label>
         <div class="span3 field"><span class="field-label">Depends on</span><div id="ed-deps" class="deps"></div></div>
       </div>
-      <p class="dlg-hint">Start before end makes a task (bar); start = end makes a milestone. Moving the end date shifts dependent items.</p>
+      <p class="dlg-hint">A <span data-term="milestone">milestone</span> has one date and is drawn as a shape; a <span data-term="task">task</span> has a start and end and is drawn as a bar. Change the type to switch between them. Moving the end date shifts anything that depends on it.</p>
       <p id="ed-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
@@ -178,7 +234,7 @@
       <div id="rp-item" class="rp-item"></div>
       <div class="rp-body">
       <div class="form-grid">
-        <label id="rp-item-pick" class="span3">Item<select name="item_id"></select></label>
+        <label id="rp-item-pick" class="span3"><span data-term="Item">Item</span><select name="item_id"></select></label>
         <div class="span2 field"><span class="field-label">Reporting cadence</span>
           <div class="seg">
             <label><input type="radio" name="cadence" value="Weekly" /><span>Weekly</span></label>
@@ -209,6 +265,61 @@
       </footer>
     </form>
   </dialog>
+
+  <!-- ============ PROGRAMME DIALOG ============ -->
+  <dialog id="program-dialog" class="edit-dialog program-dialog">
+    <form id="program-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge prog">Programme</span>
+        <h2 id="pg-heading">New programme</h2>
+        <button type="button" id="pg-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="pg-tabs" role="tablist">
+        <button type="button" role="tab" data-pg-tab="details" aria-selected="true">Details</button>
+        <button type="button" role="tab" data-pg-tab="rag" aria-selected="false">RAG options</button>
+      </div>
+      <div id="pg-panel-details" class="form-grid" role="tabpanel">
+        <label class="span2">Name<input name="name" placeholder="e.g. Platform Replacement" /></label>
+        <label>Code<input name="code" placeholder="e.g. PLT" maxlength="12" /></label>
+        <label class="span3">Description<textarea name="description" rows="2" placeholder="What the programme will deliver and why"></textarea></label>
+        <label>Programme manager<input name="manager" list="people-list" /></label>
+        <label>Sponsor<input name="sponsor" list="people-list" /></label>
+        <label>Programme RAG<select name="status"></select></label>
+        <label>Planned start<input name="start" type="date" /></label>
+        <label>Planned end<input name="end" type="date" /></label>
+        <p class="pg-date-note">Leave blank to use the dates of its items.</p>
+        <fieldset class="span3 pg-terms">
+          <legend>What does this programme call things?</legend>
+          <label>Everything<input name="item_term" list="term-item" placeholder="Item" /><small>generic name</small></label>
+          <label>A single date<input name="milestone_term" list="term-milestone" placeholder="Milestone" /><small>drawn as a shape</small></label>
+          <label>A date range<input name="task_term" list="term-task" placeholder="Task" /><small>drawn as a bar</small></label>
+          <p id="pg-term-preview" class="pg-term-preview"></p>
+        </fieldset>
+      </div>
+      <div id="pg-panel-rag" class="pg-rag" role="tabpanel" hidden>
+        <p class="pg-rag-intro">The RAG statuses this programme uses, in order. They set the colours on the Gantt chart and in its key, the RAG buttons, filters and report form.</p>
+        <table class="pg-rag-table">
+          <thead><tr><th></th><th>Colour</th><th>Name</th><th>Meaning <small>(shown in the key)</small></th><th title="Reports at this status must include a get to green plan">Get to green plan</th><th title="The status new items start at">Default</th><th></th></tr></thead>
+          <tbody id="pg-statuses"></tbody>
+        </table>
+        <div class="pg-rag-actions">
+          <button type="button" id="pg-add-status" class="btn btn-sm">+ Add status</button>
+          <button type="button" id="pg-reset-statuses" class="link-btn">Reset to the standard RAG</button>
+        </div>
+        <div class="pg-rag-preview"><span class="pg-rag-preview-label">Key preview</span><span id="pg-rag-preview"></span></div>
+      </div>
+      <p id="pg-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <button type="button" id="pg-delete" class="btn btn-danger">Delete programme</button>
+        <span class="spacer"></span>
+        <button type="button" id="pg-cancel" class="btn">Cancel</button>
+        <button type="submit" id="pg-submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+  <datalist id="term-item"><option value="Item"></option><option value="Work item"></option><option value="Activity"></option><option value="Deliverable"></option></datalist>
+  <datalist id="term-milestone"><option value="Milestone"></option><option value="Deliverable"></option><option value="Gate"></option><option value="Checkpoint"></option></datalist>
+  <datalist id="term-task"><option value="Task"></option><option value="Activity"></option><option value="Work package"></option><option value="Phase"></option></datalist>
 
   <script src="app.js"></script>
 </body>

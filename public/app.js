@@ -1,32 +1,98 @@
-/* Milestone Tracker frontend — CSV-backed editor + SVG gantt.
- * An item whose start is before its end is a task (drawn as a bar); otherwise it
- * is a milestone (drawn as a shape). Tasks can roll up to a milestone, and any
+/* Tracker frontend — CSV-backed editor + SVG gantt.
+ * Every item has a type: a milestone has a single date (start = end, drawn as a shape);
+ * a task runs from start to end inclusive (drawn as a bar). Moving either date of a
+ * milestone moves the milestone; changing the type is how an item gets a date range. Tasks can roll up to a milestone, and any
  * item can depend on others (finish-to-start) — date changes cascade downstream.
  *
  * `id` is the primary key: an integer, unique, immutable and never reused. All links
  * (parent, depends_on) reference ids. `ref` (e.g. 4.1) is the human-facing label.
  *
  * Periodic status reports live in a second record set (reports.csv); each report
- * points at the item it covers through `item_id`. */
+ * points at the item it covers through `item_id`.
+ *
+ * Items and reports belong to a programme (programs.csv) through `program_id`. Only the
+ * current programme's records are held in state.items / state.reports; the rest wait in
+ * state.otherItems / state.otherReports and are written back alongside them. Ids stay
+ * unique across every programme. Each programme can rename its items, milestones and tasks. */
 
-const STATUS = {
-  'Green':       { base: '#16a34a', light: '#4ade80', dark: '#166534', text: '#ffffff' },
-  'Amber':       { base: '#f59e0b', light: '#fcd34d', dark: '#92400e', text: '#422006' },
-  'Red':         { base: '#e60000', light: '#ff6b6b', dark: '#8a0000', text: '#ffffff' },
-  'Complete':    { base: '#1f6fb2', light: '#5b9bd5', dark: '#134a7a', text: '#ffffff' },
-  'Not Started': { base: '#a8a69c', light: '#cccabc', dark: '#5a5d5c', text: '#262626' },
+/* ---- RAG options ---- */
+// Each programme has its own list of RAG statuses (statuses.csv): a name, a colour, what it
+// means, whether a report at that status needs a get to green plan, and which one new items
+// start at. Programmes without their own list use DEFAULT_STATUSES. Items and reports store
+// the status name. STATUS / STATUSES / OFF_TRACK describe the programme being viewed.
+const DEFAULT_STATUSES = [
+  { name: 'Green', color: '#16a34a', description: 'on track', get_to_green: false, is_default: false },
+  { name: 'Amber', color: '#f59e0b', description: 'at risk', get_to_green: true, is_default: false },
+  { name: 'Red', color: '#e60000', description: 'off track', get_to_green: true, is_default: false },
+  { name: 'Complete', color: '#1f6fb2', description: 'complete', get_to_green: false, is_default: false },
+  { name: 'Not Started', color: '#a8a69c', description: 'not started', get_to_green: false, is_default: true },
+];
+// Hand-tuned gradients for the standard colours; any other colour gets a derived one.
+const PRESET_PALETTES = {
+  '#16a34a': { light: '#4ade80', dark: '#166534', text: '#ffffff' },
+  '#f59e0b': { light: '#fcd34d', dark: '#92400e', text: '#422006' },
+  '#e60000': { light: '#ff6b6b', dark: '#8a0000', text: '#ffffff' },
+  '#1f6fb2': { light: '#5b9bd5', dark: '#134a7a', text: '#ffffff' },
+  '#a8a69c': { light: '#cccabc', dark: '#5a5d5c', text: '#262626' },
 };
-const STATUSES = Object.keys(STATUS);
-const statusSlug = (s) => s.replace(/\s+/g, '');
+const STATUS_COLUMNS = ['program_id', 'position', 'name', 'color', 'description', 'get_to_green', 'is_default'];
+
+function mixHex(hex, target, t) {
+  const a = hex.match(/\w\w/g).map(x => parseInt(x, 16)), b = target.match(/\w\w/g).map(x => parseInt(x, 16));
+  return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
+function paletteOf(color) {
+  const base = /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '#a8a69c';
+  const preset = PRESET_PALETTES[base];
+  if (preset) return { base, ...preset };
+  const [r, g, b] = base.match(/\w\w/g).map(x => parseInt(x, 16));
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return { base, light: mixHex(base, '#ffffff', 0.4), dark: mixHex(base, '#000000', 0.45), text: lum > 0.6 ? '#262626' : '#ffffff' };
+}
+const UNKNOWN_PALETTE = paletteOf('#a8a69c');
+
+// A programme's status list, in order.
+function statusesFor(programId) {
+  const own = state.statuses.filter(s => s.program_id === programId).sort((a, b) => a.position - b.position);
+  return own.length ? own : DEFAULT_STATUSES;
+}
+// { list, names, map: name → palette, offTrack, def } for a programme.
+function ragOf(programId) {
+  const list = statusesFor(programId);
+  return {
+    list,
+    names: list.map(s => s.name),
+    map: Object.fromEntries(list.map(s => [s.name, paletteOf(s.color)])),
+    offTrack: list.filter(s => s.get_to_green).map(s => s.name),
+    def: (list.find(s => s.is_default) || list.at(-1)).name,
+  };
+}
+
+let STATUS = {}, STATUSES = [], OFF_TRACK = [], DEFAULT_STATUS = 'Not Started';
+function useStatuses(programId) {
+  const r = ragOf(programId);
+  STATUS = r.map; STATUSES = r.names; OFF_TRACK = r.offTrack; DEFAULT_STATUS = r.def;
+}
+const pal = (st, map = STATUS) => map[st] || UNKNOWN_PALETTE;
+const gradId = (st) => `grad-${STATUSES.includes(st) ? STATUSES.indexOf(st) : 'x'}`;
+// Options for a status select, keeping a value that isn't in the list so it can't be lost.
+const statusOptions = (selected, names = STATUSES) =>
+  optionList(selected && !names.includes(selected) ? [...names, selected] : names, selected);
 const SHAPES = ['diamond', 'circle', 'square', 'triangle'];
 const LANE_ACCENTS = ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'];
-const COLUMNS = ['id', 'ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on'];
+const COLUMNS = ['id', 'program_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on'];
 const MS_DAY = 86400000;
 
 const state = {
-  items: [],            // {id, ref, title, description, swimlane, subswimlane, owner, start, end, status, shape, parent, deps[]}
+  statuses: [],         // RAG options: {program_id, position, name, color, description, get_to_green, is_default}
+  programs: [],         // {id, name, code, description, sponsor, manager, start, end, status, item_term, milestone_term, task_term, created, updated}
+  lastProgramId: 0,
+  programId: '',        // the programme being viewed
+  otherItems: [],       // items of every other programme, kept so saves write the whole file
+  otherReports: [],
+  items: [],            // {id, program_id, ref, title, type, description, swimlane, subswimlane, owner, start, end, status, shape, parent, deps[]}
   lastId: 0,            // highest id ever issued this session, so ids are never reused
-  reports: [],          // {id, item_id, cadence, period_start, period_end, status, exec_summary, achievements, next_steps, get_to_green, author, created, updated}
+  reports: [],          // {id, program_id, item_id, cadence, period_start, period_end, status, exec_summary, achievements, next_steps, get_to_green, author, created, updated}
   lastReportId: 0,
   pxPerDay: 6,
   rowH: 40,
@@ -39,7 +105,34 @@ const state = {
   userZoomed: false, // once the user touches zoom, stop auto-fitting on resize
 };
 
-const isTask = (m) => !!(m.start && m.end && m.start < m.end);
+const TYPES = ['milestone', 'task'];
+const isTask = (m) => m.type === 'task';
+
+/* ---- programme terminology ---- */
+// Each programme names its things: the generic word (Item), the point-in-time kind (Milestone)
+// and the kind with a duration (Task). T.item etc. are lower case for use mid-sentence.
+const DEFAULT_TERMS = { item_term: 'Item', milestone_term: 'Milestone', task_term: 'Task' };
+function plural(w) {
+  if (/[^aeiou]y$/i.test(w)) return w.slice(0, -1) + 'ies';
+  if (/(s|x|z|ch|sh)$/i.test(w)) return w + 'es';
+  return w + 's';
+}
+function makeTerms(p) {
+  const t = {};
+  for (const [key, word] of [['Item', 'item_term'], ['Milestone', 'milestone_term'], ['Task', 'task_term']]) {
+    const v = (p?.[word] || '').trim() || DEFAULT_TERMS[word];
+    t[key] = v;
+    t[key + 's'] = plural(v);
+    t[key.toLowerCase()] = v.toLowerCase();
+    t[key.toLowerCase() + 's'] = plural(v).toLowerCase();
+  }
+  return t;
+}
+let T = makeTerms();
+const typeName = (m) => (isTask(m) ? T.Task : T.Milestone);
+const typeOptions = (selected) => TYPES.map(t => `<option value="${t}" ${t === selected ? 'selected' : ''}>${escAttr(t === 'task' ? T.Task : T.Milestone)}</option>`).join('');
+const withArticle = (w) => `${/^[aeiou]/i.test(w) ? 'an' : 'a'} ${w}`;
+const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const itemLabel = (m) => m.ref || `#${m.id}`;
 const fullLabel = (m) => (m.ref ? `${m.ref} ${m.title}` : m.title);
 const cmpRef = (a, b) => (!a.ref) - (!b.ref) || a.ref.localeCompare(b.ref, undefined, { numeric: true });
@@ -80,7 +173,7 @@ function csvEscape(v) {
 function toCSV(items) {
   const lines = [COLUMNS.join(',')];
   for (const m of items) {
-    lines.push([m.id, m.ref, m.title, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
+    lines.push([m.id, m.program_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
       m.status, m.shape, m.parent, m.deps.join(';')].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
@@ -89,8 +182,10 @@ function toCSV(items) {
 // Header names are matched loosely; legacy columns (name, date, rag) still load.
 const HEADER_ALIASES = {
   id: ['id'],
+  program_id: ['programid', 'programmeid', 'program', 'programme'],
   ref: ['ref', 'reference'],
   title: ['title', 'name'],
+  type: ['type', 'kind', 'itemtype'],
   description: ['description', 'desc'],
   swimlane: ['swimlane', 'lane'],
   subswimlane: ['subswimlane', 'sublane'],
@@ -115,8 +210,14 @@ function rowsToItems(rows) {
     if (!start) start = end;
     if (!end) end = start;
     if (end < start) end = start;
+    // Files without a type column: a date range is a task, a single date a milestone.
+    const t = get(r, 'type').toLowerCase();
+    const type = t.startsWith('t') ? 'task' : t.startsWith('m') ? 'milestone' : start < end ? 'task' : 'milestone';
+    if (type === 'milestone') start = end;
     return {
+      type,
       id: get(r, 'id'),
+      program_id: get(r, 'program_id'),
       ref: get(r, 'ref'),
       title: get(r, 'title'),
       description: get(r, 'description'),
@@ -124,7 +225,7 @@ function rowsToItems(rows) {
       subswimlane: get(r, 'subswimlane'),
       owner: get(r, 'owner'),
       start, end,
-      status: normaliseStatus(get(r, 'status')),
+      status: get(r, 'status'), // normalised once the programme is known
       shape: normaliseShape(get(r, 'shape')),
       parent: get(r, 'parent'),
       deps: get(r, 'deps').split(/[;|\s]+/).filter(Boolean),
@@ -139,25 +240,54 @@ function rowsToItems(rows) {
     seen.add(m.id);
   }
   state.lastId = last;
+  // Items from before programmes existed (or pointing at a missing one) join the first programme.
+  const programIds = new Set(state.programs.map(p => p.id));
   for (const m of items) {
-    m.deps = [...new Set(m.deps)].filter(d => seen.has(d) && d !== m.id);
-    if (!seen.has(m.parent) || m.parent === m.id) m.parent = '';
+    if (!programIds.has(m.program_id)) m.program_id = state.programs[0].id;
+    m.status = normaliseStatus(m.status, m.program_id);
+  }
+  // Links only work within a programme.
+  const progOf = new Map(items.map(m => [m.id, m.program_id]));
+  for (const m of items) {
+    m.deps = [...new Set(m.deps)].filter(d => progOf.get(d) === m.program_id && d !== m.id);
+    if (progOf.get(m.parent) !== m.program_id || m.parent === m.id) m.parent = '';
   }
   return items;
 }
 
 function nextId() {
-  state.lastId = Math.max(state.lastId, ...state.items.map(m => +m.id || 0)) + 1;
+  state.lastId = Math.max(state.lastId, ...allItems().map(m => +m.id || 0)) + 1;
   return String(state.lastId);
 }
 
-function normaliseStatus(v) {
-  const s = (v ?? '').trim().toLowerCase();
-  if (s.startsWith('green') || s === 'g') return 'Green';
-  if (s.startsWith('r')) return 'Red';
-  if (s.startsWith('a') || s.startsWith('y')) return 'Amber';
-  if (s.startsWith('b') || s.startsWith('c') || s.startsWith('done')) return 'Complete';
-  return 'Not Started';
+// Match a stored status to the programme's list (ignoring case). Blank gets the default
+// status; the old shorthand (G, A, Y, R, B, done…) still maps onto the standard names.
+// Anything else is kept as written and shown in grey.
+function normaliseStatus(v, programId) {
+  const r = ragOf(programId);
+  const raw = (v ?? '').trim(), s = raw.toLowerCase();
+  if (!s) return r.def;
+  const exact = r.names.find(n => n.toLowerCase() === s);
+  if (exact) return exact;
+  const legacy = s.startsWith('green') || s === 'g' ? 'Green' : s.startsWith('r') ? 'Red'
+    : s.startsWith('a') || s.startsWith('y') ? 'Amber' : s.startsWith('b') || s.startsWith('c') || s.startsWith('done') ? 'Complete'
+    : s.startsWith('not') ? 'Not Started' : '';
+  return r.names.includes(legacy) ? legacy : raw;
+}
+
+function rowsToStatuses(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const yes = (v) => /^(y|yes|true|1)$/i.test(v);
+  return rows.slice(1).map(r => {
+    const o = {};
+    for (const k of STATUS_COLUMNS) o[k] = (r[header.indexOf(k)] ?? '').trim();
+    return { ...o, position: +o.position || 0, color: paletteOf(o.color).base, get_to_green: yes(o.get_to_green), is_default: yes(o.is_default) };
+  }).filter(s => s.program_id && s.name);
+}
+function statusesToCSV(statuses) {
+  return [STATUS_COLUMNS.join(','), ...statuses.map(s => STATUS_COLUMNS.map(k =>
+    csvEscape(typeof s[k] === 'boolean' ? (s[k] ? 'yes' : '') : s[k])).join(','))].join('\n') + '\n';
 }
 function normaliseShape(v) {
   const s = (v ?? '').trim().toLowerCase();
@@ -167,11 +297,53 @@ function normaliseShape(v) {
 /* ================= data load/save ================= */
 
 async function loadData() {
-  const [items, reports] = await Promise.all(['/api/milestones', '/api/reports'].map(u => fetch(u).then(r => r.text())));
-  state.items = rowsToItems(parseCSV(items));
-  state.reports = rowsToReports(parseCSV(reports));
+  const [programs, statuses, items, reports] = await Promise.all(['/api/programs', '/api/statuses', '/api/milestones', '/api/reports'].map(async (u) => {
+    const r = await fetch(u);
+    // e.g. a server started before programmes existed: stop rather than save items under the wrong programme
+    if (!r.ok) throw new Error(`${u} returned ${r.status} — restart the server (node server.js)`);
+    return r.text();
+  }));
+  state.programs = rowsToPrograms(parseCSV(programs));
+  state.statuses = rowsToStatuses(parseCSV(statuses));
+  for (const p of state.programs) p.status = normaliseStatus(p.status, p.id);
+  const created = !state.programs.length;
+  if (created) state.programs.push(newProgram({ name: 'My programme' }));
+  const allItems = rowsToItems(parseCSV(items));
+  const allReports = rowsToReports(parseCSV(reports), allItems);
+  if (created) await saveCSV('/api/programs', programsToCSV(state.programs));
+  state.items = allItems;
+  state.reports = allReports;
+  state.otherItems = [];
+  state.otherReports = [];
+  const want = state.programId || loadAppPrefs().programId;
+  selectProgram(state.programs.some(p => p.id === want) ? want : state.programs[0].id);
+}
+
+// Hold the chosen programme's items and reports in state.items / state.reports.
+function selectProgram(id) {
+  const items = [...state.otherItems, ...state.items];
+  const reports = [...state.otherReports, ...state.reports];
+  state.programId = id;
+  state.items = items.filter(m => m.program_id === id);
+  state.otherItems = items.filter(m => m.program_id !== id);
+  state.reports = reports.filter(r => r.program_id === id);
+  state.otherReports = reports.filter(r => r.program_id !== id);
+  T = makeTerms(currentProgram());
+  useStatuses(id);
+  saveAppPrefs({ programId: id });
   autoRange();
 }
+
+const currentProgram = () => state.programs.find(p => p.id === state.programId);
+const programById = (id) => state.programs.find(p => p.id === id);
+
+// Every programme's records, grouped by programme (in programme order) for a stable file.
+function allRecords(current, others) {
+  const order = new Map(state.programs.map((p, i) => [p.id, i]));
+  return [...others, ...current].sort((a, b) => order.get(a.program_id) - order.get(b.program_id));
+}
+const allItems = () => allRecords(state.items, state.otherItems);
+const allReports = () => allRecords(state.reports, state.otherReports);
 
 // Every change is written back to its CSV. Saves are queued so they reach the server in order.
 let saveQueue = Promise.resolve();
@@ -180,10 +352,16 @@ let pendingMsg = '';
 
 function saveData(msg) {
   syncEditorToState();
-  return saveCSV('/api/milestones', toCSV(state.items), msg);
+  return saveCSV('/api/milestones', toCSV(allItems()), msg);
 }
 function saveReports(msg) {
-  return saveCSV('/api/reports', reportsToCSV(state.reports), msg);
+  return saveCSV('/api/reports', reportsToCSV(allReports()), msg);
+}
+function saveStatuses(msg) {
+  return saveCSV('/api/statuses', statusesToCSV(state.statuses), msg);
+}
+function savePrograms(msg) {
+  return saveCSV('/api/programs', programsToCSV(state.programs), msg);
 }
 
 function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if the queue is busy
@@ -365,11 +543,12 @@ function updateItem(m, changes) {
   if (m.parent === m.id) m.parent = '';
 
   const startChanged = m.start !== before.start, endChanged = m.end !== before.end;
-  // A milestone's end date moves the whole milestone; set an earlier start to make it a task.
-  if (!isTask(before) && endChanged && !startChanged && m.end) m.start = m.end;
   if (!m.start) m.start = m.end;
   if (!m.end) m.end = m.start;
-  if (m.end < m.start) {
+  if (!isTask(m)) {
+    // A milestone has one date: changing either moves it (a task turning into one keeps its end).
+    m.start = m.end = startChanged && !endChanged ? m.start : m.end;
+  } else if (m.end < m.start) {
     if (startChanged && !endChanged) m.end = m.start; else m.start = m.end;
   }
 
@@ -387,7 +566,7 @@ function movedMessage(m, moved) {
   const parts = [];
   if (moved.includes(m.id)) parts.push(`${itemLabel(m)} moved to ${fmtShort(m.start)} to respect its dependencies`);
   const others = moved.filter(id => id !== m.id).length;
-  if (others) parts.push(`${others} downstream item${others > 1 ? 's' : ''} rescheduled`);
+  if (others) parts.push(`${others} downstream ${others > 1 ? T.items : T.item} rescheduled`);
   return parts.join(' · ');
 }
 
@@ -538,7 +717,7 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
 }
 
 function drawShape(parent, shape, cx, cy, status, s) {
-  const c = STATUS[status] || STATUS['Not Started'];
+  const c = pal(status);
   let el;
   if (shape === 'diamond') {
     el = svgEl('path', { d: `M ${cx} ${cy - s - 2} L ${cx + s + 2} ${cy} L ${cx} ${cy + s + 2} L ${cx - s - 2} ${cy} Z` });
@@ -549,7 +728,7 @@ function drawShape(parent, shape, cx, cy, status, s) {
   } else {
     el = svgEl('rect', { x: cx - s, y: cy - s, width: s * 2, height: s * 2, rx: 2.5 });
   }
-  el.setAttribute('fill', `url(#grad-${statusSlug(status)})`);
+  el.setAttribute('fill', `url(#${gradId(status)})`);
   el.setAttribute('stroke', c.dark);
   el.setAttribute('stroke-width', '1.4');
   el.setAttribute('filter', 'url(#ms-shadow)');
@@ -586,7 +765,8 @@ function renderGantt() {
   const rm = rowMetrics();
 
   const items = state.items
-    .map(m => ({ ...m, _s: parseDate(m.start), _e: parseDate(m.end), _task: isTask(m) }))
+    // a task's end date is inclusive, so its bar runs to the end of that day
+    .map(m => ({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end), _task: isTask(m) }))
     .filter(m => m._s && m._e && m._e >= state.rangeStart && m._s <= state.rangeEnd);
 
   const totalDays = Math.max(1, (state.rangeEnd - state.rangeStart) / MS_DAY);
@@ -608,9 +788,9 @@ function renderGantt() {
 
   // defs: status gradients, drop shadow, arrowheads
   const defs = svgEl('defs', {});
-  for (const st of STATUSES) {
-    const c = STATUS[st];
-    const g = svgEl('linearGradient', { id: `grad-${statusSlug(st)}`, x1: 0, y1: 0, x2: 0, y2: 1 });
+  for (const st of [...STATUSES, null]) { // null: a status that isn't in the programme's list
+    const c = pal(st);
+    const g = svgEl('linearGradient', { id: gradId(st), x1: 0, y1: 0, x2: 0, y2: 1 });
     g.appendChild(svgEl('stop', { offset: '0%', 'stop-color': c.light }));
     g.appendChild(svgEl('stop', { offset: '100%', 'stop-color': c.base }));
     defs.appendChild(g);
@@ -762,14 +942,14 @@ function renderGantt() {
   // ---- items ----
   for (const m of items) {
     const { x1, x2, cy } = pos.get(m.id);
-    const c = STATUS[m.status];
+    const c = pal(m.status);
     const g = svgEl('g', { 'data-id': m.id, class: 'gantt-item' });
 
     if (m._task) {
       const bh = rm.barH;
       g.appendChild(svgEl('rect', {
         x: x1, y: cy - bh / 2, width: Math.max(2, x2 - x1), height: bh, rx: Math.min(5, bh / 3),
-        fill: `url(#grad-${statusSlug(m.status)})`, stroke: c.dark, 'stroke-width': 1.2, filter: 'url(#ms-shadow)',
+        fill: `url(#${gradId(m.status)})`, stroke: c.dark, 'stroke-width': 1.2, filter: 'url(#ms-shadow)',
       }));
       if (m._side === 'inside') {
         g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text));
@@ -799,7 +979,7 @@ function renderGantt() {
 
 function showTip(m, e) {
   const tip = document.getElementById('tip');
-  const c = STATUS[m.status];
+  const c = pal(m.status);
   const task = isTask(m);
   const days = daysBetween(m.start, m.end) + 1;
   const when = task
@@ -808,7 +988,7 @@ function showTip(m, e) {
   const where = [m.owner, [m.swimlane, m.subswimlane].filter(Boolean).join(' › ')].filter(Boolean).map(escAttr).join(' · ');
   tip.innerHTML = `
     <div class="tip-head">${m.ref ? `<span class="tip-ref">${escAttr(m.ref)}</span>` : ''}<span>${escAttr(m.title)}</span></div>
-    <div class="tip-row"><span class="pill" style="background:${c.base};color:${c.text}">${m.status}</span><span>${task ? 'Task' : 'Milestone'} · ${when}</span></div>
+    <div class="tip-row"><span class="pill" style="background:${c.base};color:${c.text}">${m.status}</span><span>${escAttr(typeName(m))} · ${when}</span></div>
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
     ${lastReportLine(m)}
@@ -835,7 +1015,7 @@ function hideTip() {
 let editing = null; // item being edited; null when adding a new one
 let edDeps = [];
 
-const EDIT_FIELDS = ['ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent'];
+const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent'];
 
 function openEditDialog(m) {
   hideTip();
@@ -845,8 +1025,10 @@ function openEditDialog(m) {
   const today = fmtISO(new Date());
   const v = m || {
     ref: '', title: '', description: '', swimlane: last?.swimlane || 'General', subswimlane: '', owner: '',
-    start: today, end: today, status: 'Not Started', shape: 'diamond', parent: '', deps: [],
+    type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
   };
+  f.type.innerHTML = typeOptions(v.type);
+  f.status.innerHTML = statusOptions(v.status);
   const parents = state.items.filter(p => !isTask(p) && p !== m).sort(cmpRef);
   if (v.parent && !parents.some(p => p.id === v.parent)) parents.push(state.items.find(p => p.id === v.parent));
   f.parent.innerHTML = '<option value="">— none —</option>' +
@@ -854,7 +1036,7 @@ function openEditDialog(m) {
   for (const k of EDIT_FIELDS) f[k].value = v[k];
   edDeps = [...v.deps];
 
-  document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : 'New item';
+  document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : `New ${T.item}`;
   document.getElementById('ed-delete').hidden = !m;
   document.getElementById('ed-report').hidden = !m;
   const n = m ? reportsFor(m.id).length : 0;
@@ -878,13 +1060,17 @@ function renderEdDeps() {
     `<select id="ed-adddep" class="add-dep"><option value="">+ add dependency</option>${opts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select>`;
 }
 
+// A milestone shows one date; a task shows start and end.
 function updateEdType() {
   const f = document.getElementById('edit-form').elements;
-  const task = f.start.value && f.end.value && f.start.value < f.end.value;
+  const task = f.type.value === 'task';
   const badge = document.getElementById('ed-type');
-  badge.textContent = task ? 'Task' : 'Milestone';
+  badge.textContent = task ? T.Task : T.Milestone;
   badge.className = 'type-badge ' + (task ? 'task' : 'ms');
-  f.shape.disabled = !!task;
+  f.shape.disabled = task;
+  document.getElementById('ed-start').classList.toggle('invisible', !task);
+  document.getElementById('ed-end-label').textContent = task ? 'End' : 'Date';
+  if (!task) f.start.value = f.end.value;
 }
 
 async function submitEditDialog(e) {
@@ -902,7 +1088,7 @@ async function submitEditDialog(e) {
 
   let m = editing;
   if (!m) {
-    m = { id: nextId(), ...changes, parent: '', deps: [] };
+    m = { id: nextId(), program_id: state.programId, ...changes, parent: '', deps: [] };
     state.items.push(m);
   }
   const res = updateItem(m, changes);
@@ -959,6 +1145,7 @@ function refreshDatalists() {
   setDatalist('lane-list', state.items.map(m => m.swimlane));
   setDatalist('sublane-list', state.items.map(m => m.subswimlane));
   setDatalist('owner-list', state.items.map(m => m.owner));
+  setDatalist('people-list', [...allItems().map(m => m.owner), ...state.programs.flatMap(p => [p.manager, p.sponsor])].sort());
 }
 
 /* ---- sortable, filterable tables with draggable column widths ---- */
@@ -999,7 +1186,7 @@ function renderTableHead(t) {
   tableEl(t).querySelector('thead').innerHTML = `
     <tr>${cols.map(c => c.fixed ? '<th></th>' : `
       <th data-sort="${c.key}" class="sortable" title="${escAttr(c.title || 'Click to sort')}">
-        <span>${c.label}</span><span class="sort-ind"></span>
+        <span>${escAttr(typeof c.label === 'function' ? c.label() : c.label)}</span><span class="sort-ind"></span>
         <span class="col-resizer" data-resize="${c.key}" title="Drag to resize · double-click to reset"></span>
       </th>`).join('')}</tr>
     <tr class="filter-row">${cols.map(filterCell).join('')}</tr>`;
@@ -1110,16 +1297,17 @@ function wireTable(t) {
 
 const opts = (values) => () => values.map(v => [v, v]);
 const GRID_COLS = [
-  { key: 'id', label: 'ID', w: 96, title: 'Primary key — assigned automatically, never changes', filter: opts(['Task', 'Milestone']) },
+  { key: 'id', label: 'ID', w: 64, title: 'Primary key — assigned automatically, never changes', filter: 'text' },
   { key: 'ref', label: 'Ref', w: 80, filter: 'text' },
   { key: 'title', label: 'Title', w: 200, filter: 'text' },
+  { key: 'type', label: 'Type', w: 130, title: 'A single date (shape) or a date range (bar)', filter: () => [['milestone', T.Milestone], ['task', T.Task]] },
   { key: 'description', label: 'Description', w: 220, filter: 'text' },
   { key: 'swimlane', label: 'Swimlane', w: 120, filter: 'text' },
   { key: 'subswimlane', label: 'Sub-swimlane', w: 120, filter: 'text' },
   { key: 'owner', label: 'Owner', w: 120, filter: 'text' },
   { key: 'start', label: 'Start', w: 135, filter: 'text' },
   { key: 'end', label: 'End', w: 135, filter: 'text' },
-  { key: 'status', label: 'RAG', w: 125, filter: opts(STATUSES) },
+  { key: 'status', label: 'RAG', w: 125, filter: () => STATUSES.map(v => [v, v]) },
   { key: 'shape', label: 'Shape', w: 100, filter: opts(SHAPES) },
   { key: 'parent', label: 'Rolls up to', w: 170, filter: 'text' },
   { key: 'deps', label: 'Depends on', w: 190, filter: 'text' },
@@ -1127,7 +1315,7 @@ const GRID_COLS = [
 ];
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
 const QUICK_COLS = {
-  id: {}, ref: {}, title: { w: 220 }, owner: {}, status: { w: 410, wkey: 'status.quick' }, start: {}, end: {},
+  id: {}, ref: {}, title: { w: 220 }, type: {}, owner: {}, status: { w: 410, wkey: 'status.quick' }, start: {}, end: {},
   actions: { w: 90, wkey: 'actions.quick' },
 };
 
@@ -1161,7 +1349,6 @@ function gridValue(m, key, byId) {
 
 function matchesFilter(m, key, f, byId) {
   if (!f) return true;
-  if (key === 'id') return f === (isTask(m) ? 'Task' : 'Milestone');
   const col = GRID_COLS.find(c => c.key === key);
   if (col.filter !== 'text') return m[key] === f;
   let text = String(gridValue(m, key, byId));
@@ -1201,36 +1388,38 @@ function renderEditor(highlight = []) {
     const dup = refCount.get(m.ref) > 1;
 
     const quick = grid.mode === 'quick';
-    const text = (k, extra = '') => `<span class="ro"${extra}>${escAttr(m[k])}</span>`;
+    // A milestone's two date cells are one date: editing either moves the milestone.
+    const dateTitle = task ? '' : ` title="${escAttr(`${T.Milestone} — changing this date moves it. Change the type to ${T.Task} to give it a date range.`)}"`;
     const cells = {
-      id: `<span class="type-badge ${task ? 'task' : 'ms'}" title="${task ? 'Task — has a duration, drawn as a bar' : 'Milestone — start equals end'}">${task ? 'Task' : 'MS'}</span><span class="id" title="Primary key">${m.id}</span>`,
-      ref: quick ? text('ref', ` class="ro ref"`) : `<input data-i="${i}" data-k="ref" value="${escAttr(m.ref)}" placeholder="e.g. 4.1" ${dup ? 'class="dup" title="Duplicate ref"' : ''} />`,
-      title: quick ? text('title', ` title="${escAttr(m.description)}"`) : `<input data-i="${i}" data-k="title" value="${escAttr(m.title)}" placeholder="Title" />`,
+      id: `<span class="id" title="Primary key">${m.id}</span>`,
+      ref: `<input data-i="${i}" data-k="ref" value="${escAttr(m.ref)}" placeholder="e.g. 4.1" class="ref-in${dup ? ' dup' : ''}" ${dup ? 'title="Duplicate ref"' : ''} />`,
+      title: `<input data-i="${i}" data-k="title" value="${escAttr(m.title)}" placeholder="Title" ${m.description ? `title="${escAttr(m.description)}"` : ''} />`,
+      type: `<select data-i="${i}" data-k="type" class="type-sel type-${m.type}">${typeOptions(m.type)}</select>`,
       description: `<input data-i="${i}" data-k="description" value="${escAttr(m.description)}" placeholder="Description" />`,
       swimlane: `<input data-i="${i}" data-k="swimlane" value="${escAttr(m.swimlane)}" list="lane-list" placeholder="Swimlane" />`,
       subswimlane: `<input data-i="${i}" data-k="subswimlane" value="${escAttr(m.subswimlane)}" list="sublane-list" placeholder="Sub-swimlane" />`,
-      owner: quick ? text('owner') : `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
-      start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}" ${quick && !task ? 'disabled title="Milestone — change the end date to move it, or use All fields to make it a task"' : ''} />`,
-      end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}" />`,
+      owner: `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
+      start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}"${dateTitle} ${task ? '' : 'class="ms-date"'} />`,
+      end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}"${dateTitle} ${task ? '' : 'class="ms-date"'} />`,
       status: quick ? `<div class="rag-pick sm">${ragButtons(m.status, `data-i="${i}"`)}</div>`
-        : `<select data-i="${i}" data-k="status" class="status-${statusSlug(m.status)}">${optionList(STATUSES, m.status)}</select>`,
-      shape: `<select data-i="${i}" data-k="shape" ${task ? 'disabled title="Tasks are drawn as bars"' : ''}>${optionList(SHAPES, m.shape)}</select>`,
+        : `<select data-i="${i}" data-k="status" class="status-sel" style="color:${pal(m.status).dark}">${statusOptions(m.status)}</select>`,
+      shape: `<select data-i="${i}" data-k="shape" ${task ? `disabled title="${escAttr(T.Tasks)} are drawn as bars"` : ''}>${optionList(SHAPES, m.shape)}</select>`,
       parent: `<select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select>`,
       deps: `<div class="deps">${chips}<select data-adddep="${i}" class="add-dep"><option value="">+ add</option>${depOpts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select></div>`,
-      actions: quick ? `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this item">Report…</button>`
+      actions: quick ? `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this ${escAttr(T.item)}">Report…</button>`
         : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
     };
     tr.innerHTML = cols.map(c => `<td${c.key === 'id' ? ' class="col-id"' : ''}>${cells[c.key]}</td>`).join('');
     body.appendChild(tr);
   }
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">No items match the filters.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">${state.items.length ? `No ${escAttr(T.items)} match the filters.` : `No ${escAttr(T.items)} in this programme yet. Use <b>+ Add ${escAttr(T.item)}</b> to create one.`}</td></tr>`;
   }
 
   const filtered = Object.keys(grid.filters).length > 0;
   document.getElementById('grid-count').textContent = filtered
     ? `Showing ${rows.length} of ${state.items.length}`
-    : `${state.items.length} items`;
+    : count(state.items.length, T.item, T.items);
   document.getElementById('btn-clear-filters').hidden = !filtered;
   document.querySelectorAll('[name="grid-mode"]').forEach(r => { r.checked = r.value === grid.mode; });
   refreshDatalists();
@@ -1271,11 +1460,16 @@ function onEditorChange(e) {
   if (!k) return;
   const m = state.items[+t.dataset.i];
 
-  if (k === 'status') t.className = 'status-' + statusSlug(t.value);
+  if (k === 'status') t.style.color = pal(t.value).dark;
   if (k === 'ref') { // refresh duplicate warnings and labels
     syncEditorToState();
     renderEditor();
     return scheduleSave();
+  }
+
+  if (k === 'type') {
+    syncEditorToState(t);
+    return applyTableChange(m, { type: t.value }, `${itemLabel(m)} is now ${withArticle(t.value === 'task' ? T.task : T.milestone)}`);
   }
 
   if (k === 'parent') {
@@ -1332,19 +1526,22 @@ function onEditorClick(e) {
 // or monthly; the period runs up to and including `period_end`.
 
 const CADENCES = ['Weekly', 'Fortnightly', 'Monthly'];
-const REPORT_COLUMNS = ['id', 'item_id', 'cadence', 'period_start', 'period_end', 'status',
+const REPORT_COLUMNS = ['id', 'program_id', 'item_id', 'cadence', 'period_start', 'period_end', 'status',
   'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author', 'created', 'updated'];
-const OFF_TRACK = ['Amber', 'Red']; // statuses that need a get-to-green plan
 
-function rowsToReports(rows) {
+// Reports saved before programmes existed take their item's programme.
+function rowsToReports(rows, items) {
   if (!rows.length) return [];
+  const progOf = new Map(items.map(m => [m.id, m.program_id]));
+  const programIds = new Set(state.programs.map(p => p.id));
   const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
   const reports = rows.slice(1).map(r => {
     const o = {};
     for (const k of REPORT_COLUMNS) o[k] = (r[header.indexOf(csvName(k))] ?? r[header.indexOf(k)] ?? '').trim();
     o.cadence = CADENCES.find(c => c.toLowerCase() === o.cadence.toLowerCase()) || 'Weekly';
-    o.status = normaliseStatus(o.status);
     if (o.period_end && !o.period_start) o.period_start = periodStart(o.period_end, o.cadence);
+    if (!programIds.has(o.program_id)) o.program_id = progOf.get(o.item_id) || state.programs[0].id;
+    o.status = normaliseStatus(o.status, o.program_id);
     return o;
   });
   const seen = new Set();
@@ -1365,7 +1562,7 @@ function reportsToCSV(reports) {
 }
 
 function nextReportId() {
-  state.lastReportId = Math.max(state.lastReportId, ...state.reports.map(r => +r.id || 0)) + 1;
+  state.lastReportId = Math.max(state.lastReportId, ...allReports().map(r => +r.id || 0)) + 1;
   return String(state.lastReportId);
 }
 
@@ -1397,7 +1594,7 @@ function fmtStamp(iso) {
   return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 const periodText = (r) => `${fmtShort(r.period_start)} – ${fmtNice(r.period_end)}`;
-const statusPill = (st) => `<span class="pill" style="background:${STATUS[st].base};color:${STATUS[st].text}">${st}</span>`;
+const statusPill = (st, map) => { const c = pal(st, map); return `<span class="pill" style="background:${c.base};color:${c.text}">${escAttr(st)}</span>`; };
 
 function lastReportLine(m) {
   const r = reportsFor(m.id)[0];
@@ -1449,7 +1646,7 @@ function dependentCount(id) {
 }
 
 const ragButtons = (current, attrs = '') => STATUSES.map(st => `
-  <button type="button" data-rag="${st}" ${attrs} aria-pressed="${st === current}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${st}</button>`).join('');
+  <button type="button" data-rag="${escAttr(st)}" ${attrs} aria-pressed="${st === current}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
 
 function renderQuick() {
   const m = itemById(quickId);
@@ -1459,19 +1656,22 @@ function renderQuick() {
   const deps = dependentCount(m.id);
   document.getElementById('quick').innerHTML = `
     <div class="q-head">
-      <span class="type-badge ${task ? 'task' : 'ms'}">${task ? 'Task' : 'Milestone'}</span>
+      <span class="type-badge ${task ? 'task' : 'ms'}">${escAttr(typeName(m))}</span>
       <span class="q-title">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>
       <button type="button" class="dlg-close" data-act="close" title="Close">✕</button>
     </div>
     <div class="q-label">RAG</div>
     <div class="rag-pick">${ragButtons(m.status)}</div>
+    <div class="q-label q-gap">Type</div>
+    <div class="q-type" role="group" aria-label="Type">${TYPES.map(t => `
+      <button type="button" data-type="${t}" aria-pressed="${t === m.type}" title="${t === 'task' ? 'A date range, drawn as a bar' : 'A single date, drawn as a shape'}">${escAttr(t === 'task' ? T.Task : T.Milestone)}</button>`).join('')}</div>
     <form class="q-dates" novalidate>
       ${task
         ? `<label>Start<input type="date" name="start" value="${m.start}" /></label><label>End<input type="date" name="end" value="${m.end}" /></label>`
         : `<label>Date<input type="date" name="end" value="${m.end}" /></label>`}
       <button type="submit" class="btn btn-primary" disabled>Update dates</button>
     </form>
-    ${deps ? `<p class="q-note">${deps} dependent item${deps > 1 ? 's' : ''} will move by the same amount.</p>` : ''}
+    ${deps ? `<p class="q-note">${deps} dependent ${escAttr(deps > 1 ? T.items : T.item)} will move by the same amount.</p>` : ''}
     <p class="q-msg">${escAttr(quickMsg)}</p>
     <div class="q-foot">
       <button type="button" class="btn" data-act="report">Provide report…</button>
@@ -1498,6 +1698,16 @@ function onQuickClick(e) {
       renderQuick();
       document.querySelector('#quick [aria-pressed="true"]')?.focus();
     }
+    return;
+  }
+  const type = e.target.closest('[data-type]');
+  if (type) {
+    if (type.dataset.type === m.type) return;
+    const res = updateItem(m, { type: type.dataset.type });
+    quickMsg = isTask(m) ? `Now ${withArticle(T.task)} — set its start and end dates.` : `Now ${withArticle(T.milestone)} on ${fmtNice(m.end)}.`;
+    renderGantt();
+    renderQuick();
+    saveData([`${itemLabel(m)} is now ${withArticle(isTask(m) ? T.task : T.milestone)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
     return;
   }
   const act = e.target.closest('[data-act]')?.dataset.act;
@@ -1549,7 +1759,7 @@ function openReportDialog({ report = null, itemId = '' } = {}) {
   const f = document.getElementById('report-form').elements;
 
   document.getElementById('rp-item-pick').hidden = !!rpItemId;
-  f.item_id.innerHTML = '<option value="">— choose an item —</option>' +
+  f.item_id.innerHTML = `<option value="">— choose ${escAttr(withArticle(T.item))} —</option>` +
     [...state.items].sort(cmpRef).map(m => `<option value="${m.id}">${escAttr(fullLabel(m))}</option>`).join('');
   f.item_id.value = rpItemId;
 
@@ -1574,7 +1784,7 @@ function newReportValues(itemId) {
   const m = itemById(itemId);
   const cadence = reportsFor(itemId)[0]?.cadence || 'Weekly';
   return {
-    cadence, period_end: defaultPeriodEnd(cadence), status: m?.status || 'Not Started',
+    cadence, period_end: defaultPeriodEnd(cadence), status: m?.status || DEFAULT_STATUS,
     exec_summary: '', achievements: '', next_steps: '', get_to_green: '', author: m?.owner || '',
   };
 }
@@ -1594,8 +1804,8 @@ function refreshReportForm() {
   strip.hidden = !rpItemId;
   strip.innerHTML = m
     ? `${statusPill(m.status)}<span class="rp-item-title">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>
-       <span class="rp-item-meta">${isTask(m) ? 'Task' : 'Milestone'} · ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : `due ${fmtNice(m.end)}`}${m.owner ? ` · ${escAttr(m.owner)}` : ''}</span>`
-    : `<span class="rp-item-title">Deleted item #${escAttr(rpItemId)}</span>`;
+       <span class="rp-item-meta">${escAttr(typeName(m))} · ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : `due ${fmtNice(m.end)}`}${m.owner ? ` · ${escAttr(m.owner)}` : ''}</span>`
+    : `<span class="rp-item-title">Deleted ${escAttr(T.item)} #${escAttr(rpItemId)}</span>`;
 
   document.getElementById('rp-range').textContent = end && parseDate(end)
     ? `Covers ${fmtShort(periodStart(end, f.cadence.value))} – ${fmtNice(end)}` : '';
@@ -1615,7 +1825,7 @@ function refreshReportForm() {
 
   const clash = end && state.reports.find(r => r !== rpEditing && r.item_id === rpItemId && r.period_end === end);
   document.getElementById('rp-error').innerHTML = clash
-    ? `There’s already a report for this item for the period ending ${fmtNice(end)}. <button type="button" class="link-btn" data-open-report="${clash.id}">Open it</button>`
+    ? `There’s already a report for this ${escAttr(T.item)} for the period ending ${fmtNice(end)}. <button type="button" class="link-btn" data-open-report="${clash.id}">Open it</button>`
     : '';
 }
 
@@ -1705,8 +1915,9 @@ async function submitReport(e) {
   const v = {};
   for (const k of ['cadence', 'period_end', 'status', 'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author']) v[k] = f[k].value.trim();
 
-  if (!rpItemId) return (err.textContent = 'Choose the item this report is for.');
+  if (!rpItemId) return (err.textContent = `Choose the ${T.item} this report is for.`);
   if (!parseDate(v.period_end)) return (err.textContent = 'Enter the date the reporting period ends.');
+  if (!v.status) return (err.textContent = 'Choose the RAG for this period.');
   if (!v.exec_summary) return (err.textContent = 'Add an exec summary.');
   const offTrack = OFF_TRACK.includes(v.status);
   if (offTrack && !v.get_to_green) return (err.textContent = `A ${v.status} report needs a get to green plan.`);
@@ -1717,7 +1928,7 @@ async function submitReport(e) {
   const now = new Date().toISOString();
   const isNew = !rpEditing;
   if (rpEditing) Object.assign(rpEditing, v, { updated: now });
-  else state.reports.push({ id: nextReportId(), item_id: rpItemId, ...v, created: now, updated: now });
+  else state.reports.push({ id: nextReportId(), program_id: state.programId, item_id: rpItemId, ...v, created: now, updated: now });
 
   const m = itemById(rpItemId);
   const syncStatus = !document.getElementById('rp-sync').hidden && f.sync_status.checked;
@@ -1743,11 +1954,12 @@ async function deleteReport() {
 function rerenderCurrentView() {
   if (isShown('gantt')) renderGantt();
   if (isShown('reports')) renderReports();
+  if (isShown('programs')) renderPrograms();
 }
 
 /* ---- reports list ---- */
 
-const itemName = (id) => { const m = itemById(id); return m ? fullLabel(m) : `Deleted item #${id}`; };
+const itemName = (id) => { const m = itemById(id); return m ? fullLabel(m) : `Deleted ${T.item} #${id}`; };
 
 // The item filter lists everything that has reports (plus a filtered-on item without any), in ref order.
 function reportItemOptions() {
@@ -1761,9 +1973,9 @@ function reportItemOptions() {
 // `text` is what a text filter searches; `sort` is the value the column sorts by.
 const RPT_COLS = [
   { key: 'period_end', label: 'Period ending', w: 150, filter: 'text', text: r => `${r.period_end} ${fmtNice(r.period_end)} ${periodText(r)}` },
-  { key: 'item_id', label: 'Item', w: 230, filter: reportItemOptions, sort: r => itemById(r.item_id) || null },
+  { key: 'item_id', label: () => T.Item, w: 230, filter: reportItemOptions, sort: r => itemById(r.item_id) || null },
   { key: 'cadence', label: 'Cadence', w: 115, filter: opts(CADENCES), sort: r => CADENCES.indexOf(r.cadence) },
-  { key: 'status', label: 'RAG', w: 120, filter: opts(STATUSES) },
+  { key: 'status', label: 'RAG', w: 120, filter: () => STATUSES.map(v => [v, v]) },
   { key: 'exec_summary', label: 'Exec summary', w: 420, filter: 'text', text: r => `${r.exec_summary} ${r.get_to_green ? 'get to green' : ''}` },
   { key: 'author', label: 'Author', w: 130, filter: 'text' },
   { key: 'updated', label: 'Last updated', w: 150, filter: 'text', text: r => fmtStamp(r.updated) },
@@ -1822,7 +2034,7 @@ function renderReports() {
     const m = itemById(r.item_id);
     return `<tr data-rid="${r.id}" tabindex="0" title="Click to view or edit">
       <td class="rc-period"><b>${fmtNice(r.period_end)}</b><small>${periodText(r)}</small></td>
-      <td class="rc-item">${m ? `${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted item #${escAttr(r.item_id)}</i>`}</td>
+      <td class="rc-item">${m ? `${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted ${escAttr(T.item)} #${escAttr(r.item_id)}</i>`}</td>
       <td class="rc-cad">${r.cadence}</td>
       <td class="rc-status">${statusPill(r.status)}</td>
       <td class="rc-sum"><div>${escAttr(r.exec_summary)}</div>${r.get_to_green ? '<small class="gtg-flag">Has get to green plan</small>' : ''}</td>
@@ -1834,7 +2046,7 @@ function renderReports() {
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="${RPT_COLS.length}" class="grid-empty">${state.reports.length
       ? 'No reports match the filters.'
-      : 'No reports yet. Click an item on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.'}</td></tr>`;
+      : `No reports in this programme yet. Click ${escAttr(withArticle(T.item))} on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.`}</td></tr>`;
   }
   document.getElementById('rp-count').textContent = filtered
     ? `Showing ${rows.length} of ${state.reports.length}`
@@ -1842,9 +2054,10 @@ function renderReports() {
   document.getElementById('rpf-clear').hidden = !filtered;
 }
 
-function initReports() {
+// The report form's RAG choices follow the current programme's options.
+function renderReportRagChoices() {
   document.getElementById('rp-status').innerHTML = STATUSES.map(st => `
-    <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${st}" /><span>${st}</span></label>`).join('');
+    <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('');
 }
 
 function wireReports() {
@@ -1908,6 +2121,478 @@ function downloadReportsCSV() {
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
 
+/* ================= programmes ================= */
+// A programme groups a set of items and their reports. The Programmes screen lists them all
+// with a summary of each; the one being viewed drives the Gantt chart, Items and Reports.
+
+const PROGRAM_COLUMNS = ['id', 'name', 'code', 'description', 'sponsor', 'manager', 'start', 'end', 'status',
+  'item_term', 'milestone_term', 'task_term', 'created', 'updated'];
+const PROGRAM_FIELDS = PROGRAM_COLUMNS.slice(1, -2);
+
+function rowsToPrograms(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const programs = rows.slice(1).map(r => {
+    const o = {};
+    for (const k of PROGRAM_COLUMNS) o[k] = (r[header.indexOf(csvName(k))] ?? r[header.indexOf(k)] ?? '').trim();
+    if (!o.name) o.name = 'Untitled programme';
+    return o;
+  });
+  const seen = new Set();
+  let last = Math.max(0, ...programs.map(p => (/^\d+$/.test(p.id) ? +p.id : 0)));
+  for (const p of programs) {
+    if (!/^\d+$/.test(p.id) || seen.has(p.id)) p.id = String(++last);
+    seen.add(p.id);
+  }
+  state.lastProgramId = last;
+  return programs;
+}
+
+function programsToCSV(programs) {
+  return [PROGRAM_COLUMNS.map(csvName).join(','), ...programs.map(p => PROGRAM_COLUMNS.map(k => csvEscape(p[k])).join(','))].join('\n') + '\n';
+}
+
+function newProgram(values = {}) {
+  state.lastProgramId = Math.max(state.lastProgramId, ...state.programs.map(p => +p.id || 0)) + 1;
+  const now = new Date().toISOString();
+  const p = { id: String(state.lastProgramId), created: now, updated: now, status: 'Not Started', ...DEFAULT_TERMS };
+  for (const k of PROGRAM_FIELDS) p[k] ??= '';
+  return Object.assign(p, values);
+}
+
+// Which programme and view were open, and whether the sidebar is collapsed — per browser.
+const APP_PREFS = 'milestone-tracker.app';
+function loadAppPrefs() {
+  try { return JSON.parse(localStorage.getItem(APP_PREFS) || '{}'); } catch { return {}; }
+}
+function saveAppPrefs(changes) {
+  try { localStorage.setItem(APP_PREFS, JSON.stringify({ ...loadAppPrefs(), ...changes })); } catch { /* ignore */ }
+}
+
+async function switchProgram(id, view) {
+  if (id !== state.programId) {
+    hideQuick();
+    syncEditorToState(); // table edits belong to the programme being left
+    document.getElementById('editor-body').innerHTML = '';
+    await flushSave();
+    selectProgram(id);
+    clearTableFilters(grid);
+    clearReportFilters();
+    state.userZoomed = false;
+    applyProgramChrome();
+  }
+  switchView(view || (currentView() === 'programs' ? 'gantt' : currentView()));
+}
+
+// Sidebar, headings and every label that uses the programme's own terms.
+function applyProgramChrome() {
+  const p = currentProgram();
+  document.querySelectorAll('[data-term]').forEach(el => { el.textContent = T[el.dataset.term]; });
+  document.getElementById('nav-editor').title = T.Items;
+  document.getElementById('program-select').innerHTML = state.programs
+    .map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${escAttr(x.name)}</option>`).join('');
+  document.getElementById('program-dot').style.background = pal(p.status).base;
+  document.getElementById('program-dot').title = `Programme RAG: ${p.status}`;
+  renderTableHead(grid);
+  renderTableHead(rptTable);
+  renderReportRagChoices();
+  renderRagLegend();
+  updatePageHead();
+}
+
+// The Gantt key lists the programme's own RAG options.
+function renderRagLegend() {
+  const list = statusesFor(state.programId);
+  document.getElementById('legend-rag').innerHTML = list.map(s => `
+    <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
+}
+
+const VIEW_TITLES = { programs: () => 'Programmes', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports' };
+function updatePageHead() {
+  const view = currentView();
+  const p = currentProgram();
+  const inProgram = view !== 'programs';
+  document.getElementById('page-title').textContent = VIEW_TITLES[view]();
+  const crumb = document.getElementById('page-program');
+  crumb.hidden = !inProgram;
+  crumb.innerHTML = inProgram ? `${p.code ? `<b>${escAttr(p.code)}</b> ` : ''}${escAttr(p.name)}` : '';
+  document.title = inProgram ? `${VIEW_TITLES[view]()} · ${p.name} — Tracker` : 'Programmes — Tracker';
+}
+
+function programStats(p) {
+  const items = allItems().filter(m => m.program_id === p.id);
+  const reports = allReports().filter(r => r.program_id === p.id);
+  const rag = {};
+  for (const m of items) rag[m.status] = (rag[m.status] || 0) + 1;
+  const dates = items.flatMap(m => [m.start, m.end]).filter(Boolean).sort();
+  return {
+    items, reports, rag,
+    tasks: items.filter(isTask).length,
+    first: dates[0], last: dates.at(-1),
+    lastReport: reports.map(r => r.period_end).sort().at(-1),
+  };
+}
+
+function renderPrograms() {
+  const cards = state.programs.map(p => {
+    const st = programStats(p);
+    const t = makeTerms(p);
+    const rg = ragOf(p.id);
+    const shown = [...rg.names, ...Object.keys(st.rag).filter(k => !rg.names.includes(k))]; // unlisted statuses last
+    const n = st.items.length;
+    const current = p.id === state.programId;
+    const start = p.start || st.first, end = p.end || st.last;
+    const span = start && end ? `${fmtShort(start)} – ${fmtNice(end)}` : start ? `From ${fmtNice(start)}` : '—';
+    const spanNote = !(p.start || p.end) && st.first ? ` <span class="muted">(from ${escAttr(t.items)})</span>` : '';
+    const bar = n
+      ? shown.filter(s => st.rag[s]).map(s => `<i style="flex:${st.rag[s]};background:${pal(s, rg.map).base}" title="${escAttr(s)}: ${st.rag[s]}"></i>`).join('')
+      : '<i class="empty"></i>';
+    const ragList = shown.filter(s => st.rag[s]).map(s => `<span><i class="dot" style="background:${pal(s, rg.map).base}"></i>${st.rag[s]} ${escAttr(s)}</span>`).join('');
+    const meta = [['Manager', p.manager], ['Sponsor', p.sponsor]].filter(([, v]) => v)
+      .map(([k, v]) => `<div><dt>${k}</dt><dd>${escAttr(v)}</dd></div>`).join('');
+    return `
+      <article class="prog-card${current ? ' current' : ''}" data-pid="${p.id}" style="--rag:${pal(p.status, rg.map).base}">
+        <div class="prog-top">
+          ${statusPill(p.status, rg.map)}
+          ${p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : ''}
+          ${current ? '<span class="prog-current">Open</span>' : ''}
+          <button type="button" class="btn btn-sm prog-edit" data-edit-program="${p.id}" title="Edit programme settings">Edit</button>
+        </div>
+        <h3>${escAttr(p.name)}</h3>
+        ${p.description ? `<p class="prog-desc">${escAttr(p.description)}</p>` : ''}
+        <dl class="prog-meta">
+          ${meta}
+          <div><dt>Timeline</dt><dd>${span}${spanNote}</dd></div>
+          <div><dt>Last report</dt><dd>${st.lastReport ? `period ending ${fmtNice(st.lastReport)}` : 'none yet'}</dd></div>
+        </dl>
+        <div class="prog-rag">
+          <div class="prog-ragbar">${bar}</div>
+          <div class="prog-raglist">${ragList || `<span class="muted">No ${escAttr(t.items)} yet</span>`}</div>
+        </div>
+        <footer class="prog-foot">
+          <span class="prog-counts">${count(n, t.item, t.items)} · ${count(n - st.tasks, t.milestone, t.milestones)} · ${count(st.tasks, t.task, t.tasks)} · ${count(st.reports.length, 'report', 'reports')}</span>
+          <button type="button" class="btn ${current ? '' : 'btn-primary'}" data-open-program="${p.id}">${current ? 'Continue' : 'Open'} →</button>
+        </footer>
+      </article>`;
+  }).join('');
+  document.getElementById('program-cards').innerHTML = cards + `
+    <button type="button" class="prog-card prog-new" data-new-program>
+      <span class="prog-new-plus">+</span><span>New programme</span>
+    </button>`;
+  const total = state.programs.length;
+  const offTrack = state.programs.filter(p => ragOf(p.id).offTrack.includes(p.status)).length;
+  document.getElementById('program-count').textContent =
+    `${count(total, 'programme', 'programmes')}${offTrack ? ` · ${offTrack} at risk or off track` : ''}`;
+}
+
+/* ---- programme dialog ---- */
+
+let pgEditing = null; // programme being edited; null for a new one
+
+function openProgramDialog(p) {
+  hideQuick();
+  pgEditing = p;
+  const f = document.getElementById('program-form').elements;
+  const v = p || { ...newProgramDefaults() };
+  // Default terms show as placeholders, so a new word can be typed straight in.
+  for (const k of PROGRAM_FIELDS) if (k !== 'status') f[k].value = (v[k] === DEFAULT_TERMS[k] ? '' : v[k]) ?? '';
+  loadPgStatuses(p);
+  showPgTab('details');
+  document.getElementById('pg-heading').textContent = p ? `Edit ${p.name}` : 'New programme';
+  document.getElementById('pg-submit').textContent = p ? 'Save' : 'Create programme';
+  const del = document.getElementById('pg-delete');
+  del.hidden = !p;
+  del.disabled = state.programs.length < 2;
+  del.title = del.disabled ? 'You need at least one programme' : '';
+  document.getElementById('pg-error').textContent = '';
+  refreshDatalists();
+  updateTermPreview();
+  document.getElementById('program-dialog').showModal();
+  f.name.focus();
+}
+
+/* ---- RAG options tab ---- */
+// pgStatuses is the list being edited: { orig (name when the dialog opened, null if new), name,
+// color, description, get_to_green, is_default, used (items + reports at it), deleted, replace }.
+// A status that's in use can only be deleted by choosing another to move its items and reports to.
+
+let pgStatuses = [];
+
+function statusUsage(programId) {
+  const used = {};
+  for (const x of [...allItems(), ...allReports()]) if (x.program_id === programId) used[x.status] = (used[x.status] || 0) + 1;
+  return used;
+}
+
+function loadPgStatuses(p) {
+  const used = p ? statusUsage(p.id) : {};
+  pgStatuses = statusesFor(p?.id).map(st => ({
+    orig: p ? st.name : null, name: st.name, color: st.color, description: st.description,
+    get_to_green: st.get_to_green, is_default: st.is_default, used: used[st.name] || 0, deleted: false, replace: null,
+  }));
+  // A status the programme is using but isn't in its list: offer to keep it by adding it.
+  pgStatusesSelected = pgStatuses.find(r => r.name === (p?.status ?? DEFAULT_STATUSES.find(d => d.is_default).name)) || null;
+  pgStrayStatus = p && !pgStatusesSelected ? p.status : '';
+  renderPgStatuses();
+}
+let pgStatusesSelected = null; // the row chosen as the programme's own RAG
+let pgStrayStatus = '';        // programme RAG that isn't in the list
+
+const activePgStatuses = () => pgStatuses.filter(r => !r.deleted);
+
+function renderPgStatuses() {
+  const active = activePgStatuses();
+  const usedText = (n) => (n ? `<small class="pg-used">used ${n} time${n > 1 ? 's' : ''}</small>` : '');
+  document.getElementById('pg-statuses').innerHTML = pgStatuses.map((r, i) => r.deleted ? `
+    <tr class="pg-deleted" data-idx="${i}">
+      <td></td>
+      <td><i class="pg-swatch" style="background:${r.color}"></i></td>
+      <td colspan="4"><s>${escAttr(r.orig)}</s> is used ${r.used} time${r.used > 1 ? 's' : ''} — move those items and reports to
+        <select data-replace="${i}">${active.map(a => `<option value="${pgStatuses.indexOf(a)}" ${a === r.replace ? 'selected' : ''}>${escAttr(a.name || '(unnamed)')}</option>`).join('')}</select></td>
+      <td><button type="button" class="link-btn" data-undo="${i}">Undo</button></td>
+    </tr>` : `
+    <tr data-idx="${i}">
+      <td class="pg-move">
+        <button type="button" data-move="-1" title="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" data-move="1" title="Move down" ${i === pgStatuses.length - 1 ? 'disabled' : ''}>↓</button>
+      </td>
+      <td><input type="color" data-f="color" value="${r.color}" title="Colour" /></td>
+      <td><input data-f="name" value="${escAttr(r.name)}" placeholder="e.g. Green" />${usedText(r.used)}</td>
+      <td><input data-f="description" value="${escAttr(r.description)}" placeholder="e.g. on track" /></td>
+      <td class="c"><input type="checkbox" data-f="get_to_green" ${r.get_to_green ? 'checked' : ''} /></td>
+      <td class="c"><input type="radio" name="pg-default" data-f="is_default" ${r.is_default ? 'checked' : ''} /></td>
+      <td><button type="button" class="btn-del" data-remove="${i}" title="Remove this status" ${active.length < 2 ? 'disabled' : ''}>✕</button></td>
+    </tr>`).join('');
+  updatePgStatusPreview();
+}
+
+// Key preview, plus the programme's own RAG choice, which uses the list being edited.
+function updatePgStatusPreview() {
+  const active = activePgStatuses();
+  document.getElementById('pg-rag-preview').innerHTML = active.map(r => `
+    <span class="legend-item"><i class="dot" style="background:${r.color}"></i> ${escAttr(r.name || '(unnamed)')}${r.description ? ` — ${escAttr(r.description)}` : ''}</span>`).join('');
+  const sel = document.getElementById('program-form').elements.status;
+  if (pgStatusesSelected?.deleted) pgStatusesSelected = pgStatusesSelected.replace;
+  if (pgStatusesSelected && !active.includes(pgStatusesSelected)) pgStatusesSelected = active.at(-1);
+  if (!pgStatusesSelected && !pgStrayStatus) pgStatusesSelected = active[0];
+  sel.innerHTML = active.map(r => `<option value="${pgStatuses.indexOf(r)}" ${r === pgStatusesSelected ? 'selected' : ''}>${escAttr(r.name || '(unnamed)')}</option>`).join('')
+    + (pgStrayStatus ? `<option value="stray" ${pgStatusesSelected ? '' : 'selected'}>${escAttr(pgStrayStatus)} (not in the list)</option>` : '');
+  document.querySelectorAll('#pg-statuses [data-replace]').forEach(el => {
+    const r = pgStatuses[+el.dataset.replace];
+    el.innerHTML = active.map(a => `<option value="${pgStatuses.indexOf(a)}" ${a === r.replace ? 'selected' : ''}>${escAttr(a.name || '(unnamed)')}</option>`).join('');
+  });
+}
+
+function onPgStatusesInput(e) {
+  const t = e.target;
+  if (t.dataset.replace != null) { pgStatuses[+t.dataset.replace].replace = pgStatuses[+t.value]; return; }
+  const row = t.closest('[data-idx]');
+  const f = t.dataset.f;
+  if (!row || !f) return;
+  const r = pgStatuses[+row.dataset.idx];
+  if (f === 'is_default') pgStatuses.forEach(x => { x.is_default = x === r; });
+  else r[f] = t.type === 'checkbox' ? t.checked : t.value;
+  updatePgStatusPreview();
+}
+
+function onPgStatusesClick(e) {
+  const move = e.target.closest('[data-move]');
+  if (move) {
+    const i = +move.closest('[data-idx]').dataset.idx, j = i + +move.dataset.move;
+    [pgStatuses[i], pgStatuses[j]] = [pgStatuses[j], pgStatuses[i]];
+    return renderPgStatuses();
+  }
+  const rm = e.target.closest('[data-remove]');
+  if (rm) {
+    const r = pgStatuses[+rm.dataset.remove];
+    if (r.used) {
+      r.deleted = true;
+      r.replace = activePgStatuses()[0];
+    } else pgStatuses = pgStatuses.filter(x => x !== r);
+    if (r.is_default && activePgStatuses().length) activePgStatuses().at(-1).is_default = true;
+    r.is_default = false;
+    return renderPgStatuses();
+  }
+  const undo = e.target.closest('[data-undo]');
+  if (undo) {
+    const r = pgStatuses[+undo.dataset.undo];
+    r.deleted = false;
+    for (const x of pgStatuses) if (x.replace === r && x.deleted) x.replace = activePgStatuses().find(a => a !== x) || r;
+    return renderPgStatuses();
+  }
+}
+
+function addPgStatus() {
+  const used = new Set(pgStatuses.map(r => r.color));
+  const color = ['#7c3aed', '#0d9488', '#db2777', '#65a30d', '#0891b2', '#ea580c'].find(c => !used.has(c)) || '#7a7870';
+  pgStatuses.push({ orig: null, name: '', color, description: '', get_to_green: false, is_default: false, used: 0, deleted: false, replace: null });
+  renderPgStatuses();
+  document.querySelector(`#pg-statuses [data-idx="${pgStatuses.length - 1}"] [data-f="name"]`)?.focus();
+}
+
+// Back to the standard five, keeping any that match by name; others in use need somewhere to go.
+function resetPgStatuses() {
+  const byName = new Map(pgStatuses.filter(r => r.orig != null).map(r => [r.orig.toLowerCase(), r]));
+  const fresh = DEFAULT_STATUSES.map(d => {
+    const old = byName.get(d.name.toLowerCase());
+    byName.delete(d.name.toLowerCase());
+    return { ...d, orig: old?.orig ?? null, used: old?.used || 0, deleted: false, replace: null };
+  });
+  const gone = [...byName.values()].filter(r => r.used).map(r => ({ ...r, deleted: true, is_default: false, replace: fresh.at(-1) }));
+  if (pgStatusesSelected) pgStatusesSelected = fresh.find(f => f.orig === pgStatusesSelected.orig) || fresh.at(-1);
+  pgStatuses = [...fresh, ...gone];
+  renderPgStatuses();
+}
+
+function showPgTab(tab) {
+  document.querySelectorAll('[data-pg-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.pgTab === tab));
+  document.getElementById('pg-panel-details').hidden = tab !== 'details';
+  document.getElementById('pg-panel-rag').hidden = tab !== 'rag';
+  document.getElementById('program-dialog').classList.toggle('wide', tab === 'rag');
+}
+
+// Check the edited list; returns an error message or null.
+function checkPgStatuses() {
+  const active = activePgStatuses();
+  for (const r of active) r.name = r.name.trim();
+  if (!active.length) return 'Keep at least one RAG status.';
+  if (active.some(r => !r.name)) return 'Every RAG status needs a name.';
+  const seen = new Set();
+  for (const r of active) {
+    if (seen.has(r.name.toLowerCase())) return `There are two RAG statuses called “${r.name}”.`;
+    seen.add(r.name.toLowerCase());
+  }
+  if (!active.some(r => r.is_default)) active.at(-1).is_default = true;
+  return null;
+}
+
+// Save the edited list for a programme and rename/move its items and reports to match.
+// Returns which files changed.
+function applyPgStatuses(programId) {
+  const active = activePgStatuses();
+  const rename = new Map();
+  for (const r of pgStatuses) if (r.orig != null) rename.set(r.orig, r.deleted ? r.replace.name : r.name);
+  let records = false;
+  if (isShown('editor')) syncEditorToState(); // don't let the grid write back old names
+  for (const list of [state.items, state.otherItems, state.reports, state.otherReports]) {
+    for (const x of list) {
+      if (x.program_id === programId && rename.has(x.status) && rename.get(x.status) !== x.status) {
+        x.status = rename.get(x.status);
+        records = true;
+      }
+    }
+  }
+  const next = active.map((r, i) => ({
+    program_id: programId, position: i + 1, name: r.name, color: r.color, description: r.description.trim(),
+    get_to_green: !!r.get_to_green, is_default: !!r.is_default,
+  }));
+  const key = (l) => JSON.stringify(l.map(s => [s.name, s.color, s.description, !!s.get_to_green, !!s.is_default]));
+  const listChanged = key(next) !== key(statusesFor(programId));
+  if (listChanged) {
+    state.statuses = state.statuses.filter(s => s.program_id !== programId);
+    if (key(next) !== key(DEFAULT_STATUSES)) state.statuses.push(...next); // the standard list needs no rows
+  }
+  return { records, listChanged };
+}
+
+function newProgramDefaults() {
+  return { name: '', code: '', description: '', sponsor: '', manager: '', start: '', end: '', status: 'Not Started', ...DEFAULT_TERMS };
+}
+
+function updateTermPreview() {
+  const f = document.getElementById('program-form').elements;
+  const t = makeTerms({ item_term: f.item_term.value, milestone_term: f.milestone_term.value, task_term: f.task_term.value });
+  document.getElementById('pg-term-preview').innerHTML =
+    `The app will say <b>+ Add ${escAttr(t.item)}</b>, <b>${escAttr(t.Items)}</b> in the menu, and “12 ${escAttr(t.items)} · 4 ${escAttr(t.milestones)} · 8 ${escAttr(t.tasks)}”.`;
+}
+
+async function submitProgramDialog(e) {
+  e.preventDefault();
+  const f = document.getElementById('program-form').elements;
+  const err = document.getElementById('pg-error');
+  const v = {};
+  for (const k of PROGRAM_FIELDS) v[k] = f[k].value.trim();
+  if (!v.name) return (err.textContent = 'Give the programme a name.');
+  const clash = state.programs.find(p => p !== pgEditing && p.name.toLowerCase() === v.name.toLowerCase());
+  if (clash) return (err.textContent = `There’s already a programme called “${clash.name}”.`);
+  if (v.start && v.end && v.end < v.start) return (err.textContent = 'The end date is before the start date.');
+  for (const k of Object.keys(DEFAULT_TERMS)) v[k] ||= DEFAULT_TERMS[k];
+  const ragErr = checkPgStatuses();
+  if (ragErr) { showPgTab('rag'); return (err.textContent = ragErr); }
+  v.status = f.status.value === 'stray' ? pgStrayStatus : pgStatusesSelected?.name ?? activePgStatuses()[0].name;
+
+  document.getElementById('program-dialog').close();
+  const p = pgEditing || newProgram();
+  if (!pgEditing) state.programs.push(p);
+  const res = applyPgStatuses(p.id);
+  Object.assign(p, v, { updated: new Date().toISOString() });
+  const saves = [savePrograms(pgEditing ? 'Programme saved' : 'Programme created')];
+  if (res.listChanged) saves.push(saveStatuses());
+  if (res.records) saves.push(saveData(), saveReports());
+  if (!pgEditing) {
+    await Promise.all(saves);
+    return switchProgram(p.id, 'editor'); // an empty programme starts on its items
+  }
+  if (p.id === state.programId) {
+    T = makeTerms(p);
+    useStatuses(p.id);
+  }
+  applyProgramChrome();
+  rerenderCurrentView();
+  if (isShown('editor')) renderEditor(); // new terms / RAG options in the grid
+  await Promise.all(saves);
+}
+
+async function deleteProgram() {
+  const p = pgEditing;
+  if (!p || state.programs.length < 2) return;
+  const st = programStats(p);
+  const t = makeTerms(p);
+  const lost = [st.items.length && count(st.items.length, t.item, t.items), st.reports.length && count(st.reports.length, 'report', 'reports')].filter(Boolean);
+  if (!confirm(`Delete the programme “${p.name}”?` + (lost.length ? `\n\nThis also permanently deletes its ${lost.join(' and ')}.` : ''))) return;
+  document.getElementById('program-dialog').close();
+  const leaving = p.id === state.programId;
+  if (leaving) await switchProgram(state.programs.find(x => x !== p).id, 'programs');
+  state.programs = state.programs.filter(x => x !== p);
+  state.otherItems = state.otherItems.filter(m => m.program_id !== p.id);
+  state.otherReports = state.otherReports.filter(r => r.program_id !== p.id);
+  const hadStatuses = state.statuses.some(s => s.program_id === p.id);
+  state.statuses = state.statuses.filter(s => s.program_id !== p.id);
+  applyProgramChrome();
+  renderPrograms();
+  await Promise.all([saveData(), saveReports(), savePrograms('Programme deleted'), hadStatuses && saveStatuses()]);
+}
+
+function wirePrograms() {
+  document.getElementById('program-select').onchange = (e) => switchProgram(e.target.value);
+  document.getElementById('btn-new-program').onclick = () => openProgramDialog(null);
+  document.getElementById('nav-settings').onclick = () => openProgramDialog(currentProgram());
+  document.getElementById('program-cards').addEventListener('click', (e) => {
+    const edit = e.target.closest('[data-edit-program]');
+    if (edit) return openProgramDialog(programById(edit.dataset.editProgram));
+    if (e.target.closest('[data-new-program]')) return openProgramDialog(null);
+    const card = e.target.closest('[data-pid]');
+    if (card) switchProgram(card.dataset.pid, 'gantt');
+  });
+
+  const dlg = document.getElementById('program-dialog');
+  const form = document.getElementById('program-form');
+  form.addEventListener('submit', submitProgramDialog);
+  form.addEventListener('input', (e) => { if (/_term$/.test(e.target.name)) updateTermPreview(); });
+  form.elements.status.addEventListener('change', (e) => { pgStatusesSelected = e.target.value === 'stray' ? null : pgStatuses[+e.target.value]; });
+  document.querySelector('.pg-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-pg-tab]'); if (b) showPgTab(b.dataset.pgTab); });
+  const rag = document.getElementById('pg-statuses');
+  rag.addEventListener('input', onPgStatusesInput);
+  rag.addEventListener('change', onPgStatusesInput);
+  rag.addEventListener('click', onPgStatusesClick);
+  document.getElementById('pg-add-status').onclick = addPgStatus;
+  document.getElementById('pg-reset-statuses').onclick = resetPgStatuses;
+  document.getElementById('pg-cancel').onclick = () => dlg.close();
+  document.getElementById('pg-close').onclick = () => dlg.close();
+  document.getElementById('pg-delete').onclick = deleteProgram;
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+}
+
 /* ================= PNG export ================= */
 
 function downloadPNG() {
@@ -1927,7 +2612,8 @@ function downloadPNG() {
     ctx.drawImage(img, 0, 0);
     URL.revokeObjectURL(url);
     const a = document.createElement('a');
-    a.download = 'milestone-gantt.png';
+    const p = currentProgram();
+    a.download = `${(p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'programme'}-gantt.png`;
     a.href = canvas.toDataURL('image/png');
     a.click();
   };
@@ -1936,8 +2622,9 @@ function downloadPNG() {
 
 /* ================= wiring ================= */
 
-const VIEWS = ['gantt', 'editor', 'reports'];
+const VIEWS = ['programs', 'gantt', 'editor', 'reports'];
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
+const currentView = () => VIEWS.find(isShown) || 'gantt';
 
 function switchView(view) {
   hideQuick();
@@ -1948,17 +2635,31 @@ function switchView(view) {
   }
   if (view === 'gantt') renderGantt();
   else if (view === 'editor') renderEditor();
-  else renderReports();
+  else if (view === 'reports') renderReports();
+  else renderPrograms();
   for (const v of VIEWS) {
     document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
-    document.getElementById(`tab-${v}`).classList.toggle('active', v === view);
+    document.getElementById(`nav-${v}`).classList.toggle('active', v === view);
+    document.getElementById(`nav-${v}`).setAttribute('aria-current', v === view ? 'page' : 'false');
   }
+  document.getElementById('app-main').scrollTop = 0;
+  updatePageHead();
+  saveAppPrefs({ view });
+}
+
+function setNavCollapsed(collapsed) {
+  document.body.classList.toggle('nav-collapsed', collapsed);
+  const btn = document.getElementById('nav-collapse');
+  btn.title = collapsed ? 'Expand menu' : 'Collapse menu';
+  btn.setAttribute('aria-expanded', !collapsed);
+  saveAppPrefs({ navCollapsed: collapsed });
 }
 
 function wireEvents() {
-  document.getElementById('tab-gantt').onclick = () => switchView('gantt');
-  document.getElementById('tab-editor').onclick = () => switchView('editor');
-  document.getElementById('tab-reports').onclick = () => switchView('reports');
+  for (const v of VIEWS) document.getElementById(`nav-${v}`).onclick = () => switchView(v);
+  document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
+  document.getElementById('app-main').addEventListener('scroll', () => { hideQuick(); hideTip(); });
+  wirePrograms();
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
@@ -2002,8 +2703,8 @@ function wireEvents() {
   const dlg = document.getElementById('edit-dialog');
   const form = document.getElementById('edit-form');
   form.addEventListener('submit', submitEditDialog);
-  form.elements.start.addEventListener('input', updateEdType);
-  form.elements.end.addEventListener('input', updateEdType);
+  form.elements.type.addEventListener('change', updateEdType);
+  form.elements.end.addEventListener('input', updateEdType); // keeps a milestone's hidden start in step
   document.getElementById('ed-cancel').onclick = () => dlg.close();
   document.getElementById('ed-close').onclick = () => dlg.close();
   document.getElementById('ed-delete').onclick = deleteFromDialog;
@@ -2024,9 +2725,9 @@ function wireEvents() {
     const last = state.items.at(-1);
     const today = fmtISO(new Date());
     state.items.push({
-      id: nextId(), ref: '', title: 'New item', description: '',
+      id: nextId(), program_id: state.programId, type: 'milestone', ref: '', title: `New ${T.item}`, description: '',
       swimlane: last?.swimlane || 'General', subswimlane: last?.subswimlane || '', owner: last?.owner || '',
-      start: today, end: today, status: 'Not Started', shape: 'diamond', parent: '', deps: [],
+      start: today, end: today, status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
     });
     clearTableFilters(grid); // so the new row is visible
     if (grid.mode === 'quick') setGridMode('full'); // a new item needs its details filled in
@@ -2034,7 +2735,7 @@ function wireEvents() {
     const input = document.querySelector(`#editor-body [data-i="${state.items.length - 1}"][data-k="title"]`);
     input?.scrollIntoView({ block: 'center' });
     input?.select();
-    scheduleSave('Item added');
+    scheduleSave(`${T.Item} added`);
   };
 
   wireTable(grid);
@@ -2047,6 +2748,7 @@ function wireEvents() {
   document.getElementById('btn-reload').onclick = async () => {
     await flushSave(); // don't lose a pending edit
     await loadData();
+    applyProgramChrome();
     renderEditor();
     flashStatus('Reloaded', true);
   };
@@ -2060,7 +2762,7 @@ function wireEvents() {
   window.addEventListener('pagehide', () => {
     if (saveTimer === null) return;
     syncEditorToState();
-    navigator.sendBeacon('/api/milestones', toCSV(state.items));
+    navigator.sendBeacon('/api/milestones', toCSV(allItems()));
   });
 
   // Auto-fit while the user hasn't chosen a zoom; re-render otherwise.
@@ -2073,13 +2775,18 @@ function wireEvents() {
 
 (async function init() {
   const f = document.getElementById('edit-form').elements;
-  f.status.innerHTML = optionList(STATUSES);
   f.shape.innerHTML = optionList(SHAPES);
-  initReports();
   document.getElementById('row-slider').value = state.rowH;
-  renderTableHead(grid);
-  renderTableHead(rptTable);
+  const prefs = loadAppPrefs();
+  setNavCollapsed(!!prefs.navCollapsed);
   wireEvents();
-  await loadData();
-  fitZoom(); // also renders; the ResizeObserver keeps it fitted as layout settles
+  try {
+    await loadData();
+  } catch (err) {
+    flashStatus(`Couldn’t load data: ${err.message}`, false, true);
+    return;
+  }
+  applyProgramChrome();
+  switchView(VIEWS.includes(prefs.view) ? prefs.view : 'gantt');
+  if (isShown('gantt')) fitZoom(); // the ResizeObserver keeps it fitted as layout settles
 })();
