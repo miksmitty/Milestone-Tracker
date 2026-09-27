@@ -7,7 +7,7 @@ const path = require('path');
 const PORT = process.env.PORT || 3000;
 const CSV_PATH = path.join(__dirname, 'milestones.csv');
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const CSV_HEADER = 'name,description,rag,date,shape,swimlane\n';
+const CSV_HEADER = 'id,ref,title,description,swimlane,subswimlane,owner,start,end,status,shape,parent,depends_on\n';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

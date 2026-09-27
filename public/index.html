@@ -17,7 +17,7 @@
     </div>
     <nav class="tabs">
       <button id="tab-gantt" class="tab active">Gantt Chart</button>
-      <button id="tab-editor" class="tab">Milestones</button>
+      <button id="tab-editor" class="tab">Items</button>
     </nav>
     <div class="header-right">
       <span id="save-status" class="save-status"></span>
@@ -42,11 +42,17 @@
         <button id="zoom-fit" class="btn btn-ghost" title="Fit chart to window">Fit</button>
       </div>
       <div class="toolbar-group">
+        <label class="toolbar-label" for="row-slider">Row height</label>
+        <input type="range" id="row-slider" min="24" max="60" step="2" value="40" title="Row height — below 40 the dates/owner line is hidden" />
+      </div>
+      <div class="toolbar-group">
         <label class="check"><input type="checkbox" id="toggle-months" checked /> Month grid</label>
         <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Quarter grid</label>
         <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
+        <label class="check"><input type="checkbox" id="toggle-links" checked /> Dependencies</label>
       </div>
       <div class="toolbar-group toolbar-right">
+        <button id="btn-gantt-add" class="btn" title="Add a milestone or task">+ Add</button>
         <button id="btn-png" class="btn btn-primary" title="Download the chart as a PNG image">Download PNG</button>
       </div>
     </div>
@@ -54,10 +60,16 @@
       <div id="gantt-container"></div>
     </div>
     <div class="legend">
-      <span class="legend-title">RAG</span>
+      <span class="legend-title">Status</span>
       <span class="legend-item"><i class="dot" style="background:#16a34a"></i> Green — on track</span>
       <span class="legend-item"><i class="dot" style="background:#f59e0b"></i> Amber — at risk</span>
       <span class="legend-item"><i class="dot" style="background:#dc2626"></i> Red — off track</span>
+      <span class="legend-item"><i class="dot" style="background:#2563eb"></i> Blue — complete</span>
+      <span class="legend-item"><i class="dot" style="background:#94a3b8"></i> Grey — not started</span>
+      <span class="legend-title legend-gap">Key</span>
+      <span class="legend-item"><i class="bar"></i> Task</span>
+      <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#64748b" stroke-width="1.5"/><path d="M18 1 L25 5 L18 9 Z" fill="#64748b"/></svg> Depends on</span>
+      <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#7c3aed"/></svg> Rolls up to</span>
     </div>
   </main>
 
@@ -65,32 +77,62 @@
   <main id="view-editor" class="view hidden">
     <div class="toolbar">
       <div class="toolbar-group">
-        <button id="btn-add" class="btn btn-primary">+ Add milestone</button>
-        <button id="btn-sort" class="btn btn-ghost" title="Sort rows by date">Sort by date</button>
+        <button id="btn-add" class="btn btn-primary">+ Add item</button>
+        <span id="grid-count" class="grid-count"></span>
+        <button id="btn-clear-filters" class="btn btn-ghost" hidden>Clear filters</button>
       </div>
       <div class="toolbar-group toolbar-right">
-        <button id="btn-reload" class="btn btn-ghost" title="Discard unsaved edits and reload from CSV">Reload</button>
-        <button id="btn-save" class="btn btn-primary">Save to CSV</button>
+        <span class="autosave-note">Changes save automatically</span>
+        <button id="btn-reload" class="btn btn-ghost" title="Reload from milestones.csv (e.g. after editing it in a spreadsheet)">Reload</button>
       </div>
     </div>
     <div class="table-wrap">
       <table id="editor-table">
-        <thead>
-          <tr>
-            <th style="width:16%">Name</th>
-            <th style="width:30%">Description</th>
-            <th style="width:9%">RAG</th>
-            <th style="width:12%">Date</th>
-            <th style="width:11%">Shape</th>
-            <th style="width:14%">Swimlane</th>
-            <th style="width:5%"></th>
-          </tr>
-        </thead>
+        <colgroup id="grid-cols"></colgroup>
+        <thead id="grid-head"></thead>
         <tbody id="editor-body"></tbody>
       </table>
     </div>
-    <p class="hint">Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.</p>
+    <p class="hint">Click a column header to sort, use the filter row to narrow the list, and drag a header edge to resize (double-click to reset). <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
+      Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.
+      An item whose start is before its end is a <b>task</b> (bar); set start = end for a <b>milestone</b> (changing a milestone's end date moves it; set an earlier start to turn it into a task).
+      Changing an end date shifts everything that depends on it by the same amount.</p>
   </main>
+
+  <!-- ============ HOVER CARD + EDIT DIALOG ============ -->
+  <div id="tip" class="tip" role="tooltip"></div>
+
+  <dialog id="edit-dialog" class="edit-dialog">
+    <form id="edit-form" novalidate>
+      <header class="dlg-head">
+        <span id="ed-type" class="type-badge ms">Milestone</span>
+        <h2 id="ed-heading">Edit item</h2>
+        <button type="button" id="ed-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="form-grid">
+        <label>Ref<input name="ref" placeholder="e.g. 4.1" /></label>
+        <label class="span2">Title<input name="title" placeholder="Title" /></label>
+        <label class="span3">Description<textarea name="description" rows="2" placeholder="Description"></textarea></label>
+        <label>Swimlane<input name="swimlane" list="lane-list" /></label>
+        <label>Sub-swimlane<input name="subswimlane" list="sublane-list" /></label>
+        <label>Owner<input name="owner" list="owner-list" /></label>
+        <label>Start<input name="start" type="date" /></label>
+        <label>End<input name="end" type="date" /></label>
+        <label>Status<select name="status"></select></label>
+        <label>Shape<select name="shape"></select></label>
+        <label class="span2">Rolls up to<select name="parent"></select></label>
+        <div class="span3 field"><span class="field-label">Depends on</span><div id="ed-deps" class="deps"></div></div>
+      </div>
+      <p class="dlg-hint">Start before end makes a task (bar); start = end makes a milestone. Moving the end date shifts dependent items.</p>
+      <p id="ed-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="ed-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
 
   <script src="app.js"></script>
 </body>
