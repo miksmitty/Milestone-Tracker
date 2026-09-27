@@ -1333,8 +1333,8 @@ function refreshDatalists() {
 // function returning [[value, label]] options (exact match). Sort order, widths and the view mode
 // are a per-browser convenience (storage may be unavailable) and never change the CSV order.
 
-function makeTable({ table, store, cols, onChange, mode }) {
-  const t = { table, store, cols, onChange, mode, sort: { key: null, dir: 1 }, filters: {}, widths: {} };
+function makeTable({ table, store, cols, onChange, mode, fill }) {
+  const t = { table, store, cols, onChange, mode, fill, sort: { key: null, dir: 1 }, filters: {}, widths: {} };
   try {
     const saved = JSON.parse(localStorage.getItem(store) || '{}');
     for (const k of ['sort', 'widths', 'mode']) if (saved[k]) t[k] = saved[k];
@@ -1382,14 +1382,17 @@ function refreshSelectFilters(t) {
   }
 }
 
+// A table with a `fill` column stretches to its container: that column takes the spare width,
+// and the set widths become the minimum before the table scrolls sideways.
 function applyTableWidths(t) {
   let total = 0;
   for (const c of t.cols()) {
     const w = colWidth(t, c);
-    tableEl(t).querySelector(`col[data-key="${c.key}"]`).style.width = w + 'px';
+    tableEl(t).querySelector(`col[data-key="${c.key}"]`).style.width = c.key === t.fill ? '' : w + 'px';
     total += w;
   }
-  tableEl(t).style.width = total + 'px';
+  tableEl(t).style.width = t.fill ? '100%' : total + 'px';
+  tableEl(t).style.minWidth = t.fill ? total + 'px' : '';
 }
 
 function updateSortIndicators(t) {
@@ -1446,12 +1449,21 @@ function wireTable(t) {
     const handle = e.target.closest('[data-resize]');
     if (!handle) return;
     e.preventDefault();
-    const c = t.cols().find(x => x.key === handle.dataset.resize);
+    const cols = t.cols();
+    let c = cols.find(x => x.key === handle.dataset.resize);
+    let dir = 1;
+    // The fill column takes the spare width, so while there is some, dragging its edge moves
+    // the border instead: the next column gives or takes the difference.
+    const wrap = tableEl(t).parentElement;
+    if (c.key === t.fill && wrap.clientWidth > parseFloat(tableEl(t).style.minWidth)) {
+      const next = cols[cols.indexOf(c) + 1];
+      if (next) { c = next; dir = -1; }
+    }
     const startX = e.clientX, startW = colWidth(t, c);
     handle.setPointerCapture(e.pointerId);
     document.body.classList.add('col-resizing');
     const move = (ev) => {
-      t.widths[c.wkey || c.key] = Math.max(48, Math.round(startW + ev.clientX - startX));
+      t.widths[c.wkey || c.key] = Math.max(48, Math.round(startW + dir * (ev.clientX - startX)));
       applyTableWidths(t);
     };
     const up = () => {
@@ -2190,7 +2202,7 @@ const RPT_COLS = [
 // With the preview open the list keeps to what identifies a report; the pane shows the rest.
 const PREVIEW_HIDDEN = ['cadence', 'exec_summary', 'updated'];
 const rptTable = makeTable({
-  table: 'reports-table', store: 'milestone-tracker.reports-grid', onChange: () => renderReports(),
+  table: 'reports-table', store: 'milestone-tracker.reports-grid', onChange: () => renderReports(), fill: 'item_id',
   cols: () => (rptPreview ? RPT_COLS.filter(c => !PREVIEW_HIDDEN.includes(c.key)) : RPT_COLS),
 });
 let rptSearch = ''; // free-text search across every report field, from the toolbar
@@ -2349,8 +2361,10 @@ function renderPane(focusKey) {
       ${rptTable.filters.item_id === r.item_id || n < 2 ? ''
         : `<button type="button" class="link-btn" data-pane="item">All ${n} reports on this ${escAttr(T.item)}</button>`}
     </div>`;
-  const stamp = `Submitted ${fmtStamp(r.created)}` + (r.updated !== r.created ? ` · last edited ${fmtStamp(r.updated)}` : '');
+  const edited = r.updated !== r.created ? `<small>Last edited ${fmtStamp(r.updated)}</small>` : '';
 
+  // The text runs down a main column; the report's details sit in a side column (above the
+  // text when the pane is narrow). Reading and editing share the layout, so nothing jumps.
   if (!paneEditing) {
     const sections = PANE_TEXTS.filter(s => !s.gtg || r.get_to_green).map(s => `
       <section class="pane-sec${s.gtg ? ' gtg' : ''}" data-field="${s.key}"><h3>${s.label}</h3>
@@ -2358,10 +2372,16 @@ function renderPane(focusKey) {
     el.innerHTML = `${bar}
       <div class="pane-doc" title="Click to edit">
         ${item}
-        <div class="pane-when" data-field="status">${statusPill(r.status)} <span>Period ending <b>${fmtNice(r.period_end)}</b></span></div>
-        <div class="pane-sub">${periodText(r)} · ${r.cadence}${r.author ? ` · <span data-field="author">${escAttr(r.author)}</span>` : ''}</div>
-        ${sections}
-        <p class="pane-meta">${stamp}</p>
+        <div class="pane-cols">
+          <div class="pane-main">${sections}</div>
+          <aside class="pane-side">
+            <div class="ps-row" data-field="status"><span class="ps-k">RAG this period</span>${statusPill(r.status)}</div>
+            <div class="ps-row" data-field="period_end"><span class="ps-k">Period ending</span><b>${fmtNice(r.period_end)}</b><small>Covers ${periodText(r)}</small></div>
+            <div class="ps-row" data-field="cadence"><span class="ps-k">Cadence</span>${r.cadence}</div>
+            <div class="ps-row" data-field="author"><span class="ps-k">Reported by</span>${r.author ? escAttr(r.author) : '<span class="pane-blank">—</span>'}</div>
+            <div class="ps-row ps-stamp"><span class="ps-k">Submitted</span>${fmtStamp(r.created)}${edited}</div>
+          </aside>
+        </div>
       </div>`;
     return;
   }
@@ -2369,19 +2389,22 @@ function renderPane(focusKey) {
   el.innerHTML = `<form id="pane-form" novalidate>${bar}
     <div class="pane-doc editing">
       ${item}
-      <div class="form-grid pane-grid">
-        <div class="span2 field"><span class="field-label">RAG this period</span><div class="rag">${STATUSES.map(st => `
-          <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('')}</div></div>
-        <label id="pane-sync" class="span2 rp-sync"><input type="checkbox" name="sync_status" checked /> <span></span></label>
-        <div class="span2 field"><span class="field-label">Reporting cadence</span><div class="seg">${CADENCES.map(c => `
-          <label><input type="radio" name="cadence" value="${c}" /><span>${c}</span></label>`).join('')}</div></div>
-        <label>Period ending<input name="period_end" type="date" /></label>
-        <label>Reported by<input name="author" list="owner-list" /></label>
-        <p class="span2 rp-range pane-range"></p>
-        ${PANE_TEXTS.map(s => `<label class="span2${s.gtg ? ' rp-gtg' : ''}" data-sec="${s.key}">${s.label}<textarea name="${s.key}" rows="2" placeholder="${escAttr(placeholderOf(s.key))}"></textarea></label>`).join('')}
+      <div class="pane-cols">
+        <div class="pane-main form-grid">
+          ${PANE_TEXTS.map(s => `<label class="${s.gtg ? 'rp-gtg' : ''}" data-sec="${s.key}">${s.label}<textarea name="${s.key}" rows="4" placeholder="${escAttr(placeholderOf(s.key))}"></textarea></label>`).join('')}
+          <p class="dlg-error pane-error"></p>
+        </div>
+        <aside class="pane-side form-grid">
+          <div class="field"><span class="field-label">RAG this period</span><div class="rag">${STATUSES.map(st => `
+            <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('')}</div></div>
+          <label id="pane-sync" class="rp-sync"><input type="checkbox" name="sync_status" checked /> <span></span></label>
+          <label>Period ending<input name="period_end" type="date" /><small class="pane-range"></small></label>
+          <div class="field"><span class="field-label">Cadence</span><div class="seg">${CADENCES.map(c => `
+            <label><input type="radio" name="cadence" value="${c}" /><span>${c}</span></label>`).join('')}</div></div>
+          <label>Reported by<input name="author" list="owner-list" /></label>
+          <div class="ps-row ps-stamp"><span class="ps-k">Submitted</span>${fmtStamp(r.created)}${edited}</div>
+        </aside>
       </div>
-      <p class="dlg-error pane-error"></p>
-      <p class="pane-meta">${stamp}</p>
     </div></form>`;
   const f = paneForm().elements;
   for (const k of PANE_FIELDS) f[k].value = r[k];
