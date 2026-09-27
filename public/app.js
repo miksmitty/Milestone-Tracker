@@ -4,7 +4,10 @@
  * item can depend on others (finish-to-start) — date changes cascade downstream.
  *
  * `id` is the primary key: an integer, unique, immutable and never reused. All links
- * (parent, depends_on) reference ids. `ref` (e.g. 4.1) is the human-facing label. */
+ * (parent, depends_on) reference ids. `ref` (e.g. 4.1) is the human-facing label.
+ *
+ * Periodic status reports live in a second record set (reports.csv); each report
+ * points at the item it covers through `item_id`. */
 
 const STATUS = {
   'Green':       { base: '#16a34a', light: '#4ade80', dark: '#166534', text: '#ffffff' },
@@ -23,6 +26,8 @@ const MS_DAY = 86400000;
 const state = {
   items: [],            // {id, ref, title, description, swimlane, subswimlane, owner, start, end, status, shape, parent, deps[]}
   lastId: 0,            // highest id ever issued this session, so ids are never reused
+  reports: [],          // {id, item_id, cadence, period_start, period_end, status, exec_summary, achievements, next_steps, get_to_green, author, created, updated}
+  lastReportId: 0,
   pxPerDay: 6,
   rowH: 40,
   rangeStart: null,     // Date
@@ -162,24 +167,30 @@ function normaliseShape(v) {
 /* ================= data load/save ================= */
 
 async function loadData() {
-  const res = await fetch('/api/milestones');
-  const text = await res.text();
-  state.items = rowsToItems(parseCSV(text));
+  const [items, reports] = await Promise.all(['/api/milestones', '/api/reports'].map(u => fetch(u).then(r => r.text())));
+  state.items = rowsToItems(parseCSV(items));
+  state.reports = rowsToReports(parseCSV(reports));
   autoRange();
 }
 
-// Every change is written back to the CSV. Saves are queued so they reach the server in order.
+// Every change is written back to its CSV. Saves are queued so they reach the server in order.
 let saveQueue = Promise.resolve();
 let saveTimer = null;
 let pendingMsg = '';
 
 function saveData(msg) {
   syncEditorToState();
-  const body = toCSV(state.items); // snapshot now, even if the queue is busy
+  return saveCSV('/api/milestones', toCSV(state.items), msg);
+}
+function saveReports(msg) {
+  return saveCSV('/api/reports', reportsToCSV(state.reports), msg);
+}
+
+function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if the queue is busy
   saveQueue = saveQueue.then(async () => {
     flashStatus('Saving…', null);
     try {
-      const res = await fetch('/api/milestones', { method: 'POST', body });
+      const res = await fetch(url, { method: 'POST', body });
       const out = await res.json();
       if (!out.ok) throw new Error(out.error || 'server error');
       flashStatus([msg, 'Saved ✓'].filter(Boolean).join(' · '), true);
@@ -800,7 +811,8 @@ function showTip(m, e) {
     <div class="tip-row"><span class="pill" style="background:${c.base};color:${c.text}">${m.status}</span><span>${task ? 'Task' : 'Milestone'} · ${when}</span></div>
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
-    <div class="tip-hint">Click to edit</div>`;
+    ${lastReportLine(m)}
+    <div class="tip-hint">Click to edit · right-click to report</div>`;
   tip.classList.add('show');
   moveTip(e);
 }
@@ -844,6 +856,7 @@ function openEditDialog(m) {
 
   document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : 'New item';
   document.getElementById('ed-delete').hidden = !m;
+  document.getElementById('ed-report').hidden = !m;
   document.getElementById('ed-error').textContent = '';
   refreshDatalists();
   renderEdDeps();
@@ -898,7 +911,7 @@ async function submitEditDialog(e) {
 }
 
 async function deleteFromDialog() {
-  if (!editing || !confirm(`Delete “${fullLabel(editing)}”? Any links to it will be removed.`)) return;
+  if (!editing || !confirm(deleteMessage(editing))) return;
   removeItem(editing.id);
   document.getElementById('edit-dialog').close();
   renderGantt();
@@ -1241,11 +1254,433 @@ function onEditorClick(e) {
   if (del) {
     syncEditorToState();
     const m = state.items[+del.dataset.del];
-    if (!confirm(`Delete “${fullLabel(m)}”? Any links to it will be removed.`)) return;
+    if (!confirm(deleteMessage(m))) return;
     removeItem(m.id);
     renderEditor();
     scheduleSave('Deleted');
   }
+}
+
+/* ================= reports ================= */
+// A report is a status update on one item for one period. Reports are weekly, fortnightly
+// or monthly; the period runs up to and including `period_end`.
+
+const CADENCES = ['Weekly', 'Fortnightly', 'Monthly'];
+const REPORT_COLUMNS = ['id', 'item_id', 'cadence', 'period_start', 'period_end', 'status',
+  'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author', 'created', 'updated'];
+const OFF_TRACK = ['Amber', 'Red']; // statuses that need a get-to-green plan
+
+function rowsToReports(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const reports = rows.slice(1).map(r => {
+    const o = {};
+    for (const k of REPORT_COLUMNS) o[k] = (r[header.indexOf(k)] ?? '').trim();
+    o.cadence = CADENCES.find(c => c.toLowerCase() === o.cadence.toLowerCase()) || 'Weekly';
+    o.status = normaliseStatus(o.status);
+    if (o.period_end && !o.period_start) o.period_start = periodStart(o.period_end, o.cadence);
+    return o;
+  });
+  const seen = new Set();
+  let last = Math.max(0, ...reports.map(r => (/^\d+$/.test(r.id) ? +r.id : 0)));
+  for (const r of reports) {
+    if (!/^\d+$/.test(r.id) || seen.has(r.id)) r.id = String(++last);
+    seen.add(r.id);
+  }
+  state.lastReportId = last;
+  return reports;
+}
+
+function reportsToCSV(reports) {
+  return [REPORT_COLUMNS.join(','), ...reports.map(r => REPORT_COLUMNS.map(k => csvEscape(r[k])).join(','))].join('\n') + '\n';
+}
+
+function nextReportId() {
+  state.lastReportId = Math.max(state.lastReportId, ...state.reports.map(r => +r.id || 0)) + 1;
+  return String(state.lastReportId);
+}
+
+const itemById = (id) => state.items.find(m => m.id === id);
+const byPeriodDesc = (a, b) => b.period_end.localeCompare(a.period_end) || b.updated.localeCompare(a.updated);
+const reportsFor = (itemId) => state.reports.filter(r => r.item_id === itemId).sort(byPeriodDesc);
+
+// First day of the period that ends on `end` (inclusive).
+function periodStart(end, cadence) {
+  if (cadence === 'Weekly') return addDays(end, -6);
+  if (cadence === 'Fortnightly') return addDays(end, -13);
+  const d = parseDate(end);
+  const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  const prevLen = new Date(d.getFullYear(), d.getMonth(), 0).getDate();
+  prev.setDate(Math.min(d.getDate(), prevLen) + 1); // day after the same date last month
+  return fmtISO(prev);
+}
+
+// Weekly/fortnightly periods end on the coming Friday; monthly ones at month end.
+function defaultPeriodEnd(cadence) {
+  const d = new Date();
+  if (cadence === 'Monthly') return fmtISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7));
+  return fmtISO(d);
+}
+
+function fmtStamp(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+const periodText = (r) => `${fmtShort(r.period_start)} – ${fmtNice(r.period_end)}`;
+const statusPill = (st) => `<span class="pill" style="background:${STATUS[st].base};color:${STATUS[st].text}">${st}</span>`;
+
+function lastReportLine(m) {
+  const r = reportsFor(m.id)[0];
+  return r ? `<div class="tip-row tip-muted">Last report: period ending ${fmtShort(r.period_end)} ${statusPill(r.status)}</div>`
+    : '<div class="tip-row tip-muted">No reports yet</div>';
+}
+
+function deleteMessage(m) {
+  const n = reportsFor(m.id).length;
+  return `Delete “${fullLabel(m)}”? Any links to it will be removed.` +
+    (n ? `\n\nIts ${n} report${n > 1 ? 's are' : ' is'} kept in reports.csv.` : '');
+}
+
+/* ---- right-click menu on the chart ---- */
+
+function showCtxMenu(m, e) {
+  e.preventDefault();
+  hideTip();
+  const menu = document.getElementById('ctx-menu');
+  const n = reportsFor(m.id).length;
+  menu.dataset.id = m.id;
+  menu.innerHTML = `
+    <div class="ctx-head">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</div>
+    <button role="menuitem" data-act="report">Provide report…</button>
+    <button role="menuitem" data-act="edit">Edit item…</button>
+    <button role="menuitem" data-act="history" ${n ? '' : 'disabled'}>View reports (${n})</button>`;
+  menu.hidden = false;
+  const x = Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 8);
+  const y = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.querySelector('button').focus();
+}
+function hideCtxMenu() {
+  const menu = document.getElementById('ctx-menu');
+  if (menu) menu.hidden = true;
+}
+function onCtxMenuClick(e) {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const m = itemById(document.getElementById('ctx-menu').dataset.id);
+  hideCtxMenu();
+  if (!m) return;
+  if (b.dataset.act === 'report') openReportDialog({ itemId: m.id });
+  else if (b.dataset.act === 'edit') openEditDialog(m);
+  else {
+    clearReportFilters();
+    rptFilter.item = m.id;
+    switchView('reports');
+  }
+}
+
+/* ---- report dialog ---- */
+
+let rpEditing = null;  // report being edited; null for a new one
+let rpItemId = '';
+let rpDateTouched = false; // stop re-defaulting the period once the user picks a date
+let rpPrevIdx = 0;         // which earlier report the side panel shows (0 = the one just before)
+
+function openReportDialog({ report = null, itemId = '' } = {}) {
+  hideTip();
+  hideCtxMenu();
+  rpEditing = report;
+  rpItemId = report ? report.item_id : itemId;
+  rpDateTouched = !!report;
+  rpPrevIdx = 0;
+  const f = document.getElementById('report-form').elements;
+
+  document.getElementById('rp-item-pick').hidden = !!rpItemId;
+  f.item_id.innerHTML = '<option value="">— choose an item —</option>' +
+    [...state.items].sort(cmpRef).map(m => `<option value="${m.id}">${escAttr(fullLabel(m))}</option>`).join('');
+  f.item_id.value = rpItemId;
+
+  const v = report || newReportValues(rpItemId);
+  for (const k of ['cadence', 'period_end', 'status', 'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author']) f[k].value = v[k];
+  f.sync_status.checked = true;
+
+  document.getElementById('rp-heading').textContent = report ? 'Edit report' : 'Provide report';
+  document.getElementById('rp-submit').textContent = report ? 'Save changes' : 'Submit report';
+  document.getElementById('rp-delete').hidden = !report;
+  document.getElementById('rp-meta').textContent = report
+    ? `Submitted ${fmtStamp(report.created)}` + (report.updated !== report.created ? ` · last edited ${fmtStamp(report.updated)}` : '')
+    : '';
+  refreshDatalists();
+  refreshReportForm();
+  document.getElementById('report-dialog').showModal();
+  (rpItemId ? f.exec_summary : f.item_id).focus();
+}
+
+// Defaults for a new report: carry on the item's last cadence, current status and owner.
+function newReportValues(itemId) {
+  const m = itemById(itemId);
+  const cadence = reportsFor(itemId)[0]?.cadence || 'Weekly';
+  return {
+    cadence, period_end: defaultPeriodEnd(cadence), status: m?.status || 'Not Started',
+    exec_summary: '', achievements: '', next_steps: '', get_to_green: '', author: m?.owner || '',
+  };
+}
+
+function refreshReportForm() {
+  const f = document.getElementById('report-form').elements;
+  const m = itemById(rpItemId);
+  const end = f.period_end.value;
+  const st = f.status.value;
+
+  const strip = document.getElementById('rp-item');
+  strip.hidden = !rpItemId;
+  strip.innerHTML = m
+    ? `${statusPill(m.status)}<span class="rp-item-title">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>
+       <span class="rp-item-meta">${isTask(m) ? 'Task' : 'Milestone'} · ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : `due ${fmtNice(m.end)}`}${m.owner ? ` · ${escAttr(m.owner)}` : ''}</span>`
+    : `<span class="rp-item-title">Deleted item #${escAttr(rpItemId)}</span>`;
+
+  document.getElementById('rp-range').textContent = end && parseDate(end)
+    ? `Covers ${fmtShort(periodStart(end, f.cadence.value))} – ${fmtNice(end)}` : '';
+
+  const offTrack = OFF_TRACK.includes(st);
+  document.getElementById('rp-gtg').hidden = !offTrack;
+  f.get_to_green.required = offTrack;
+
+  // Offer to update the item's status, but only from its most recent report.
+  const others = state.reports.filter(r => r.item_id === rpItemId && r !== rpEditing);
+  const latest = !others.some(r => r.period_end > end);
+  const sync = document.getElementById('rp-sync');
+  sync.hidden = !(m && latest && st !== m.status);
+  if (m) sync.querySelector('span').innerHTML = `Also change ${escAttr(itemLabel(m))}’s status on the chart from <b>${m.status}</b> to <b>${st}</b>`;
+
+  renderPrevReport(others.filter(r => r.period_end < end).sort(byPeriodDesc));
+
+  const clash = end && state.reports.find(r => r !== rpEditing && r.item_id === rpItemId && r.period_end === end);
+  document.getElementById('rp-error').innerHTML = clash
+    ? `There’s already a report for this item for the period ending ${fmtNice(end)}. <button type="button" class="link-btn" data-open-report="${clash.id}">Open it</button>`
+    : '';
+}
+
+function onReportFormInput(e) {
+  const f = document.getElementById('report-form').elements;
+  const t = e.target;
+  if (t.name === 'item_id') {
+    rpItemId = t.value;
+    const v = newReportValues(rpItemId);
+    for (const k of ['cadence', 'status', 'author']) f[k].value = v[k];
+    if (!rpDateTouched) f.period_end.value = v.period_end;
+  } else if (t.name === 'cadence') {
+    if (!rpDateTouched) f.period_end.value = defaultPeriodEnd(t.value);
+  } else if (t.name === 'period_end') {
+    rpDateTouched = true;
+  } else if (t.name !== 'status') return;
+  if (t.name !== 'status') rpPrevIdx = 0;
+  refreshReportForm();
+}
+
+// Side panel with an earlier report on the same item, so the new one can be written against
+// what was said last time. Sections can be copied into the matching field of the new report.
+const PREV_SECTIONS = [
+  { key: 'exec_summary', label: 'Exec summary', to: 'exec_summary', btn: 'Copy to exec summary' },
+  { key: 'achievements', label: 'Achievements' },
+  { key: 'next_steps', label: 'Next steps it committed to', to: 'achievements', btn: 'Copy to achievements' },
+  { key: 'get_to_green', label: 'Get to green plan', to: 'get_to_green', btn: 'Carry forward' },
+];
+
+function renderPrevReport(earlier) {
+  const el = document.getElementById('rp-prev');
+  rpPrevIdx = Math.min(rpPrevIdx, Math.max(0, earlier.length - 1));
+  const prev = earlier[rpPrevIdx];
+  el.hidden = !prev;
+  document.getElementById('report-dialog').classList.toggle('has-prev', !!prev);
+  if (!prev) return;
+  const gtgShown = !document.getElementById('rp-gtg').hidden;
+  const sections = PREV_SECTIONS.map(s => {
+    const text = prev[s.key];
+    const copy = s.to && text && (s.to !== 'get_to_green' || gtgShown)
+      ? `<button type="button" class="link-btn" data-copy="${s.key}" data-to="${s.to}">${s.btn}</button>` : '';
+    return `<section><header><span>${s.label}</span>${copy}</header>
+      ${text ? `<p>${escAttr(text)}</p>` : '<p class="rp-prev-empty">—</p>'}</section>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="rp-prev-head">
+      <span class="rp-prev-title">${rpPrevIdx ? 'Earlier report' : 'Previous report'}</span>
+      <span class="rp-prev-nav">
+        <button type="button" data-prev-step="1" ${rpPrevIdx < earlier.length - 1 ? '' : 'disabled'} title="Older report">‹</button>
+        <span>${rpPrevIdx + 1} of ${earlier.length}</span>
+        <button type="button" data-prev-step="-1" ${rpPrevIdx > 0 ? '' : 'disabled'} title="Newer report">›</button>
+      </span>
+    </div>
+    <div class="rp-prev-when">${statusPill(prev.status)} Period ending <b>${fmtNice(prev.period_end)}</b></div>
+    <div class="rp-prev-sub">${prev.cadence}${prev.author ? ` · ${escAttr(prev.author)}` : ''}</div>
+    ${sections}`;
+  el._earlier = earlier;
+}
+
+function onPrevPanelClick(e) {
+  const step = e.target.closest('[data-prev-step]');
+  if (step) {
+    rpPrevIdx += +step.dataset.prevStep;
+    return renderPrevReport(document.getElementById('rp-prev')._earlier);
+  }
+  const copy = e.target.closest('[data-copy]');
+  if (!copy) return;
+  const prev = document.getElementById('rp-prev')._earlier[rpPrevIdx];
+  const field = document.getElementById('report-form').elements[copy.dataset.to];
+  const text = prev[copy.dataset.copy];
+  if (!field.value.includes(text)) field.value = field.value.trim() ? `${field.value.trimEnd()}\n${text}` : text;
+  field.focus();
+  field.setSelectionRange(field.value.length, field.value.length);
+}
+
+async function submitReport(e) {
+  e.preventDefault();
+  const f = document.getElementById('report-form').elements;
+  const err = document.getElementById('rp-error');
+  const v = {};
+  for (const k of ['cadence', 'period_end', 'status', 'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author']) v[k] = f[k].value.trim();
+
+  if (!rpItemId) return (err.textContent = 'Choose the item this report is for.');
+  if (!parseDate(v.period_end)) return (err.textContent = 'Enter the date the reporting period ends.');
+  if (!v.exec_summary) return (err.textContent = 'Add an exec summary.');
+  const offTrack = OFF_TRACK.includes(v.status);
+  if (offTrack && !v.get_to_green) return (err.textContent = `A ${v.status} report needs a get to green plan.`);
+  if (!offTrack) v.get_to_green = '';
+  if (state.reports.some(r => r !== rpEditing && r.item_id === rpItemId && r.period_end === v.period_end)) return refreshReportForm();
+  v.period_start = periodStart(v.period_end, v.cadence);
+
+  const now = new Date().toISOString();
+  const isNew = !rpEditing;
+  if (rpEditing) Object.assign(rpEditing, v, { updated: now });
+  else state.reports.push({ id: nextReportId(), item_id: rpItemId, ...v, created: now, updated: now });
+
+  const m = itemById(rpItemId);
+  const syncStatus = !document.getElementById('rp-sync').hidden && f.sync_status.checked;
+  document.getElementById('report-dialog').close();
+  if (syncStatus) {
+    m.status = v.status;
+    saveData(`${itemLabel(m)} is now ${v.status}`);
+  }
+  rerenderCurrentView();
+  await saveReports(isNew ? 'Report submitted' : 'Report updated');
+}
+
+async function deleteReport() {
+  if (!rpEditing) return;
+  const m = itemById(rpEditing.item_id);
+  if (!confirm(`Delete the report${m ? ` on “${fullLabel(m)}”` : ''} for the period ending ${fmtNice(rpEditing.period_end)}?`)) return;
+  state.reports = state.reports.filter(r => r !== rpEditing);
+  document.getElementById('report-dialog').close();
+  rerenderCurrentView();
+  await saveReports('Report deleted');
+}
+
+function rerenderCurrentView() {
+  if (isShown('gantt')) renderGantt();
+  if (isShown('reports')) renderReports();
+}
+
+/* ---- reports list ---- */
+
+const rptFilter = { item: '', status: '', cadence: '', q: '' };
+
+function clearReportFilters() {
+  Object.assign(rptFilter, { item: '', status: '', cadence: '', q: '' });
+}
+
+function renderReports() {
+  const byId = new Map(state.items.map(m => [m.id, m]));
+  const itemName = (id) => (byId.has(id) ? fullLabel(byId.get(id)) : `Deleted item #${id}`);
+
+  // item filter lists everything that has reports, in ref order
+  const withReports = [...new Set(state.reports.map(r => r.item_id))]
+    .sort((a, b) => (byId.has(a) && byId.has(b) ? cmpRef(byId.get(a), byId.get(b)) : !byId.has(a) - !byId.has(b)));
+  if (rptFilter.item && !withReports.includes(rptFilter.item)) withReports.unshift(rptFilter.item);
+  const sel = document.getElementById('rpf-item');
+  sel.innerHTML = '<option value="">All items</option>' + withReports.map(id => `<option value="${id}">${escAttr(itemName(id))}</option>`).join('');
+  sel.value = rptFilter.item;
+  document.getElementById('rpf-status').value = rptFilter.status;
+  document.getElementById('rpf-cadence').value = rptFilter.cadence;
+  const qEl = document.getElementById('rpf-q');
+  if (document.activeElement !== qEl) qEl.value = rptFilter.q; // don't disturb the caret while typing
+
+  const q = rptFilter.q.trim().toLowerCase();
+  const rows = state.reports
+    .filter(r => (!rptFilter.item || r.item_id === rptFilter.item)
+      && (!rptFilter.status || r.status === rptFilter.status)
+      && (!rptFilter.cadence || r.cadence === rptFilter.cadence)
+      && (!q || [itemName(r.item_id), r.exec_summary, r.achievements, r.next_steps, r.get_to_green, r.author].join(' ').toLowerCase().includes(q)))
+    .sort((a, b) => b.period_end.localeCompare(a.period_end)
+      || (byId.has(a.item_id) && byId.has(b.item_id) ? cmpRef(byId.get(a.item_id), byId.get(b.item_id)) : 0));
+
+  const body = document.getElementById('reports-body');
+  body.innerHTML = rows.map(r => {
+    const m = byId.get(r.item_id);
+    return `<tr data-rid="${r.id}" tabindex="0" title="Click to view or edit">
+      <td class="rc-period"><b>${fmtNice(r.period_end)}</b><small>${periodText(r)}</small></td>
+      <td class="rc-item">${m ? `${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted item #${escAttr(r.item_id)}</i>`}</td>
+      <td class="rc-cad">${r.cadence}</td>
+      <td class="rc-status">${statusPill(r.status)}</td>
+      <td class="rc-sum"><div>${escAttr(r.exec_summary)}</div>${r.get_to_green ? '<small class="gtg-flag">Has get to green plan</small>' : ''}</td>
+      <td class="rc-author">${escAttr(r.author)}</td>
+      <td class="rc-upd">${fmtStamp(r.updated)}</td>
+    </tr>`;
+  }).join('');
+  const filtered = Object.values(rptFilter).some(v => v.trim());
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" class="grid-empty">${state.reports.length
+      ? 'No reports match the filters.'
+      : 'No reports yet. Right-click an item on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.'}</td></tr>`;
+  }
+  document.getElementById('rp-count').textContent = filtered
+    ? `Showing ${rows.length} of ${state.reports.length}`
+    : `${state.reports.length} report${state.reports.length === 1 ? '' : 's'}`;
+  document.getElementById('rpf-clear').hidden = !filtered;
+}
+
+function initReports() {
+  document.getElementById('rp-status').innerHTML = STATUSES.map(st => `
+    <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${st}" /><span>${st}</span></label>`).join('');
+  document.getElementById('rpf-status').innerHTML = '<option value="">All statuses</option>' + optionList(STATUSES);
+  document.getElementById('rpf-cadence').innerHTML = '<option value="">All cadences</option>' + optionList(CADENCES);
+}
+
+function wireReports() {
+  const menu = document.getElementById('ctx-menu');
+  menu.addEventListener('click', onCtxMenuClick);
+  document.addEventListener('mousedown', (e) => { if (!menu.hidden && !menu.contains(e.target)) hideCtxMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
+  document.addEventListener('scroll', hideCtxMenu, true);
+  window.addEventListener('resize', hideCtxMenu);
+
+  const dlg = document.getElementById('report-dialog');
+  const form = document.getElementById('report-form');
+  form.addEventListener('submit', submitReport);
+  form.addEventListener('change', onReportFormInput);
+  document.getElementById('rp-cancel').onclick = () => dlg.close();
+  document.getElementById('rp-close').onclick = () => dlg.close();
+  document.getElementById('rp-delete').onclick = deleteReport;
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+  document.getElementById('rp-prev').addEventListener('click', onPrevPanelClick);
+  document.getElementById('rp-error').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-open-report]');
+    if (b) openReportDialog({ report: state.reports.find(r => r.id === b.dataset.openReport) });
+  });
+
+  document.getElementById('btn-new-report').onclick = () => openReportDialog({ itemId: rptFilter.item });
+  const openRow = (e) => {
+    const tr = e.target.closest('[data-rid]');
+    if (tr) openReportDialog({ report: state.reports.find(r => r.id === tr.dataset.rid) });
+  };
+  const body = document.getElementById('reports-body');
+  body.addEventListener('click', openRow);
+  body.addEventListener('keydown', (e) => { if (e.key === 'Enter') openRow(e); });
+  for (const [id, key] of [['rpf-item', 'item'], ['rpf-status', 'status'], ['rpf-cadence', 'cadence'], ['rpf-q', 'q']]) {
+    document.getElementById(id).addEventListener('input', (e) => { rptFilter[key] = e.target.value; renderReports(); });
+  }
+  document.getElementById('rpf-clear').onclick = () => { clearReportFilters(); renderReports(); };
 }
 
 /* ================= PNG export ================= */
@@ -1276,25 +1711,29 @@ function downloadPNG() {
 
 /* ================= wiring ================= */
 
+const VIEWS = ['gantt', 'editor', 'reports'];
+const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
+
 function switchView(view) {
-  const gantt = view === 'gantt';
-  if (!gantt) {
-    renderEditor();
-  } else {
+  hideCtxMenu();
+  if (view !== 'editor') {
     syncEditorToState();
-    // Clear the hidden table so a later sync can't overwrite edits made from the chart.
+    // Clear the hidden table so a later sync can't overwrite edits made elsewhere.
     document.getElementById('editor-body').innerHTML = '';
-    renderGantt();
   }
-  document.getElementById('view-gantt').classList.toggle('hidden', !gantt);
-  document.getElementById('view-editor').classList.toggle('hidden', gantt);
-  document.getElementById('tab-gantt').classList.toggle('active', gantt);
-  document.getElementById('tab-editor').classList.toggle('active', !gantt);
+  if (view === 'gantt') renderGantt();
+  else if (view === 'editor') renderEditor();
+  else renderReports();
+  for (const v of VIEWS) {
+    document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
+    document.getElementById(`tab-${v}`).classList.toggle('active', v === view);
+  }
 }
 
 function wireEvents() {
   document.getElementById('tab-gantt').onclick = () => switchView('gantt');
   document.getElementById('tab-editor').onclick = () => switchView('editor');
+  document.getElementById('tab-reports').onclick = () => switchView('reports');
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
@@ -1333,6 +1772,7 @@ function wireEvents() {
   gc.addEventListener('mousemove', (e) => { if (document.getElementById('tip').classList.contains('show')) moveTip(e); });
   gc.addEventListener('mouseleave', hideTip);
   gc.addEventListener('click', (e) => { const m = itemAt(e); if (m) openEditDialog(m); });
+  gc.addEventListener('contextmenu', (e) => { const m = itemAt(e); if (m) showCtxMenu(m, e); });
 
   // edit dialog
   const dlg = document.getElementById('edit-dialog');
@@ -1343,6 +1783,7 @@ function wireEvents() {
   document.getElementById('ed-cancel').onclick = () => dlg.close();
   document.getElementById('ed-close').onclick = () => dlg.close();
   document.getElementById('ed-delete').onclick = deleteFromDialog;
+  document.getElementById('ed-report').onclick = () => { const m = editing; dlg.close(); openReportDialog({ itemId: m.id }); };
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   document.getElementById('ed-deps').addEventListener('click', (e) => {
     const rm = e.target.closest('[data-edrm]');
@@ -1391,6 +1832,8 @@ function wireEvents() {
   document.getElementById('editor-body').addEventListener('change', onEditorChange);
   document.getElementById('editor-body').addEventListener('click', onEditorClick);
 
+  wireReports();
+
   // Leaving the page with a save still pending: send it anyway.
   window.addEventListener('pagehide', () => {
     if (saveTimer === null) return;
@@ -1410,6 +1853,7 @@ function wireEvents() {
   const f = document.getElementById('edit-form').elements;
   f.status.innerHTML = optionList(STATUSES);
   f.shape.innerHTML = optionList(SHAPES);
+  initReports();
   document.getElementById('row-slider').value = state.rowH;
   loadGridPrefs();
   renderGridHead();

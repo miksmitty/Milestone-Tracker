@@ -18,6 +18,7 @@
     <nav class="tabs">
       <button id="tab-gantt" class="tab active">Gantt Chart</button>
       <button id="tab-editor" class="tab">Items</button>
+      <button id="tab-reports" class="tab">Reports</button>
     </nav>
     <div class="header-right">
       <span id="save-status" class="save-status"></span>
@@ -99,8 +100,36 @@
       Changing an end date shifts everything that depends on it by the same amount.</p>
   </main>
 
-  <!-- ============ HOVER CARD + EDIT DIALOG ============ -->
+  <!-- ============ REPORTS VIEW ============ -->
+  <main id="view-reports" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="btn-new-report" class="btn btn-primary">+ New report</button>
+        <span id="rp-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-group rp-filters">
+        <select id="rpf-item" title="Filter by item"></select>
+        <select id="rpf-status" title="Filter by status"></select>
+        <select id="rpf-cadence" title="Filter by cadence"></select>
+        <input id="rpf-q" type="search" placeholder="Search report text…" />
+        <button id="rpf-clear" class="btn btn-ghost" hidden>Clear filters</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="reports-table">
+        <thead>
+          <tr><th class="rc-period">Period ending</th><th class="rc-item">Item</th><th class="rc-cad">Cadence</th><th class="rc-status">Status</th><th>Exec summary</th><th class="rc-author">Author</th><th class="rc-upd">Last updated</th></tr>
+        </thead>
+        <tbody id="reports-body"></tbody>
+      </table>
+    </div>
+    <p class="hint">Click a report to view or edit it. To report on an item, <b>right-click it on the Gantt chart</b> and choose <b>Provide report</b>, or open it and use the <b>Provide report</b> button.
+      Reports are stored in <code>reports.csv</code>, one row per report, linked to the item by its ID.</p>
+  </main>
+
+  <!-- ============ HOVER CARD + CONTEXT MENU + EDIT DIALOG ============ -->
   <div id="tip" class="tip" role="tooltip"></div>
+  <div id="ctx-menu" class="ctx-menu" role="menu" hidden></div>
 
   <dialog id="edit-dialog" class="edit-dialog">
     <form id="edit-form" novalidate>
@@ -127,9 +156,52 @@
       <p id="ed-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
+        <button type="button" id="ed-report" class="btn">Provide report</button>
         <span class="spacer"></span>
         <button type="button" id="ed-cancel" class="btn">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ REPORT DIALOG ============ -->
+  <dialog id="report-dialog" class="edit-dialog report-dialog">
+    <form id="report-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge rpt">Report</span>
+        <h2 id="rp-heading">Provide report</h2>
+        <button type="button" id="rp-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div id="rp-item" class="rp-item"></div>
+      <div class="rp-body">
+      <div class="form-grid">
+        <label id="rp-item-pick" class="span3">Item<select name="item_id"></select></label>
+        <div class="span2 field"><span class="field-label">Reporting cadence</span>
+          <div class="seg">
+            <label><input type="radio" name="cadence" value="Weekly" /><span>Weekly</span></label>
+            <label><input type="radio" name="cadence" value="Fortnightly" /><span>Fortnightly</span></label>
+            <label><input type="radio" name="cadence" value="Monthly" /><span>Monthly</span></label>
+          </div>
+        </div>
+        <label>Period ending<input name="period_end" type="date" /></label>
+        <p id="rp-range" class="span3 rp-range"></p>
+        <div class="span3 field"><span class="field-label">Status this period</span><div id="rp-status" class="rag"></div></div>
+        <label id="rp-sync" class="span3 rp-sync"><input type="checkbox" name="sync_status" checked /> <span></span></label>
+        <label class="span3">Exec summary<textarea name="exec_summary" rows="3" placeholder="Two or three sentences for the exec audience: where this stands and anything they need to know or decide."></textarea></label>
+        <label class="span3">Achievements last period<textarea name="achievements" rows="3" placeholder="What was delivered or progressed since the last report."></textarea></label>
+        <label class="span3">Next steps<textarea name="next_steps" rows="3" placeholder="What will happen in the coming period."></textarea></label>
+        <label id="rp-gtg" class="span3 rp-gtg">Get to green plan<textarea name="get_to_green" rows="3" placeholder="What is off track, the actions to recover, who owns them and by when."></textarea></label>
+        <label>Reported by<input name="author" list="owner-list" /></label>
+        <p id="rp-meta" class="span2 rp-meta"></p>
+      </div>
+      <aside id="rp-prev" class="rp-prev" hidden></aside>
+      </div>
+      <p id="rp-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <button type="button" id="rp-delete" class="btn btn-danger">Delete report</button>
+        <span class="spacer"></span>
+        <button type="button" id="rp-cancel" class="btn">Cancel</button>
+        <button type="submit" id="rp-submit" class="btn btn-primary">Submit report</button>
       </footer>
     </form>
   </dialog>
