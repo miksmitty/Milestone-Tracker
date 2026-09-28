@@ -127,6 +127,8 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 - Swimlanes with alternating backgrounds and colour accents
 - Swimlanes with nested sub-swimlanes
 - Milestones drawn as RAG-coloured shapes, tasks as bars, with title, dates and owner; overlapping items stack automatically
+- Each task shows its duration in days after its title (e.g. **24d**, counting start and end day)
+- Each milestone with tasks rolling up to it shows its **% complete**: the share of those tasks' total duration that is at a complete RAG (a status named or described as Complete / Done). Tasks rolling up through other milestones count too, and the hover card shows the days and tasks behind it
 - Dependency arrows and dashed roll-up arrows (toggle with **View → Dependencies**)
 - **View → Row height** — below 40px the dates/owner line under each item is hidden for a compact view
 - Hover an item for a summary card (including its last report); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)

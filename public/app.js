@@ -446,6 +446,36 @@ function daysBetween(a, b) {
   return Math.round((parseDate(b) - parseDate(a)) / MS_DAY);
 }
 
+// A task's length in calendar days, counting both its start and end day.
+const taskDays = (m) => (m.start && m.end ? Math.max(1, daysBetween(m.start, m.end) + 1) : 0);
+
+// Whether a RAG status means the work is done (named or described as complete / done).
+function isDoneStatus(name) {
+  const st = statusesFor(state.workspaceId).find(s => s.name === name);
+  return [name, st?.description].some(v => /^\s*(complete|completed|done)\s*$/i.test(v || ''));
+}
+
+// A milestone's progress: the share of its tasks' total duration that is complete. Counts the
+// tasks that roll up to it, directly or through other milestones. null when it has no tasks.
+function milestoneProgress(m) {
+  const kids = new Map();
+  for (const x of state.items) if (x.parent) (kids.get(x.parent) || kids.set(x.parent, []).get(x.parent)).push(x);
+  const seen = new Set([m.id]), tasks = [];
+  const walk = (id) => {
+    for (const c of kids.get(id) || []) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      if (isTask(c)) tasks.push(c); else walk(c.id);
+    }
+  };
+  walk(m.id);
+  const total = tasks.reduce((a, t) => a + taskDays(t), 0);
+  if (!total) return null;
+  const done = tasks.filter(t => isDoneStatus(t.status));
+  const doneDays = done.reduce((a, t) => a + taskDays(t), 0);
+  return { pct: Math.floor((doneDays / total) * 100), doneDays, total, doneCount: done.length, count: tasks.length };
+}
+
 function autoRange() {
   const shown = state.items.filter(ganttMatches);
   const dates = (shown.length ? shown : state.items).flatMap(m => [parseDate(m.start), parseDate(m.end)]).filter(Boolean);
@@ -683,8 +713,9 @@ function truncate(s, px, size, weight = 400) {
 // Fit ref + title into maxW: the ref is kept, the title is truncated.
 function fitLabel(m, maxW, size) {
   const refW = m.ref ? textW(m.ref, size, 700) + REF_GAP : 0;
-  const title = truncate(m.title, Math.max(24, maxW - refW), size, 600);
-  return { title, w: refW + textW(title, size, 600) };
+  const tagW = m._tag ? textW(m._tag, size, 700) + REF_GAP : 0;
+  const title = truncate(m.title, Math.max(24, maxW - refW - tagW), size, 600);
+  return { title, w: refW + textW(title, size, 600) + tagW };
 }
 
 function metaText(m) {
@@ -692,13 +723,14 @@ function metaText(m) {
   return m.owner ? `${dates} · ${m.owner}` : dates;
 }
 
-// Title with the ref in bold ahead of it.
-function titleText(attrs, m, refFill) {
+// Title with the ref in bold ahead of it, and the tag (task duration / milestone % complete) after.
+function titleText(attrs, m, refFill, tagFill) {
   const t = svgEl('text', attrs);
   if (m.ref) {
     t.appendChild(svgEl('tspan', { 'font-weight': 700, fill: refFill }, m.ref));
     t.appendChild(svgEl('tspan', { dx: REF_GAP }, m._title));
   } else t.textContent = m._title;
+  if (m._tag) t.appendChild(svgEl('tspan', { dx: REF_GAP, 'font-weight': 700, fill: tagFill }, m._tag));
   return t;
 }
 
@@ -819,6 +851,11 @@ function renderGantt() {
   const items = state.items
     // a task's end date is inclusive, so its bar runs to the end of that day
     .map(m => ({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end), _task: isTask(m) }))
+    .map(m => {
+      // tag after the title: a task's duration, a milestone's % complete
+      const prog = !m._task && milestoneProgress(m);
+      return { ...m, _tag: m._task ? `${taskDays(m)}d` : prog ? `${prog.pct}%` : '' };
+    })
     .filter(m => m._s && m._e && m._e >= state.rangeStart && m._s <= state.rangeEnd && ganttMatches(m));
   renderGanttFilters();
 
@@ -1013,7 +1050,7 @@ function renderGantt() {
         fill: `url(#${gradId(m.status)})`, stroke: c.dark, 'stroke-width': 1.2, filter: 'url(#ms-shadow)',
       }));
       if (m._side === 'inside') {
-        g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text));
+        g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text, c.text));
         if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: '#7a7870', ...HALO }, m._meta));
       }
     } else {
@@ -1027,7 +1064,7 @@ function renderGantt() {
     if (m._side !== 'inside') {
       const anchor = m._side === 'left' ? 'end' : 'start';
       const ty = rm.detail ? cy + 1 : cy + 4.5;
-      g.appendChild(titleText({ x: m._lx, y: ty, 'text-anchor': anchor, 'font-size': 12.5, 'font-weight': 600, fill: '#262626', ...HALO }, m, '#e60000'));
+      g.appendChild(titleText({ x: m._lx, y: ty, 'text-anchor': anchor, 'font-size': 12.5, 'font-weight': 600, fill: '#262626', ...HALO }, m, '#e60000', '#7a7870'));
       if (m._meta) g.appendChild(svgEl('text', { x: m._lx, y: cy + 15, 'text-anchor': anchor, 'font-size': 10.5, fill: '#7a7870', ...HALO }, m._meta));
     }
     svg.appendChild(g);
@@ -1235,9 +1272,12 @@ function showTip(m, e) {
     ? `${fmtShort(m.start)} – ${fmtNice(m.end)} <span class="tip-muted">(${days} days)</span>`
     : fmtNice(m.end);
   const where = [m.owner, [m.swimlane, m.subswimlane].filter(Boolean).join(' › ')].filter(Boolean).map(escAttr).join(' · ');
+  const prog = !task && milestoneProgress(m);
+  const progress = prog ? `<div class="tip-row"><b>${prog.pct}% complete</b><span class="tip-muted">${prog.doneDays} of ${prog.total} days · ${prog.doneCount} of ${prog.count} ${prog.count === 1 ? T.task : T.tasks} done</span></div>` : '';
   tip.innerHTML = `
     <div class="tip-head">${m.ref ? `<span class="tip-ref">${escAttr(m.ref)}</span>` : ''}<span>${escAttr(m.title)}</span></div>
     <div class="tip-row"><span class="pill" style="background:${c.base};color:${c.text}">${m.status}</span><span>${escAttr(typeName(m))} · ${when}</span></div>
+    ${progress}
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
     ${lastReportLine(m)}
