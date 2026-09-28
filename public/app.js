@@ -3123,6 +3123,21 @@ function wireReports() {
   document.getElementById('rpf-clear').onclick = () => { clearReportFilters(); renderReports(); };
 }
 
+// Downloads the items currently listed on the Items tab (filters and sort applied), in the
+// same columns as milestones.csv so the file loads straight back in.
+function downloadItemsCSV() {
+  syncEditorToState();
+  const p = currentWorkspace();
+  const name = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
+  const csv = toCSV(gridRows().map(r => r.m));
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.download = `${name}-items-${fmtISO(new Date())}.csv`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+
 // Downloads the reports currently listed (filters applied). item_ref / item_title are added for
 // readability; the file still loads as reports.csv because unknown columns are ignored.
 function downloadReportsCSV() {
@@ -3769,6 +3784,7 @@ function wireEvents() {
     syncEditorToState();
     renderEditor();
   };
+  document.getElementById('btn-items-csv').onclick = downloadItemsCSV;
   document.getElementById('btn-reload').onclick = async () => {
     await flushSave(); // don't lose a pending edit
     await loadData();
