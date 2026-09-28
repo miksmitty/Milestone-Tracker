@@ -100,6 +100,7 @@ const state = {
   rangeEnd: null,       // Date
   showMonths: true,
   showQuarters: true,
+  timescale: 'quarters', // key of TIMESCALES
   showToday: true,
   showLinks: true,
   userZoomed: false, // once the user touches zoom, stop auto-fitting on resize
@@ -604,6 +605,38 @@ const QUARTER_H = 26;
 const MONTH_H = 24;
 const DETAIL_MIN_ROW_H = 40; // below this, the dates/owner line under each item is hidden
 
+// Header units. labels() lists candidates longest first; the first that fits its cell is drawn.
+const gb = (d, o) => d.toLocaleDateString('en-GB', o);
+const TIME_UNITS = {
+  quarter: {
+    start: d => new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1),
+    next: d => new Date(d.getFullYear(), d.getMonth() + 3, 1),
+    labels: d => { const q = `Q${Math.floor(d.getMonth() / 3) + 1}`; return [`${q} ${d.getFullYear()}`, `${q} ’${String(d.getFullYear()).slice(2)}`, q]; },
+  },
+  month: {
+    start: d => new Date(d.getFullYear(), d.getMonth(), 1),
+    next: d => new Date(d.getFullYear(), d.getMonth() + 1, 1),
+    labels: d => [gb(d, { month: 'long', year: 'numeric' }), `${gb(d, { month: 'short' })} ’${String(d.getFullYear()).slice(2)}`, gb(d, { month: 'short' }), gb(d, { month: 'narrow' })],
+  },
+  week: { // weeks start on Monday
+    start: d => new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)),
+    next: d => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7),
+    labels: d => [`w/c ${gb(d, { day: 'numeric', month: 'short', year: 'numeric' })}`, gb(d, { day: 'numeric', month: 'short' }), String(d.getDate())],
+  },
+  day: {
+    start: d => new Date(d.getFullYear(), d.getMonth(), d.getDate()),
+    next: d => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1),
+    labels: d => [`${gb(d, { weekday: 'short' })} ${d.getDate()}`, String(d.getDate()), gb(d, { weekday: 'narrow' })],
+  },
+};
+// Timescale presets: top and bottom header tiers, and the zoom (px per day) each opens at.
+const TIMESCALES = {
+  quarters: { top: 'quarter', bottom: 'month', px: null }, // fits the range to the window
+  months: { top: 'month', bottom: 'week', px: 14 },
+  weeks: { top: 'week', bottom: 'day', px: 50 },
+};
+const MAX_ZOOM = 80;
+
 // Sizes derived from the row-height slider.
 function rowMetrics() {
   const h = state.rowH;
@@ -828,14 +861,25 @@ function renderGantt() {
   // background
   svg.appendChild(svgEl('rect', { x: 0, y: 0, width, height, fill: '#ffffff' }));
 
+  // Label column and timescale header are separate layers, pinned while the chart scrolls
+  // (see syncGanttSticky) so swimlane names and dates stay in view, as in MS Project.
+  const col = svgEl('g', { class: 'gantt-col' });
+  const head = svgEl('g', { class: 'gantt-head' });
+  const corner = svgEl('g', { class: 'gantt-corner' });
+  head.appendChild(svgEl('rect', { x: 0, y: 0, width, height: headerH, fill: '#ffffff' }));
+  corner.appendChild(svgEl('rect', { x: 0, y: 0, width: LABEL_W, height: headerH, fill: '#ffffff' }));
+  corner.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: headerH, stroke: '#cccabc', 'stroke-width': 1 }));
+  if (headerH) corner.appendChild(svgEl('line', { x1: 0, y1: headerH, x2: LABEL_W, y2: headerH, stroke: '#cccabc', 'stroke-width': 1 }));
+
   // lane backgrounds (alternating) + lane / sub-lane labels
   let y = headerH;
   lanes.forEach((lane, i) => {
     if (i % 2 === 1) svg.appendChild(svgEl('rect', { x: 0, y, width, height: lane.h, fill: '#f9f8f5' }));
+    col.appendChild(svgEl('rect', { x: 0, y, width: LABEL_W, height: lane.h, fill: i % 2 ? '#f9f8f5' : '#ffffff' }));
     const accent = LANE_ACCENTS[i % LANE_ACCENTS.length];
-    svg.appendChild(svgEl('rect', { x: 0, y: y + 4, width: 4, height: lane.h - 8, rx: 2, fill: accent }));
+    col.appendChild(svgEl('rect', { x: 0, y: y + 4, width: 4, height: lane.h - 8, rx: 2, fill: accent }));
     const laneColW = subCol ? LANE_COL_W : LABEL_W;
-    svg.appendChild(svgEl('text', {
+    col.appendChild(svgEl('text', {
       x: 16, y: y + lane.h / 2 + 5, 'font-size': 14, 'font-weight': 700, fill: '#262626',
     }, truncate(lane.name, laneColW - 24, 14, 700)));
 
@@ -845,9 +889,10 @@ function renderGantt() {
       if (subCol) {
         if (j > 0) {
           svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: width, y2: sy, stroke: '#e0ded6', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+          col.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: LABEL_W, y2: sy, stroke: '#e0ded6', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
         }
         if (sub.name) {
-          svg.appendChild(svgEl('text', {
+          col.appendChild(svgEl('text', {
             x: LANE_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: '#5a5d5c',
           }, truncate(sub.name, SUB_COL_W - 20, 12, 600)));
         }
@@ -855,74 +900,70 @@ function renderGantt() {
       sy += sub.h;
     });
     if (subCol) {
-      svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: y, x2: LANE_COL_W, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
+      col.appendChild(svgEl('line', { x1: LANE_COL_W, y1: y, x2: LANE_COL_W, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
     }
     svg.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: width, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
+    col.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: LABEL_W, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
     y += lane.h;
   });
 
   // vertical separator between labels and chart
-  svg.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: height, stroke: '#cccabc', 'stroke-width': 1 }));
+  col.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: height, stroke: '#cccabc', 'stroke-width': 1 }));
 
-  // ---- month / quarter grid + headers ----
-  const gridTop = headerH;
+  // ---- timescale: two tiers of headers + grid, like MS Project ----
   const gridBottom = headerH + bodyH;
+  const scale = TIMESCALES[state.timescale];
+  const topH = state.showQuarters ? QUARTER_H : 0;
 
-  const firstMonth = new Date(state.rangeStart.getFullYear(), state.rangeStart.getMonth(), 1);
-  const months = [];
-  for (let d = new Date(firstMonth); d <= state.rangeEnd; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
-    months.push(new Date(d));
+  // weekends shaded once days are wide enough to pick out
+  if (state.pxPerDay >= 8) {
+    const d = new Date(state.rangeStart);
+    d.setDate(d.getDate() - 1); // catch a Sunday at the very start
+    for (; d < state.rangeEnd; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() !== 6) continue; // Saturday: shade Sat + Sun together
+      const x1 = xOf(d), x2 = xOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 2));
+      if (x2 > x1) svg.appendChild(svgEl('rect', { x: x1, y: headerH, width: x2 - x1, height: bodyH, fill: '#1c1c1c', 'fill-opacity': 0.035 }));
+    }
   }
 
-  if (state.showMonths) {
-    const bandY = state.showQuarters ? QUARTER_H : 0;
-    svg.appendChild(svgEl('rect', { x: LABEL_W, y: bandY, width: chartW, height: MONTH_H, fill: '#f4f3ee' }));
-    for (const m of months) {
-      const x1 = Math.max(LABEL_W, rawX(m));
-      const next = new Date(m.getFullYear(), m.getMonth() + 1, 1);
-      const x2 = Math.min(width - PAD_RIGHT + 10, rawX(next));
+  // One tier: header band with a label per unit, and a gridline at each unit's start.
+  const drawTier = (unit, bandY, bandH, top) => {
+    const u = TIME_UNITS[unit];
+    head.appendChild(svgEl('rect', { x: LABEL_W, y: bandY, width: chartW, height: bandH, fill: top ? '#ecebe4' : '#f4f3ee' }));
+    const size = top ? 12.5 : 11.5, weight = top ? 700 : 600;
+    const cells = [];
+    for (let d = u.start(state.rangeStart); d < state.rangeEnd; d = u.next(d)) {
+      const x1 = Math.max(LABEL_W, rawX(d));
+      const x2 = Math.min(width - PAD_RIGHT + 10, rawX(u.next(d)));
       if (x2 - x1 < 4) continue;
-      if (rawX(m) >= LABEL_W) {
-        svg.appendChild(svgEl('line', { x1: rawX(m), y1: bandY, x2: rawX(m), y2: gridBottom, stroke: '#e0ded6', 'stroke-width': 1 }));
+      if (rawX(d) >= LABEL_W) {
+        const line = top ? { stroke: '#a8a69c', 'stroke-width': 1.2 } : { stroke: '#e0ded6', 'stroke-width': 1 };
+        head.appendChild(svgEl('line', { x1: rawX(d), y1: bandY, x2: rawX(d), y2: headerH, ...line }));
+        svg.appendChild(svgEl('line', { x1: rawX(d), y1: headerH, x2: rawX(d), y2: gridBottom, ...line }));
       }
-      const label = (x2 - x1) > 58
-        ? m.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }).replace(' ', ' ’')
-        : m.toLocaleDateString('en-GB', { month: 'short' });
-      if (x2 - x1 > 28) {
-        svg.appendChild(svgEl('text', {
-          x: (x1 + x2) / 2, y: bandY + MONTH_H / 2 + 4, 'text-anchor': 'middle',
-          'font-size': 11.5, 'font-weight': 600, fill: '#5a5d5c',
-        }, label));
+      cells.push({ x1, x2, labels: u.labels(d), full: rawX(u.next(d)) - rawX(d) });
+    }
+    // one label style for the whole tier: the longest that fits every full-width cell
+    const fits = (c, i) => textW(c.labels[i], size, weight) <= c.full - 8;
+    const n = cells[0] ? cells[0].labels.length : 0;
+    let style = 0;
+    while (style < n && !cells.every(c => fits(c, style))) style++;
+    for (const c of cells) {
+      // part-cells at the range edges fall back to shorter labels, or none
+      let i = style;
+      while (i < n && textW(c.labels[i], size, weight) > c.x2 - c.x1 - 8) i++;
+      if (i < n) {
+        head.appendChild(svgEl('text', {
+          x: (c.x1 + c.x2) / 2, y: bandY + bandH / 2 + 4.5, 'text-anchor': 'middle',
+          'font-size': size, 'font-weight': weight, fill: top ? '#1c1c1c' : '#5a5d5c',
+        }, c.labels[i]));
       }
     }
-    svg.appendChild(svgEl('line', { x1: LABEL_W, y1: bandY + MONTH_H, x2: width, y2: bandY + MONTH_H, stroke: '#cccabc', 'stroke-width': 1 }));
-  }
-
-  if (state.showQuarters) {
-    svg.appendChild(svgEl('rect', { x: LABEL_W, y: 0, width: chartW, height: QUARTER_H, fill: '#ecebe4' }));
-    const qStarts = months.filter(m => m.getMonth() % 3 === 0);
-    // ensure the partial quarter at range start gets a label
-    const firstQ = new Date(state.rangeStart.getFullYear(), Math.floor(state.rangeStart.getMonth() / 3) * 3, 1);
-    if (!qStarts.length || qStarts[0] > firstQ) qStarts.unshift(firstQ);
-    for (const q of qStarts) {
-      const qx = rawX(q);
-      const next = new Date(q.getFullYear(), q.getMonth() + 3, 1);
-      const x1 = Math.max(LABEL_W, qx);
-      const x2 = Math.min(width - PAD_RIGHT + 10, rawX(next));
-      if (x2 - x1 < 8) continue;
-      if (qx >= LABEL_W) {
-        svg.appendChild(svgEl('line', { x1: qx, y1: 0, x2: qx, y2: gridBottom, stroke: '#a8a69c', 'stroke-width': 1.2 }));
-      }
-      const qNum = Math.floor(q.getMonth() / 3) + 1;
-      if (x2 - x1 > 44) {
-        svg.appendChild(svgEl('text', {
-          x: (x1 + x2) / 2, y: QUARTER_H / 2 + 4.5, 'text-anchor': 'middle',
-          'font-size': 12.5, 'font-weight': 700, fill: '#1c1c1c',
-        }, `Q${qNum} ${q.getFullYear()}`));
-      }
-    }
-    svg.appendChild(svgEl('line', { x1: LABEL_W, y1: QUARTER_H, x2: width, y2: QUARTER_H, stroke: '#cccabc', 'stroke-width': 1 }));
-  }
+    head.appendChild(svgEl('line', { x1: LABEL_W, y1: bandY + bandH, x2: width, y2: bandY + bandH, stroke: '#cccabc', 'stroke-width': 1 }));
+  };
+  if (state.showMonths) drawTier(scale.bottom, topH, MONTH_H, false);
+  if (state.showQuarters) drawTier(scale.top, 0, QUARTER_H, true);
+  const gridTop = headerH;
 
   // ---- today line ----
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -996,7 +1037,20 @@ function renderGantt() {
     svg.appendChild(svgEl('text', { x: LABEL_W + 20, y: headerH + 64, 'font-size': 13, fill: '#7a7870' },
       `No ${T.items} match the filters in this date range.`));
   }
+  svg.append(head, col, corner);
   container.appendChild(svg);
+  syncGanttSticky();
+}
+
+// Keep the label column and timescale header in view while the chart panel scrolls.
+function syncGanttSticky() {
+  const wrap = document.getElementById('gantt-scroll');
+  const svg = document.querySelector('#gantt-container svg');
+  if (!svg) return;
+  const x = wrap.scrollLeft, y = wrap.scrollTop;
+  svg.querySelector('.gantt-col').setAttribute('transform', `translate(${x} 0)`);
+  svg.querySelector('.gantt-head').setAttribute('transform', `translate(0 ${y})`);
+  svg.querySelector('.gantt-corner').setAttribute('transform', `translate(${x} ${y})`);
 }
 
 /* ================= gantt filters + sort ================= */
@@ -1307,7 +1361,7 @@ async function deleteFromDialog() {
 /* ================= zoom / range controls ================= */
 
 function setZoom(px) {
-  state.pxPerDay = Math.min(30, Math.max(1, px));
+  state.pxPerDay = Math.min(MAX_ZOOM, Math.max(1, px));
   document.getElementById('zoom-slider').value = state.pxPerDay;
   renderGantt();
 }
@@ -1318,6 +1372,24 @@ function fitZoom() {
   const totalDays = Math.max(1, (state.rangeEnd - state.rangeStart) / MS_DAY);
   const avail = wrap.clientWidth - labelWidth() - PAD_RIGHT - 2;
   setZoom(avail / totalDays);
+}
+
+// Switch the header tiers and jump to that preset's zoom; Months and Weeks open around today.
+function setTimescale(key) {
+  if (!TIMESCALES[key]) key = 'quarters';
+  state.timescale = key;
+  saveAppPrefs({ timescale: key });
+  for (const b of document.querySelectorAll('#timescale button')) b.setAttribute('aria-pressed', b.dataset.scale === key);
+  const px = TIMESCALES[key].px;
+  state.userZoomed = !!px;
+  if (!px) return fitZoom();
+  setZoom(px);
+  if (!state.rangeStart) return;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const wrap = document.getElementById('gantt-scroll');
+  if (today >= state.rangeStart && today <= state.rangeEnd) {
+    wrap.scrollLeft = ((today - state.rangeStart) / MS_DAY - 7) * state.pxPerDay;
+  } else wrap.scrollLeft = 0;
 }
 
 /* ================= editor table ================= */
@@ -3225,6 +3297,7 @@ function wireReports() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !quick.hidden) hideQuick(); });
   const hideIfClean = () => { if (!quickDirty()) hideQuick(); };
   document.getElementById('gantt-scroll').addEventListener('scroll', hideIfClean);
+  document.getElementById('gantt-scroll').addEventListener('scroll', syncGanttSticky, { passive: true });
   window.addEventListener('resize', hideIfClean);
 
   const dlg = document.getElementById('report-dialog');
@@ -4234,7 +4307,9 @@ function wireWorkspaces() {
 function downloadPNG() {
   const svg = document.querySelector('#gantt-container svg');
   if (!svg) return;
-  const xml = new XMLSerializer().serializeToString(svg);
+  const copy = svg.cloneNode(true); // drop the scroll offsets of the pinned layers
+  for (const g of copy.querySelectorAll('.gantt-col, .gantt-head, .gantt-corner')) g.removeAttribute('transform');
+  const xml = new XMLSerializer().serializeToString(copy);
   const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const img = new Image();
@@ -4301,6 +4376,10 @@ function wireEvents() {
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
   document.getElementById('zoom-fit').onclick = () => { state.userZoomed = false; fitZoom(); };
+  document.getElementById('timescale').onclick = (e) => {
+    const b = e.target.closest('button[data-scale]');
+    if (b) setTimescale(b.dataset.scale);
+  };
   document.getElementById('zoom-slider').oninput = (e) => { state.userZoomed = true; setZoom(+e.target.value); };
   document.getElementById('row-slider').oninput = (e) => { state.rowH = +e.target.value; renderGantt(); };
 
@@ -4429,5 +4508,5 @@ function wireEvents() {
   }
   applyWorkspaceChrome();
   switchView(VIEWS.includes(prefs.view) ? prefs.view : 'gantt');
-  if (isShown('gantt')) fitZoom(); // the ResizeObserver keeps it fitted as layout settles
+  setTimescale(prefs.timescale); // Quarters fits; the ResizeObserver keeps it fitted as layout settles
 })();

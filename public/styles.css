@@ -701,6 +701,8 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .tb-seg { height: 32px; }
 .tb-seg button { min-width: 30px; color: var(--text); font-size: 13px; }
 .tb-seg button:hover { background: #fff; }
+.tb-scale button { font-weight: 600; color: var(--muted); }
+.tb-scale button[aria-pressed="true"] { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(28,28,28,.12); }
 .gbar #btn-gantt-add, .gbar #btn-png { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; }
 
 .gbar-chips {

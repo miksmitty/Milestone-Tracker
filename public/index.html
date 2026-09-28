@@ -143,8 +143,8 @@
           </button>
           <div id="gm-view" class="tb-pop" hidden>
             <div class="pop-checks">
-              <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Quarter grid</label>
-              <label class="check"><input type="checkbox" id="toggle-months" checked /> Month grid</label>
+              <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Top timescale</label>
+              <label class="check"><input type="checkbox" id="toggle-months" checked /> Bottom timescale</label>
               <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
               <label class="check"><input type="checkbox" id="toggle-links" checked /> Dependencies</label>
             </div>
@@ -152,7 +152,7 @@
               <input type="range" id="row-slider" min="24" max="60" step="2" value="40" title="Below 40 the dates/owner line is hidden" />
             </label>
             <label class="pop-field"><span>Zoom</span>
-              <input type="range" id="zoom-slider" min="1" max="30" step="0.5" value="6" />
+              <input type="range" id="zoom-slider" min="1" max="80" step="0.5" value="6" />
             </label>
           </div>
         </div>
@@ -169,6 +169,12 @@
             <label class="pop-field"><span>To</span><input type="date" id="range-end" /></label>
             <button type="button" id="range-auto" class="btn btn-sm" title="Fit the range to the items shown">Fit to <span data-term="items">items</span></button>
           </div>
+        </div>
+
+        <div id="timescale" class="tb-seg tb-scale" role="group" aria-label="Timescale">
+          <button type="button" data-scale="quarters" title="Quarters over months">Quarters</button>
+          <button type="button" data-scale="months" title="Months over weeks">Months</button>
+          <button type="button" data-scale="weeks" title="Weeks over days">Weeks</button>
         </div>
 
         <div class="tb-seg" role="group" aria-label="Zoom">

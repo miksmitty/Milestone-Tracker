@@ -132,9 +132,11 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 - Hover an item for a summary card (including its last report); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)
 - The chart fills the window below its toolbar and scrolls inside its own panel
 - One toolbar: **Search**, **Filter**, **Sort** and **View** menus on the left; the date range, zoom and actions on the right
-- Zoom: − **Fit** + (auto-fits until you zoom manually), with a finer slider under **View**
+- Timescale, as in MS Project: **Quarters** (quarters over months, fitted to the window), **Months** (months over weeks) or **Weeks** (weeks over days, with day names). Months and Weeks open scrolled to today, weekends are shaded once days are wide enough, and the choice is remembered per browser
+- The swimlane column and the timescale header stay pinned while the chart scrolls
+- Zoom: − **Fit** + (auto-fits until you zoom manually), with a finer slider under **View**; header labels shorten to fit as you zoom
 - The date range button shows the months in view; open it to pick dates, or **Fit to items** to fit the range to everything shown
 - **Search** by ref, title, description, owner or swimlane, and **Filter** by swimlane, owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
 - **Sort** swimlanes as listed, A–Z, by earliest start, by latest end, or most at risk first (most items at an off-track RAG). Items are packed several to a row by date, or choose one per row sorted by start, end, ref, title, RAG or owner, ascending or descending. A dot on **Sort** shows it's changed from the default, and the sort is remembered per browser
-- **View** toggles the **quarter grid**, **month grid** and **today line**
+- **View** toggles the **top** and **bottom timescale**, **today line** and **dependencies**
 - **Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the workspace
