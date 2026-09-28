@@ -19,8 +19,22 @@ Run a lessons-learned session with the team.",,Sarah Patel,2025-09-28T08:23:00.0
 Agreed acceptance criteria with the business leads.","Prepare evidence pack for the next governance board.
 Confirm dependencies with upstream workstreams.",,Sarah Patel,2025-10-11T08:36:00.000Z,2025-10-11T08:36:00.000Z
 5,1,1,Fortnightly,2025-10-11,2025-10-24,Amber,1.1 Project Kickoff: At risk. Some slippage this period; mitigations are in place.,"Resolved outstanding queries raised by the design authority.
-Progressed 5 of the scheduled work packages.","Run a lessons-learned session with the team.
-Walk through progress with Sarah Patel at the weekly checkpoint.",Add contingency resource for two weeks and hold a daily stand-up until back on track.,Sarah Patel,2025-10-26T08:49:00.000Z,2025-10-26T08:49:00.000Z
+Progressed 5 of the scheduled work packages.
+kjdkjf
+fd
+sfs Hello df
+sf
+
+
+f
+sd
+fs
+fsd
+f
+s
+df
+sfd","Run a lessons-learned session with the team.
+Walk through progress with Sarah Patel at the weekly checkpoint.",Add contingency resource for two weeks and hold a daily stand-up until back on track.,Sarah Patel,2025-10-26T08:49:00.000Z,2026-09-27T17:28:00.931Z
 6,1,1,Fortnightly,2025-10-25,2025-11-07,Green,1.1 Project Kickoff: Good progress this period; all key activities remain on schedule.,"Updated the plan and RAID log for Project Kickoff.
 Confirmed resourcing for the next phase.","Confirm dependencies with upstream workstreams.
 Continue delivery against the Project Kickoff plan.",,Sarah Patel,2025-11-08T08:12:00.000Z,2025-11-08T08:12:00.000Z
@@ -644,9 +658,9 @@ Prepare evidence pack for the next governance board.",Add contingency resource f
 240,1,24,Weekly,2026-09-12,2026-09-18,Amber,1.4 Go-Live: Resource constraints are putting pressure on the timeline.,"Confirmed resourcing for the next phase.
 Held a checkpoint review with Sarah Patel and key stakeholders.","Close the remaining 4 actions and re-baseline if needed.
 Run a lessons-learned session with the team.",Escalate the dependency blocker to the leadership team; agree a revised date for the handover.,Sarah Patel,2026-09-19T09:25:00.000Z,2026-09-19T09:25:00.000Z
-241,1,24,Weekly,2026-09-19,2026-09-25,Amber,1.4 Go-Live: A dependency is running late and may affect the end date.,"Completed the planned activities for Go-Live on schedule.
-Resolved outstanding queries raised by the design authority.","Prepare evidence pack for the next governance board.
-Confirm dependencies with upstream workstreams.",Descope non-critical items to the next release to protect the milestone date.,Sarah Patel,2026-09-27T09:38:00.000Z,2026-09-27T09:38:00.000Z
+241,1,24,Weekly,2026-09-19,2026-09-25,Amber,1.4 Go-Live: A dependency is running late and may affect the end date.,"- **Completed** the planned activities for Go-Live on schedule.
+- Resolved outstanding queries raised by the design authority.","Prepare evidence pack for the next governance board.
+Confirm dependencies with upstream workstreams.",Descope non-critical items to the next release to protect the milestone date.,Sarah Patel,2026-09-27T09:38:00.000Z,2026-09-27T17:58:38.167Z
 242,1,25,Monthly,2025-11-01,2025-11-30,Not Started,4.12 Hypercare: Not yet started. Preparation and planning under way ahead of the start date.,,"Continue delivery against the Hypercare plan.
 Prepare evidence pack for the next governance board.",,Mark Evans,2025-12-01T08:28:00.000Z,2025-12-01T08:28:00.000Z
 243,1,25,Monthly,2025-12-01,2025-12-31,Not Started,4.12 Hypercare: Awaiting predecessor activities; no issues to report.,,"Close the remaining 3 actions and re-baseline if needed.
@@ -687,5 +701,19 @@ Confirm dependencies with upstream workstreams.",,Sarah Patel,2026-09-13T09:26:0
 Walk through progress with Sarah Patel at the weekly checkpoint.",,Sarah Patel,2026-09-19T09:39:00.000Z,2026-09-19T09:39:00.000Z
 261,1,26,Weekly,2026-09-19,2026-09-25,Not Started,1.5 Hypercare Exit: Not yet started. Preparation and planning under way ahead of the start date.,,"Confirm dependencies with upstream workstreams.
 Continue delivery against the Hypercare Exit plan.",,Sarah Patel,2026-09-27T09:52:00.000Z,2026-09-27T09:52:00.000Z
+264,1,4,Weekly,2026-09-19,2026-09-25,Complete,"2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+
+2.1 Solution Architecture: Complete. All deliverables accepted and signed off.2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off. 2.1 Solution Architecture: Complete. All deliverables accepted and signed off.","2.1 Solution Architecture: Complete. All deliverables accepted and signed off.2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+2.1 Solution Architecture: Complete. All deliverables accepted and signed off.","- 2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+- 2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+- 2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+- 2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+- 2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+- 2.1 Solution Architecture: Complete. All deliverables accepted and signed off.
+- 2.1 Solution Architecture: Complete. All deliverables accepted and signed off.",,Tom Reed,2026-09-27T20:53:25.069Z,2026-09-27T20:55:10.284Z
 262,2,30,Weekly,2026-09-19,2026-09-25,Green,Fit-out on schedule. First and second floor partitioning complete.,Partitioning finished on floors 1 and 2; first fix electrics started.,Start third floor partitioning; kitchen units delivered.,,Owen Price,2026-09-25T16:00:00.000Z,2026-09-25T16:00:00.000Z
 263,2,31,Weekly,2026-09-19,2026-09-25,Amber,"Chair supplier has a six week lead time, putting the end of October delivery at risk.",Desks ordered and delivery slot booked.,Confirm alternative chair supplier.,Source chairs from the second framework supplier by 2 Oct (Owen Price); agree a phased delivery if needed.,Owen Price,2026-09-25T16:00:00.000Z,2026-09-25T16:00:00.000Z

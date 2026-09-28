@@ -1811,29 +1811,42 @@ function deleteMessage(m) {
 }
 
 /* ---- quick update panel (click or right-click an item on the chart) ---- */
-// RAG and dates change far more often than an item's details, so they are one click away here;
-// everything else lives behind "Edit details".
+// RAG, type and dates change far more often than an item's details, so they sit here; everything
+// else lives behind "Edit details". Changes are a draft until Save, and the draft keeps both
+// dates while the type is switched, so trying Milestone and going back to Task loses nothing.
 
-let quickId = null;  // item the panel is showing
-let quickMsg = '';   // result of the last change, shown in the panel
+let quickId = null;    // item the panel is showing
+let quickDraft = null; // {status, type, start, end} as edited, not yet saved
+let quickMsg = '';     // why the last Save didn't go through
 
 function showQuick(m, e) {
   e.preventDefault();
   hideTip();
+  if (quickDirty() && quickId !== m.id && !confirm(`Discard your changes to ${itemLabel(itemById(quickId))}?`)) return;
   quickId = m.id;
+  quickDraft = { status: m.status, type: m.type, start: m.start || m.end, end: m.end || m.start };
   quickMsg = '';
   renderQuick();
   const el = document.getElementById('quick');
   el.hidden = false;
   el.style.left = Math.max(8, Math.min(e.clientX + 10, window.innerWidth - el.offsetWidth - 8)) + 'px';
   el.style.top = Math.max(8, Math.min(e.clientY + 10, window.innerHeight - el.offsetHeight - 8)) + 'px';
-  el.querySelector('[aria-pressed="true"]')?.focus();
+  el.querySelector('.rag-pick [aria-pressed="true"]')?.focus();
 }
 
 function hideQuick() {
   const el = document.getElementById('quick');
   if (el) el.hidden = true;
   quickId = null;
+  quickDraft = null;
+}
+
+// Has anything in the panel changed from the saved item?
+function quickDirty() {
+  const m = itemById(quickId), d = quickDraft;
+  if (!m || !d) return false;
+  const task = d.type === 'task';
+  return d.status !== m.status || d.type !== m.type || d.end !== m.end || (task && d.start !== m.start);
 }
 
 // Items that would move with this one (explicit dependencies, followed transitively).
@@ -1851,35 +1864,58 @@ const ragButtons = (current, attrs = '') => STATUSES.map(st => `
   <button type="button" data-rag="${escAttr(st)}" ${attrs} aria-pressed="${st === current}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
 
 function renderQuick() {
-  const m = itemById(quickId);
-  if (!m) return hideQuick();
-  const task = isTask(m);
+  const m = itemById(quickId), d = quickDraft;
+  if (!m || !d) return hideQuick();
+  const task = d.type === 'task';
   const n = reportsFor(m.id).length;
   const deps = dependentCount(m.id);
   document.getElementById('quick').innerHTML = `
+    <form class="q-form" novalidate>
     <div class="q-head">
-      <span class="type-badge ${task ? 'task' : 'ms'}">${escAttr(typeName(m))}</span>
+      <span class="type-badge ${task ? 'task' : 'ms'}">${escAttr(task ? T.Task : T.Milestone)}</span>
       <span class="q-title">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>
-      <button type="button" class="dlg-close" data-act="close" title="Close">✕</button>
+      <button type="button" class="dlg-close" data-act="cancel" title="Close without saving (Esc)">✕</button>
     </div>
     <div class="q-label">RAG</div>
-    <div class="rag-pick">${ragButtons(m.status)}</div>
-    <div class="q-label q-gap">Type</div>
-    <div class="q-type" role="group" aria-label="Type">${TYPES.map(t => `
-      <button type="button" data-type="${t}" aria-pressed="${t === m.type}" title="${t === 'task' ? 'A date range, drawn as a bar' : 'A single date, drawn as a shape'}">${escAttr(t === 'task' ? T.Task : T.Milestone)}</button>`).join('')}</div>
-    <form class="q-dates" novalidate>
-      ${task
-        ? `<label>Start<input type="date" name="start" value="${m.start}" /></label><label>End<input type="date" name="end" value="${m.end}" /></label>`
-        : `<label>Date<input type="date" name="end" value="${m.end}" /></label>`}
-      <button type="submit" class="btn btn-primary" disabled>Update dates</button>
-    </form>
-    ${deps ? `<p class="q-note">${deps} dependent ${escAttr(deps > 1 ? T.items : T.item)} will move by the same amount.</p>` : ''}
+    <div class="rag-pick">${ragButtons(d.status)}</div>
+    <div class="q-row">
+      <div>
+        <div class="q-label">Type</div>
+        <div class="q-type" role="group" aria-label="Type">${TYPES.map(t => `
+          <button type="button" data-type="${t}" aria-pressed="${t === d.type}" title="${t === 'task' ? 'A date range, drawn as a bar' : 'A single date, drawn as a shape'}">${escAttr(t === 'task' ? T.Task : T.Milestone)}</button>`).join('')}</div>
+      </div>
+      <div class="q-dates">
+        ${task
+          ? `<label>Start<input type="date" name="start" value="${d.start}" /></label><label>End<input type="date" name="end" value="${d.end}" /></label>`
+          : `<label>Date<input type="date" name="end" value="${d.end}" /></label>`}
+      </div>
+    </div>
+    ${deps ? `<p class="q-note">Moving the ${task ? 'end ' : ''}date moves ${deps} dependent ${escAttr(deps > 1 ? T.items : T.item)} by the same amount.</p>` : ''}
     <p class="q-msg">${escAttr(quickMsg)}</p>
+    <div class="q-save">
+      <span class="q-unsaved"></span>
+      <button type="button" class="btn" data-act="cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
     <div class="q-foot">
       <button type="button" class="btn" data-act="report">Provide report…</button>
       <button type="button" class="btn" data-act="history" ${n ? '' : 'disabled'}>Reports (${n})</button>
       <button type="button" class="btn" data-act="edit">Edit details…</button>
-    </div>`;
+    </div>
+    </form>`;
+  refreshQuickSave();
+}
+
+// Save is only offered for a real, valid change.
+function refreshQuickSave() {
+  const el = document.getElementById('quick'), d = quickDraft;
+  if (!d || el.hidden && !quickId) return;
+  const okDate = (v) => parseDate(v) && +v.slice(0, 4) >= 1900;
+  const valid = okDate(d.end) && (d.type !== 'task' || okDate(d.start));
+  const dirty = quickDirty();
+  el.querySelector('[type=submit]').disabled = !(dirty && valid);
+  el.querySelector('.q-unsaved').textContent = dirty ? (valid ? 'Unsaved changes' : 'Enter a valid date') : '';
+  el.classList.toggle('dirty', dirty);
 }
 
 function setRag(m, st) {
@@ -1890,30 +1926,30 @@ function setRag(m, st) {
 }
 
 function onQuickClick(e) {
-  const m = itemById(quickId);
-  if (!m) return;
+  const m = itemById(quickId), d = quickDraft;
+  if (!m || !d) return;
   const rag = e.target.closest('[data-rag]');
   if (rag) {
-    if (setRag(m, rag.dataset.rag)) {
-      quickMsg = `RAG changed to ${m.status}.`;
-      renderGantt();
-      renderQuick();
-      document.querySelector('#quick [aria-pressed="true"]')?.focus();
-    }
+    d.status = rag.dataset.rag;
+    quickMsg = '';
+    renderQuick();
+    document.querySelector(`#quick .rag-pick [aria-pressed="true"]`)?.focus();
     return;
   }
   const type = e.target.closest('[data-type]');
   if (type) {
-    if (type.dataset.type === m.type) return;
-    const res = updateItem(m, { type: type.dataset.type });
-    quickMsg = isTask(m) ? `Now ${withArticle(T.task)} — set its start and end dates.` : `Now ${withArticle(T.milestone)} on ${fmtNice(m.end)}.`;
-    renderGantt();
+    if (type.dataset.type === d.type) return;
+    d.type = type.dataset.type;
+    if (d.type === 'task' && d.start > d.end) d.start = d.end; // the milestone date moved before the old start
+    quickMsg = '';
     renderQuick();
-    saveData([`${itemLabel(m)} is now ${withArticle(isTask(m) ? T.task : T.milestone)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
+    document.querySelector(`#quick [data-type="${d.type}"]`)?.focus();
     return;
   }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (!act) return;
+  if (act === 'cancel') return hideQuick();
+  if (quickDirty() && !confirm('Discard the changes you haven’t saved?')) return;
   hideQuick();
   if (act === 'report') openReportDialog({ itemId: m.id });
   else if (act === 'edit') openEditDialog(m);
@@ -1921,27 +1957,411 @@ function onQuickClick(e) {
 }
 
 function onQuickDateInput(e) {
-  const form = e.target.form;
-  const m = itemById(quickId);
-  if (!form || !m) return;
-  const f = form.elements;
-  const valid = [...form.querySelectorAll('input')].every(i => parseDate(i.value) && +i.value.slice(0, 4) >= 1900);
-  const changed = f.end.value !== m.end || (f.start && f.start.value !== m.start);
-  form.querySelector('[type=submit]').disabled = !(valid && changed);
+  const d = quickDraft, t = e.target;
+  if (!d || !['start', 'end'].includes(t.name)) return;
+  d[t.name] = t.value;
+  // A milestone's single date moves the whole item, so a task keeps its length if it comes back.
+  if (d.type !== 'task' && t.name === 'end') {
+    const m = itemById(quickId);
+    if (m && parseDate(t.value) && parseDate(m.end) && parseDate(m.start)) d.start = addDays(m.start, daysBetween(m.end, t.value));
+  }
+  quickMsg = '';
+  document.querySelector('#quick .q-msg').textContent = '';
+  refreshQuickSave();
 }
 
 async function onQuickDateSubmit(e) {
   e.preventDefault();
-  const m = itemById(quickId);
-  const f = e.target.elements;
-  if (!m || f[f.length - 1].disabled) return;
-  const changes = { end: f.end.value };
-  if (f.start) changes.start = f.start.value;
-  const res = updateItem(m, changes);
-  quickMsg = res.error || [`Dates updated: ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end)}.`, movedMessage(m, res.moved)].filter(Boolean).join(' ');
+  const m = itemById(quickId), d = quickDraft;
+  if (!m || !d || document.querySelector('#quick [type=submit]').disabled) return;
+  const task = d.type === 'task';
+  if (task && d.end < d.start) {
+    quickMsg = 'The end date is before the start date.';
+    return renderQuick();
+  }
+  const msgs = [];
+  if (d.status !== m.status) { m.status = d.status; msgs.push(`RAG ${d.status}`); }
+  const changes = { type: d.type, end: d.end, start: task ? d.start : d.end };
+  let res = { moved: [] };
+  if (changes.type !== m.type || changes.end !== m.end || changes.start !== m.start) {
+    const typeChanged = changes.type !== m.type;
+    res = updateItem(m, changes);
+    if (res.error) {
+      quickMsg = res.error;
+      return renderQuick();
+    }
+    if (typeChanged) msgs.push(`now ${withArticle(task ? T.task : T.milestone)}`);
+    msgs.push(task ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end));
+  }
+  hideQuick();
   renderGantt();
-  renderQuick();
-  if (!res.error) await saveData(movedMessage(m, res.moved) || `${itemLabel(m)} dates updated`);
+  await saveData([`${itemLabel(m)}: ${msgs.join(', ')}`, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
+}
+
+/* ---- markdown ---- */
+// Report text is written in Markdown. This small renderer covers what status reports need:
+// paragraphs, headings, bullet and numbered lists (nested by indenting), quotes, **bold**,
+// *italic*, ~~strikethrough~~, `code` and links (a backslash keeps a character literal, e.g. \*). Every line is escaped before any markup is
+// added, so no HTML in the text gets through, and links only go to http(s) or mailto. A single
+// line break stays a line break, so text written before Markdown reads as it always did.
+
+const MD_URL = /^(https?:\/\/|mailto:)/i;
+
+function mdInline(line) { // `line` is already escaped
+  const held = []; // code spans and links are set aside so their contents aren't restyled
+  const hold = (html) => `\u0000${held.push(html) - 1}\u0000`;
+  let s = line.replace(/\\([\\`*_~[\]#>+\-.)•])/g, (_, c) => hold(c));
+  s = s.replace(/`([^`]+)`/g, (_, c) => hold(`<code>${c}</code>`));
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, text, url) =>
+    (MD_URL.test(url) ? hold(`<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`) : m));
+  s = s.replace(/(^|[\s(])((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?)])/g, (_, pre, url) =>
+    pre + hold(`<a href="${/^www\./i.test(url) ? 'https://' + url : url}" target="_blank" rel="noopener noreferrer">${url}</a>`));
+  s = s.replace(/\*\*(?=\S)(.+?)\*\*|__(?=\S)(.+?)__/g, (_, a, b) => `<strong>${a ?? b}</strong>`);
+  s = s.replace(/(^|[^*\w])\*(?=[^\s*])(.+?)\*(?!\*)/g, '$1<em>$2</em>');
+  s = s.replace(/(^|[^_\w])_(?=[^\s_])(.+?)_(?!\w)/g, '$1<em>$2</em>');
+  s = s.replace(/~~(?=\S)(.+?)~~/g, '<del>$1</del>');
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => held[i]);
+}
+
+function mdList(items) {
+  let html = '';
+  const open = []; // tags of the lists currently open, outermost first
+  for (const it of items) {
+    const level = Math.min(it.level, open.length); // at most one level deeper than the last item
+    while (open.length > level + 1) html += `</li></${open.pop()}>`;
+    if (open.length === level + 1 && open[level] !== it.tag) html += `</li></${open.pop()}>`;
+    if (open.length === level + 1) html += '</li>';
+    else { html += `<${it.tag}>`; open.push(it.tag); }
+    html += `<li>${mdInline(it.text)}`;
+  }
+  while (open.length) html += `</li></${open.pop()}>`;
+  return html;
+}
+
+function mdToHtml(src) {
+  const out = [];
+  let para = [], list = [], quote = [];
+  const flush = () => {
+    if (para.length) out.push(`<p>${para.map(mdInline).join('<br>')}</p>`);
+    if (list.length) out.push(mdList(list));
+    if (quote.length) out.push(`<blockquote>${quote.map(mdInline).join('<br>')}</blockquote>`);
+    para = []; list = []; quote = [];
+  };
+  for (const raw of String(src ?? '').replace(/\r\n?/g, '\n').split('\n')) {
+    const line = escAttr(raw.replace(/\t/g, '  '));
+    let m;
+    if (!line.trim()) flush();
+    else if ((m = line.match(/^ {0,3}(#{1,3})\s+(.*?)\s*#*$/))) { flush(); out.push(`<h${m[1].length + 3}>${mdInline(m[2])}</h${m[1].length + 3}>`); }
+    else if ((m = line.match(/^( *)([-*+•]|\d+[.)])\s+(.*)$/))) {
+      if (para.length || quote.length) { const l = list; list = []; flush(); list = l; }
+      list.push({ level: Math.floor(m[1].length / 2), tag: /\d/.test(m[2]) ? 'ol' : 'ul', text: m[3] });
+    }
+    else if ((m = line.match(/^ *&gt;\s?(.*)$/) || line.match(/^ *>\s?(.*)$/))) { if (!quote.length) flush(); quote.push(m[1]); }
+    else if (list.length && /^ {2,}\S/.test(line)) list[list.length - 1].text += ' ' + line.trim(); // wrapped list item
+    else { if (list.length || quote.length) flush(); para.push(line); }
+  }
+  flush();
+  return out.join('');
+}
+
+// One line of plain text, for list cells where the full formatting won't fit.
+function mdToText(src) {
+  const held = [];
+  return String(src ?? '')
+    .replace(/\\([\\`*_~[\]#>+\-.)•])/g, (_, c) => `\u0000${held.push(c) - 1}\u0000`)
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^ *(#{1,3}|[-*+•]|\d+[.)]|>)\s+/gm, '')
+    .replace(/(\*\*|__|~~|`)/g, '')
+    .replace(/(^|\W)[*_](\S.*?)[*_](?=\W|$)/g, '$1$2')
+    .replace(/\s*\n+\s*/g, ' · ')
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => held[i]);
+}
+
+// Shortcuts in report text boxes: ⌘/Ctrl+B bold, ⌘/Ctrl+I italic, ⌘/Ctrl+K link, and Enter
+// on a list line starts the next item (Enter on an empty item ends the list).
+function onMdKeydown(e) {
+  const t = e.target;
+  if (!(t instanceof HTMLTextAreaElement) || !t.classList.contains('md-input')) return;
+  const { selectionStart: a, selectionEnd: b, value } = t;
+  const insert = (text, selA, selB) => {
+    t.focus();
+    if (!document.execCommand('insertText', false, text)) t.setRangeText(text, t.selectionStart, t.selectionEnd, 'end'); // execCommand keeps undo working
+    if (selA != null) t.setSelectionRange(selA, selB);
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const mod = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+  const wrap = { b: '**', i: '*' }[mod && e.key.toLowerCase()];
+  if (wrap) {
+    e.preventDefault();
+    const sel = value.slice(a, b);
+    insert(wrap + sel + wrap, a + wrap.length, a + wrap.length + sel.length);
+  } else if (mod && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    const sel = value.slice(a, b) || 'link';
+    insert(`[${sel}](https://)`, a + sel.length + 3, a + sel.length + 11);
+  } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && a === b) {
+    const lineStart = value.lastIndexOf('\n', a - 1) + 1;
+    const m = value.slice(lineStart, a).match(/^( *)([-*+•]|(\d+)([.)]))( +)(.*)$/);
+    if (!m) return;
+    e.preventDefault();
+    if (!m[6].trim() && value.slice(a, value.indexOf('\n', a) < 0 ? undefined : value.indexOf('\n', a)).trim() === '') {
+      // empty item: end the list, leaving a plain line to carry on typing
+      if (!lineStart) { t.setRangeText('', 0, a, 'end'); return t.dispatchEvent(new Event('input', { bubbles: true })); }
+      t.setSelectionRange(lineStart - 1, a);
+      return insert('\n');
+    }
+    insert(`\n${m[1]}${m[3] ? `${+m[3] + 1}${m[4]}` : m[2]}${m[5]}`);
+  }
+}
+
+/* ---- rich-text editor for report text ---- */
+// Report boxes are edited as formatted text, but what's stored is still Markdown: each editor
+// sits on a (hidden) textarea that holds the Markdown, so forms, saving and dirty checks read
+// `.value` as before. Typing converts the editor's HTML back to Markdown; the textarea is only
+// rewritten on a real edit, so opening a report never changes its text. The Markdown button
+// shows the textarea itself for anyone who'd rather type the syntax.
+
+const ED_TOOLS = [
+  { cmd: 'bold', label: '<b>B</b>', title: 'Bold (⌘B)' },
+  { cmd: 'italic', label: '<i>I</i>', title: 'Italic (⌘I)' },
+  { cmd: 'strikeThrough', label: '<s>S</s>', title: 'Strikethrough' },
+  { sep: true },
+  { cmd: 'insertUnorderedList', label: '<svg viewBox="0 0 20 20"><circle cx="4.5" cy="6" r="1.3"/><circle cx="4.5" cy="14" r="1.3"/><path d="M8.5 6h8M8.5 14h8"/></svg>', title: 'Bulleted list (type “- ”)' },
+  { cmd: 'insertOrderedList', label: '<svg viewBox="0 0 20 20"><path d="M8.5 6h8M8.5 14h8"/><text x="2.2" y="8.3" font-size="6.5" stroke="none" fill="currentColor">1</text><text x="2.2" y="16.3" font-size="6.5" stroke="none" fill="currentColor">2</text></svg>', title: 'Numbered list (type “1. ”)' },
+  { cmd: 'link', label: '<svg viewBox="0 0 20 20"><path d="M8.5 11.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5L10 5M11.5 8.5a3.5 3.5 0 0 0-5 0L4 11a3.5 3.5 0 0 0 5 5l1-1"/></svg>', title: 'Link (⌘K)' },
+];
+
+function mdEditor(t) {
+  if (t._ed) return t._ed;
+  const wrap = document.createElement('div');
+  wrap.className = 'wys';
+  wrap.innerHTML = `
+    <div class="wys-bar" role="toolbar" aria-label="Formatting">
+      ${ED_TOOLS.map(b => (b.sep ? '<span class="wys-sep"></span>'
+        : `<button type="button" data-cmd="${b.cmd}" title="${b.title}" aria-pressed="false" tabindex="-1">${b.label}</button>`)).join('')}
+      <span class="spacer"></span>
+      <button type="button" data-cmd="source" class="wys-src" title="Edit as Markdown text" aria-pressed="false" tabindex="-1">Markdown</button>
+    </div>
+    <div class="wys-body md" contenteditable="true" role="textbox" aria-multiline="true"></div>`;
+  t.after(wrap);
+  wrap.prepend(t); // the textarea lives in the wrapper, shown only in Markdown mode
+  t.classList.add('md-input');
+  const body = wrap.querySelector('.wys-body');
+  body.dataset.placeholder = t.placeholder;
+  body.setAttribute('aria-label', t.closest('.field, label')?.querySelector('.field-label')?.textContent || t.name);
+  const ed = { t, wrap, body };
+  t._ed = ed;
+
+  body.addEventListener('input', () => edCommit(ed));
+  body.addEventListener('keydown', (e) => edKeydown(ed, e));
+  body.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
+    if (!text) return;
+    document.execCommand('insertHTML', false, /\n/.test(text.trim()) ? mdToHtml(text) : mdInline(escAttr(text)));
+  });
+  body.addEventListener('drop', (e) => e.preventDefault()); // only typed or pasted text, never dropped HTML
+  wrap.querySelector('.wys-bar').addEventListener('mousedown', (e) => e.preventDefault()); // keep the selection
+  wrap.querySelector('.wys-bar').addEventListener('click', (e) => {
+    const cmd = e.target.closest('[data-cmd]')?.dataset.cmd;
+    if (!cmd) return;
+    if (cmd === 'source') return edSource(ed, !wrap.classList.contains('source'));
+    body.focus();
+    if (cmd === 'link') edLink(ed);
+    else document.execCommand(cmd);
+    edCommit(ed);
+  });
+  t.addEventListener('input', () => { if (wrap.classList.contains('source')) autoGrow(t); });
+  edLoad(t);
+  return ed;
+}
+
+// Show the textarea's Markdown in the editor (after the value was set in code).
+function edLoad(t) {
+  const ed = t._ed;
+  if (!ed) return;
+  ed.body.innerHTML = mdToHtml(t.value);
+  edEmpty(ed);
+  if (ed.wrap.classList.contains('source')) autoGrow(t);
+}
+const edEmpty = (ed) => ed.body.classList.toggle('is-empty', !ed.body.textContent.trim() && !ed.body.querySelector('li'));
+
+// Chrome makes a list inside the paragraph it started in; lift it out so spacing matches the
+// saved report. The caret sits in a text node that's only moved, so it's put back afterwards.
+function edTidy(ed) {
+  const wrapped = [...ed.body.querySelectorAll('p, div')].filter(p => p.querySelector(':scope > ul, :scope > ol'));
+  if (!wrapped.length) return;
+  const sel = window.getSelection();
+  const at = sel.rangeCount ? [sel.anchorNode, sel.anchorOffset] : null;
+  for (const p of wrapped) {
+    const parts = [];
+    let loose = null;
+    for (const n of [...p.childNodes]) {
+      if (/^(UL|OL|P|DIV|BLOCKQUOTE|H[1-6])$/.test(n.nodeName)) { parts.push(n); loose = null; }
+      else if (n.nodeName === 'BR' && !loose) continue;
+      else { if (!loose) parts.push(loose = document.createElement('p')); loose.append(n); }
+    }
+    p.replaceWith(...parts);
+  }
+  if (at && ed.body.contains(at[0])) sel.collapse(at[0], Math.min(at[1], at[0].length ?? at[0].childNodes.length));
+}
+
+function edCommit(ed) {
+  edTidy(ed);
+  ed.t.value = htmlToMd(ed.body);
+  edEmpty(ed);
+  ed.t.dispatchEvent(new Event('input', { bubbles: true }));
+  edToolState();
+}
+
+function edSource(ed, on) {
+  ed.wrap.classList.toggle('source', on);
+  ed.wrap.querySelector('.wys-src').setAttribute('aria-pressed', on);
+  if (on) { autoGrow(ed.t); ed.t.focus(); } else { edLoad(ed.t); focusText(ed.t); }
+}
+
+// Focus a report text box, caret at the end, whichever way it's being edited.
+function focusText(t) {
+  const ed = t._ed;
+  if (!ed || ed.wrap.classList.contains('source')) {
+    t.focus();
+    return t.setSelectionRange(t.value.length, t.value.length);
+  }
+  ed.body.focus();
+  const r = document.createRange();
+  r.selectNodeContents(ed.body);
+  r.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+
+function edLink(ed) {
+  const sel = window.getSelection();
+  let url = prompt('Link address', 'https://');
+  if (!url || url === 'https://') return;
+  url = url.trim();
+  if (!MD_URL.test(url)) url = /^[\w.-]+@[\w.-]+\.\w+$/.test(url) ? `mailto:${url}` : `https://${url.replace(/^\/+/, '')}`;
+  if (sel.isCollapsed) document.execCommand('insertHTML', false, `<a href="${escAttr(url)}">${escAttr(url)}</a>`);
+  else document.execCommand('createLink', false, url);
+}
+
+function edKeydown(ed, e) {
+  const mod = (e.metaKey || e.ctrlKey) && !e.altKey;
+  if (mod && !e.shiftKey && e.key.toLowerCase() === 'k') { e.preventDefault(); edLink(ed); return edCommit(ed); }
+  if (mod && e.shiftKey && e.key.toLowerCase() === 'x') { e.preventDefault(); document.execCommand('strikeThrough'); return edCommit(ed); }
+  const sel = window.getSelection();
+  const li = sel.anchorNode && (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement).closest('li');
+  if (e.key === 'Tab' && li && ed.body.contains(li)) {
+    e.preventDefault();
+    document.execCommand(e.shiftKey ? 'outdent' : 'indent');
+    return edCommit(ed);
+  }
+  // Markdown as you type: "- ", "* ", "1. " or "> " at the start of a line.
+  if (e.key === ' ' && sel.isCollapsed && !li) {
+    const block = (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement).closest('p, div, h4, h5, h6');
+    const start = block && ed.body.contains(block) ? block : ed.body;
+    const before = document.createRange();
+    before.setStart(start, 0);
+    before.setEnd(sel.anchorNode, sel.anchorOffset);
+    const typed = before.toString();
+    const cmd = /^[-*+•]$/.test(typed) ? ['insertUnorderedList'] : /^\d+[.)]$/.test(typed) ? ['insertOrderedList']
+      : typed === '>' ? ['formatBlock', 'blockquote'] : null;
+    if (!cmd) return;
+    e.preventDefault();
+    sel.removeAllRanges();
+    sel.addRange(before);
+    document.execCommand('delete');
+    document.execCommand(...cmd);
+    edCommit(ed);
+  }
+}
+
+// Light up the toolbar buttons for the formatting at the caret.
+function edToolState() {
+  const wrap = document.activeElement?.closest?.('.wys');
+  if (!wrap) return;
+  wrap.querySelectorAll('.wys-bar [data-cmd]').forEach(b => {
+    if (b.dataset.cmd === 'link' || b.dataset.cmd === 'source') return;
+    let on = false;
+    try { on = document.queryCommandState(b.dataset.cmd); } catch { /* ignore */ }
+    b.setAttribute('aria-pressed', on);
+  });
+}
+
+// The editor's HTML as Markdown: paragraphs are separated by a blank line, line breaks (Shift+
+// Enter) stay single, and characters that would otherwise read as formatting are escaped.
+function htmlToMd(root) {
+  const esc = (s) => s.replace(/\\/g, '\\\\').replace(/([*`[\]])/g, '\\$1').replace(/~~/g, '\\~\\~')
+    .replace(/(^|\W)_/g, '$1\\_').replace(/_(?=\W|$)/g, '\\_');
+  const escLead = (line) => line.replace(/^(\s*)([-+•>]|#{1,3})(?=\s)/, '$1\\$2').replace(/^(\s*\d+)([.)])(?=\s)/, '$1\\$2');
+  const wrapWith = (s, m) => s.split('\n').map(l => {
+    const x = l.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    return x[2] ? `${x[1]}${m}${x[2]}${m}${x[3]}` : l;
+  }).join('\n');
+  const isList = (n) => n.nodeName === 'UL' || n.nodeName === 'OL';
+  const isBlock = (n) => /^(P|DIV|H[1-6]|BLOCKQUOTE|UL|OL|LI)$/.test(n.nodeName);
+
+  const inline = (node) => {
+    let out = '';
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) { out += esc(n.nodeValue.replace(/\u00a0/g, ' ').replace(/\s*\n\s*/g, ' ')); continue; }
+      if (n.nodeType !== 1 || isList(n)) continue;
+      const tag = n.nodeName, st = n.style || {};
+      if (tag === 'BR') out += '\n';
+      else if (tag === 'CODE') out += '`' + n.textContent.replace(/`/g, '') + '`';
+      else if (tag === 'A') {
+        const href = n.getAttribute('href') || '', text = inline(n);
+        out += MD_URL.test(href) ? (text === esc(href) ? href : `[${text}](${href.replace(/[()\s]/g, encodeURIComponent)})`) : text;
+      } else {
+        let t = inline(n);
+        if (isBlock(n) && out && !out.endsWith('\n')) t = '\n' + t;
+        if (tag === 'B' || tag === 'STRONG' || +st.fontWeight >= 600 || st.fontWeight === 'bold') t = wrapWith(t, '**');
+        if (tag === 'I' || tag === 'EM' || st.fontStyle === 'italic') t = wrapWith(t, '*');
+        if (/^(S|STRIKE|DEL)$/.test(tag) || /line-through/.test(st.textDecoration || st.textDecorationLine || '')) t = wrapWith(t, '~~');
+        out += t;
+      }
+    }
+    return out;
+  };
+  const paragraph = (text) => text.replace(/\n$/, '').split('\n').map(l => escLead(l.trim())).join('\n');
+  const list = (node, depth, lines) => {
+    let i = 0;
+    for (const c of node.children) {
+      if (c.nodeName === 'LI') {
+        const marker = node.nodeName === 'OL' ? `${++i}.` : '-';
+        lines.push(`${'  '.repeat(depth)}${marker} ${inline(c).replace(/\s*\n\s*/g, ' ').trim()}`);
+        for (const sub of c.children) if (isList(sub)) list(sub, depth + 1, lines);
+      } else if (isList(c)) list(c, depth + 1, lines);
+    }
+    return lines;
+  };
+  const blocks = [];
+  let loose = '';
+  const flushLoose = () => { if (loose.trim()) blocks.push(paragraph(loose)); loose = ''; };
+  const walk = (parent, out) => {
+    for (const n of parent.childNodes) {
+      if (n.nodeType === 1 && isList(n)) { flushLoose(); out.push(list(n, 0, []).join('\n')); }
+      else if (n.nodeType === 1 && /^H[1-6]$/.test(n.nodeName)) {
+        flushLoose();
+        const text = inline(n).replace(/\s*\n\s*/g, ' ').trim();
+        if (text) out.push(`${'#'.repeat(Math.min(3, Math.max(1, +n.nodeName[1] - 3)))} ${text}`);
+      } else if (n.nodeName === 'BLOCKQUOTE') {
+        flushLoose();
+        const inner = [];
+        walk(n, inner);
+        if (!inner.length) { const t = paragraph(inline(n)); if (t.trim()) inner.push(t); }
+        if (inner.length) out.push(inner.join('\n').split('\n').map(l => `> ${l}`).join('\n'));
+      } else if (n.nodeType === 1 && (n.nodeName === 'P' || n.nodeName === 'DIV')) {
+        flushLoose();
+        if (n.querySelector('ul, ol, p, div, blockquote')) walk(n, out); // a wrapper, not a paragraph
+        else { const t = paragraph(inline(n)); if (t.trim()) out.push(t); }
+      } else if (parent === root) loose += n.nodeType === 3 ? esc(n.nodeValue.replace(/\u00a0/g, ' ')) : n.nodeName === 'BR' ? '\n' : inline({ childNodes: [n] });
+    }
+    if (parent === root) flushLoose();
+  };
+  walk(root, blocks);
+  return blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /* ---- report dialog ---- */
@@ -1967,6 +2387,7 @@ function openReportDialog({ report = null, itemId = '' } = {}) {
 
   const v = report || newReportValues(rpItemId);
   for (const k of ['cadence', 'period_end', 'status', 'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author']) f[k].value = v[k];
+  for (const k of REPORT_TEXTS) edLoad(f[k]);
   f.sync_status.checked = true;
 
   document.getElementById('rp-heading').textContent = report ? 'Edit report' : 'Provide report';
@@ -1978,7 +2399,7 @@ function openReportDialog({ report = null, itemId = '' } = {}) {
   refreshDatalists();
   refreshReportForm();
   document.getElementById('report-dialog').showModal();
-  (rpItemId ? f.exec_summary : f.item_id).focus();
+  if (rpItemId) focusText(f.exec_summary); else f.item_id.focus();
 }
 
 // Defaults for a new report: carry on the item's last cadence, current status and owner.
@@ -2077,7 +2498,7 @@ function renderPrevReport(earlier) {
     const copy = s.to && text && (s.to !== 'get_to_green' || gtgShown)
       ? `<button type="button" class="link-btn" data-copy="${s.key}" data-to="${s.to}">${s.btn}</button>` : '';
     return `<section><header><span>${s.label}</span>${copy}</header>
-      ${text ? `<p>${escAttr(text)}</p>` : '<p class="rp-prev-empty">—</p>'}</section>`;
+      ${text ? `<div class="md">${mdToHtml(text)}</div>` : '<p class="rp-prev-empty">—</p>'}</section>`;
   }).join('');
   el.innerHTML = `
     <div class="rp-prev-head">
@@ -2105,9 +2526,9 @@ function onPrevPanelClick(e) {
   const prev = document.getElementById('rp-prev')._earlier[rpPrevIdx];
   const field = document.getElementById('report-form').elements[copy.dataset.to];
   const text = prev[copy.dataset.copy];
-  if (!field.value.includes(text)) field.value = field.value.trim() ? `${field.value.trimEnd()}\n${text}` : text;
-  field.focus();
-  field.setSelectionRange(field.value.length, field.value.length);
+  if (!field.value.includes(text)) field.value = field.value.trim() ? `${field.value.trimEnd()}\n\n${text}` : text;
+  edLoad(field);
+  focusText(field);
 }
 
 // Why a report's values can't be saved yet, or '' if they can.
@@ -2196,11 +2617,12 @@ const RPT_COLS = [
   { key: 'status', label: 'RAG', w: 120, filter: () => STATUSES.map(v => [v, v]) },
   { key: 'exec_summary', label: 'Exec summary', w: 420, filter: 'text', text: r => `${r.exec_summary} ${r.get_to_green ? 'get to green' : ''}` },
   { key: 'author', label: 'Author', w: 130, filter: 'text' },
-  { key: 'updated', label: 'Last updated', w: 150, filter: 'text', text: r => fmtStamp(r.updated) },
+  { key: 'created', label: 'Created', w: 120, filter: 'text', text: r => fmtStamp(r.created) },
+  { key: 'updated', label: 'Last updated', w: 120, filter: 'text', text: r => fmtStamp(r.updated) },
 ];
 
 // With the preview open the list keeps to what identifies a report; the pane shows the rest.
-const PREVIEW_HIDDEN = ['cadence', 'exec_summary', 'updated'];
+const PREVIEW_HIDDEN = ['cadence', 'exec_summary'];
 const rptTable = makeTable({
   table: 'reports-table', store: 'milestone-tracker.reports-grid', onChange: () => renderReports(), fill: 'item_id',
   cols: () => (rptPreview ? RPT_COLS.filter(c => !PREVIEW_HIDDEN.includes(c.key)) : RPT_COLS),
@@ -2246,6 +2668,13 @@ function filteredReports() {
   return sortRows(rptTable, rows, valueOf, reportDefaultOrder);
 }
 
+// A created / updated time as date over time, so the column stays narrow.
+function stampCell(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '<td class="rc-stamp"></td>';
+  return `<td class="rc-stamp" title="${escAttr(fmtStamp(iso))}">${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}<small>${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</small></td>`;
+}
+
 function renderReports() {
   refreshSelectFilters(rptTable);
   const qEl = document.getElementById('rpf-q');
@@ -2259,9 +2688,10 @@ function renderReports() {
     item_id: (r, m) => `<td class="rc-item">${m ? `${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted ${escAttr(T.item)} #${escAttr(r.item_id)}</i>`}</td>`,
     cadence: r => `<td class="rc-cad">${r.cadence}</td>`,
     status: r => `<td class="rc-status">${statusPill(r.status)}${rptPreview && r.get_to_green ? '<small class="gtg-flag">Get to green plan</small>' : ''}</td>`,
-    exec_summary: r => `<td class="rc-sum"><div>${escAttr(r.exec_summary)}</div>${r.get_to_green ? '<small class="gtg-flag">Has get to green plan</small>' : ''}</td>`,
+    exec_summary: r => `<td class="rc-sum"><div>${escAttr(mdToText(r.exec_summary))}</div>${r.get_to_green ? '<small class="gtg-flag">Has get to green plan</small>' : ''}</td>`,
     author: r => `<td class="rc-author">${escAttr(r.author)}</td>`,
-    updated: r => `<td class="rc-upd">${fmtStamp(r.updated)}</td>`,
+    created: r => stampCell(r.created),
+    updated: r => stampCell(r.updated),
   };
   const cols = rptTable.cols();
   const body = document.getElementById('reports-body');
@@ -2307,6 +2737,7 @@ const PANE_TEXTS = [
   { key: 'next_steps', label: 'Next steps' },
   { key: 'get_to_green', label: 'Get to green plan', gtg: true },
 ];
+const REPORT_TEXTS = ['exec_summary', 'achievements', 'next_steps', 'get_to_green'];
 const PANE_FIELDS = ['cadence', 'period_end', 'status', 'exec_summary', 'achievements', 'next_steps', 'get_to_green', 'author'];
 const selectedReport = () => state.reports.find(r => r.id === rptSelId);
 const paneForm = () => document.getElementById('pane-form');
@@ -2368,7 +2799,7 @@ function renderPane(focusKey) {
   if (!paneEditing) {
     const sections = PANE_TEXTS.filter(s => !s.gtg || r.get_to_green).map(s => `
       <section class="pane-sec${s.gtg ? ' gtg' : ''}" data-field="${s.key}"><h3>${s.label}</h3>
-        ${r[s.key] ? `<p>${escAttr(r[s.key])}</p>` : '<p class="pane-blank">—</p>'}</section>`).join('');
+        ${r[s.key] ? `<div class="md">${mdToHtml(r[s.key])}</div>` : '<p class="pane-blank">—</p>'}</section>`).join('');
     el.innerHTML = `${bar}
       <div class="pane-doc" title="Click to edit">
         ${item}
@@ -2391,7 +2822,7 @@ function renderPane(focusKey) {
       ${item}
       <div class="pane-cols">
         <div class="pane-main form-grid">
-          ${PANE_TEXTS.map(s => `<label class="${s.gtg ? 'rp-gtg' : ''}" data-sec="${s.key}">${s.label}<textarea name="${s.key}" rows="4" placeholder="${escAttr(placeholderOf(s.key))}"></textarea></label>`).join('')}
+          ${PANE_TEXTS.map(s => `<div class="field${s.gtg ? ' rp-gtg' : ''}" data-sec="${s.key}"><span class="field-label">${s.label}</span><textarea name="${s.key}" rows="4" placeholder="${escAttr(placeholderOf(s.key))}"></textarea></div>`).join('')}
           <p class="dlg-error pane-error"></p>
         </div>
         <aside class="pane-side form-grid">
@@ -2408,12 +2839,11 @@ function renderPane(focusKey) {
     </div></form>`;
   const f = paneForm().elements;
   for (const k of PANE_FIELDS) f[k].value = r[k];
+  for (const k of REPORT_TEXTS) mdEditor(f[k]);
   refreshDatalists();
   refreshPaneForm();
-  paneForm().querySelectorAll('textarea').forEach(autoGrow);
-  const target = f[focusKey] instanceof HTMLTextAreaElement || f[focusKey] instanceof HTMLInputElement ? f[focusKey] : f.exec_summary;
-  target.focus();
-  if (target.setSelectionRange && target.type !== 'date') target.setSelectionRange(target.value.length, target.value.length);
+  if (f[focusKey] instanceof HTMLInputElement && f[focusKey].type !== 'radio') f[focusKey].focus();
+  else focusText(REPORT_TEXTS.includes(focusKey) ? f[focusKey] : f.exec_summary);
 }
 
 function autoGrow(t) {
@@ -2431,7 +2861,6 @@ function refreshPaneForm() {
     ? `Covers ${fmtShort(periodStart(end, f.cadence.value))} – ${fmtNice(end)}` : '';
   const gtg = form.querySelector('[data-sec="get_to_green"]');
   gtg.hidden = !OFF_TRACK.includes(st);
-  if (!gtg.hidden) autoGrow(f.get_to_green);
   const sync = document.getElementById('pane-sync');
   sync.hidden = !(m && isLatestReport(r.item_id, end, r) && st !== m.status);
   if (m) sync.querySelector('span').innerHTML = `Also change ${escAttr(itemLabel(m))}’s RAG on the chart from <b>${m.status}</b> to <b>${st}</b>`;
@@ -2574,7 +3003,6 @@ function wirePane() {
   const pane = document.getElementById('rp-pane');
   pane.addEventListener('click', onPaneClick);
   pane.addEventListener('submit', (e) => { e.preventDefault(); savePane(); });
-  pane.addEventListener('input', (e) => { if (e.target.tagName === 'TEXTAREA') autoGrow(e.target); });
   pane.addEventListener('change', (e) => {
     if (['status', 'cadence', 'period_end'].includes(e.target.name)) refreshPaneForm();
     const err = paneForm()?.querySelector('.pane-error');
@@ -2632,13 +3060,25 @@ function wireReports() {
   quick.addEventListener('click', onQuickClick);
   quick.addEventListener('input', onQuickDateInput);
   quick.addEventListener('submit', onQuickDateSubmit);
-  document.addEventListener('mousedown', (e) => { if (!quick.hidden && !quick.contains(e.target)) hideQuick(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideQuick(); });
-  document.getElementById('gantt-scroll').addEventListener('scroll', hideQuick);
-  window.addEventListener('resize', hideQuick);
+  // Clicking away closes the panel unless it has unsaved changes; then it asks for Save or Cancel.
+  document.addEventListener('mousedown', (e) => {
+    if (quick.hidden || quick.contains(e.target) || e.target.closest('.gantt-item')) return;
+    if (!quickDirty()) return hideQuick();
+    quick.classList.remove('nudge');
+    void quick.offsetWidth; // restart the animation
+    quick.classList.add('nudge');
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !quick.hidden) hideQuick(); });
+  const hideIfClean = () => { if (!quickDirty()) hideQuick(); };
+  document.getElementById('gantt-scroll').addEventListener('scroll', hideIfClean);
+  window.addEventListener('resize', hideIfClean);
 
   const dlg = document.getElementById('report-dialog');
   const form = document.getElementById('report-form');
+  for (const k of REPORT_TEXTS) mdEditor(form.elements[k]);
+  document.addEventListener('keydown', onMdKeydown); // shortcuts while editing as Markdown text
+  document.addEventListener('selectionchange', edToolState);
+  try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch { /* ignore */ }
   form.addEventListener('submit', submitReport);
   form.addEventListener('change', onReportFormInput);
   document.getElementById('rp-cancel').onclick = () => dlg.close();
@@ -3241,7 +3681,7 @@ function setNavCollapsed(collapsed) {
 function wireEvents() {
   for (const v of VIEWS) document.getElementById(`nav-${v}`).onclick = () => switchView(v);
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
-  document.getElementById('app-main').addEventListener('scroll', () => { hideQuick(); hideTip(); });
+  document.getElementById('app-main').addEventListener('scroll', () => { if (!quickDirty()) hideQuick(); hideTip(); });
   wireWorkspaces();
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };

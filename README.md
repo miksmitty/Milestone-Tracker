@@ -74,7 +74,7 @@ Changing an item's end date in the **Items** screen shifts everything downstream
 
 RAG and dates change far more often than anything else, so they are the quickest to update:
 
-- **Gantt chart**: click (or right-click) an item to open the quick update panel. Click a RAG to change it; change the dates and hit *Update dates* (the panel says how many dependent items will move). From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
+- **Gantt chart**: click (or right-click) an item to open the quick update panel. Change its RAG, switch it between milestone and task, or change its dates, then **Save** (or Enter) — nothing changes until you do, and **Cancel** / Esc throws the changes away. Switching the type back and forth keeps both dates, and moving a milestone's date keeps the task's length if you switch back. Clicking away with unsaved changes gives the panel a nudge instead of losing them. The panel says how many dependent items will move. From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
 - **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. Click a RAG to set it, or edit any cell. Switch to **All fields** for lanes, links, shape and so on.
 - The quick update panel on the chart also has a **Type** switch.
 
@@ -89,6 +89,8 @@ Owners provide a regular status report on any milestone or task. **Click an item
 - **Exec summary** (required), **Achievements last period**, **Next steps**
 - **Get to green plan**: only shown for, and required by, Amber and Red reports
 - **Reported by**: defaults to the item's owner
+
+The exec summary, achievements, next steps and get to green plan are **formatted text**. Use the toolbar or ⌘/Ctrl+B, I and K for bold, italic and links (plus strikethrough), and bulleted or numbered lists; typing `- `, `1. ` or `> ` at the start of a line starts a list or quote, Tab / Shift+Tab nest a list item, Enter starts a new paragraph and Shift+Enter a new line. Pasted text keeps any Markdown formatting it has, and never brings in other HTML. Behind the scenes the text is stored as **Markdown** in reports.csv (and the CSV download), so it reads cleanly in a spreadsheet; click **Markdown** on a box to see and edit that text directly (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `#` headings, `- `/`1. ` lists, `> ` quotes, `[links](https://…)`, and `\` to keep a character literal). The Reports list shows the exec summary as plain text.
 
 The item's previous report is shown in a panel beside the form while you write the new one, with ‹ › to step back through older reports. Its sections can be copied across: last period's *next steps* into this period's *achievements*, the *exec summary*, or the *get to green plan* (carried forward). You can only have one report per item per period; if one exists, you'll be offered a link to open it.
 
