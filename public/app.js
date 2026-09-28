@@ -501,9 +501,9 @@ function shiftItem(m, n) {
   m.end = addDays(m.end, n);
 }
 
-// Move everything downstream of `id` (via explicit dependencies) by `delta` days,
+// Move everything downstream of `ids` (via explicit dependencies) by `delta` days,
 // so gaps between linked items are preserved whether the change is earlier or later.
-function cascadeShift(id, delta) {
+function cascadeShift(ids, delta) {
   if (!delta) return;
   const byId = new Map(state.items.map(m => [m.id, m]));
   const depSucc = new Map();
@@ -513,8 +513,8 @@ function cascadeShift(id, delta) {
       depSucc.get(d).push(m.id);
     }
   }
-  const queue = [...(depSucc.get(id) || [])];
-  const seen = new Set([id]);
+  const queue = ids.flatMap(id => depSucc.get(id) || []);
+  const seen = new Set(ids);
   while (queue.length) {
     const s = queue.shift();
     if (seen.has(s)) continue;
@@ -574,7 +574,7 @@ function updateItem(m, changes) {
     return { error: 'That link would create a circular dependency.' };
   }
   const snapshot = new Map(state.items.map(x => [x.id, x.start + x.end]));
-  cascadeShift(m.id, before.end && m.end ? daysBetween(before.end, m.end) : 0);
+  cascadeShift([m.id], before.end && m.end ? daysBetween(before.end, m.end) : 0);
   enforceConstraints();
   return { moved: state.items.filter(x => snapshot.get(x.id) !== x.start + x.end).map(x => x.id) };
 }
@@ -1379,7 +1379,7 @@ function renderTableHead(t) {
     return `<th class="filter-cell">${ctl}</th>`;
   };
   tableEl(t).querySelector('thead').innerHTML = `
-    <tr>${cols.map(c => c.fixed ? '<th></th>' : `
+    <tr>${cols.map(c => c.fixed ? `<th${c.head ? ` class="col-${c.key}"` : ''}>${c.head ? c.head() : ''}</th>` : `
       <th data-sort="${c.key}" class="sortable" title="${escAttr(c.title || 'Click to sort')}">
         <span>${escAttr(typeof c.label === 'function' ? c.label() : c.label)}</span><span class="sort-ind"></span>
         <span class="col-resizer" data-resize="${c.key}" title="Drag to resize · double-click to reset"></span>
@@ -1504,6 +1504,7 @@ function wireTable(t) {
 
 const opts = (values) => () => values.map(v => [v, v]);
 const GRID_COLS = [
+  { key: 'sel', label: '', w: 36, fixed: true, head: () => `<input type="checkbox" id="grid-sel-all" title="Select all shown" />` },
   { key: 'id', label: 'ID', w: 64, title: 'Primary key — assigned automatically, never changes', filter: 'text' },
   { key: 'ref', label: 'Ref', w: 80, filter: 'text' },
   { key: 'title', label: 'Title', w: 200, filter: 'text' },
@@ -1522,7 +1523,7 @@ const GRID_COLS = [
 ];
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
 const QUICK_COLS = {
-  id: {}, ref: {}, title: { w: 220 }, type: {}, owner: {}, status: { w: 410, wkey: 'status.quick' }, start: {}, end: {},
+  sel: {}, id: {}, ref: {}, title: { w: 220 }, type: {}, owner: {}, status: { w: 410, wkey: 'status.quick' }, start: {}, end: {},
   actions: { w: 90, wkey: 'actions.quick' },
 };
 
@@ -1585,7 +1586,9 @@ function renderEditor(highlight = []) {
   for (const { m, i } of rows) {
     const task = isTask(m);
     const tr = document.createElement('tr');
-    if (highlight.includes(m.id)) tr.className = 'shifted';
+    tr.dataset.id = m.id;
+    tr.classList.toggle('shifted', highlight.includes(m.id));
+    tr.classList.toggle('selected', gridSel.has(m.id));
 
     const parentOpts = milestones.filter(p => p.id !== m.id);
     if (m.parent && !parentOpts.some(p => p.id === m.parent)) parentOpts.push(byId.get(m.parent));
@@ -1598,6 +1601,7 @@ function renderEditor(highlight = []) {
     // A milestone's two date cells are one date: editing either moves the milestone.
     const dateTitle = task ? '' : ` title="${escAttr(`${T.Milestone} — changing this date moves it. Change the type to ${T.Task} to give it a date range.`)}"`;
     const cells = {
+      sel: `<input type="checkbox" data-sel="${m.id}" ${gridSel.has(m.id) ? 'checked' : ''} title="Select" />`,
       id: `<span class="id" title="Primary key">${m.id}</span>`,
       ref: `<input data-i="${i}" data-k="ref" value="${escAttr(m.ref)}" placeholder="e.g. 4.1" class="ref-in${dup ? ' dup' : ''}" ${dup ? 'title="Duplicate ref"' : ''} />`,
       title: `<input data-i="${i}" data-k="title" value="${escAttr(m.title)}" placeholder="Title" ${m.description ? `title="${escAttr(m.description)}"` : ''} />`,
@@ -1616,7 +1620,7 @@ function renderEditor(highlight = []) {
       actions: quick ? `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this ${escAttr(T.item)}">Report…</button>`
         : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
     };
-    tr.innerHTML = cols.map(c => `<td${c.key === 'id' ? ' class="col-id"' : ''}>${cells[c.key]}</td>`).join('');
+    tr.innerHTML = cols.map(c => `<td${c.key === 'id' ? ' class="col-id"' : c.key === 'sel' ? ' class="col-sel"' : ''}>${cells[c.key]}</td>`).join('');
     body.appendChild(tr);
   }
   if (!rows.length) {
@@ -1630,6 +1634,10 @@ function renderEditor(highlight = []) {
   document.getElementById('btn-clear-filters').hidden = !filtered;
   document.querySelectorAll('[name="grid-mode"]').forEach(r => { r.checked = r.value === grid.mode; });
   refreshDatalists();
+  // Only rows on screen stay selected, so a bulk action never reaches something filtered out of view.
+  const shown = new Set(rows.map(r => r.m.id));
+  for (const id of gridSel) if (!shown.has(id)) gridSel.delete(id);
+  renderBulkBar();
 }
 
 function escAttr(s) {
@@ -1696,6 +1704,8 @@ function onEditorChange(e) {
 }
 
 function onEditorClick(e) {
+  const sel = e.target.closest('[data-sel]');
+  if (sel) return toggleSelected(sel, e.shiftKey);
   const rag = e.target.closest('[data-rag]');
   if (rag) {
     syncEditorToState();
@@ -1726,6 +1736,135 @@ function onEditorClick(e) {
     renderEditor();
     scheduleSave('Deleted');
   }
+}
+
+/* ---- row selection + bulk actions ---- */
+// Tick rows (shift-click for a range) to set one field on all of them, move their dates or delete them.
+
+const gridSel = new Set(); // ids of the selected rows; always a subset of the rows shown
+let gridSelAnchor = null;  // last row ticked, where a shift-click range starts
+let bulkField = 'status';
+
+const BULK_FIELDS = () => [
+  ['status', 'RAG'], ['owner', 'Owner'], ['swimlane', 'Swimlane'], ['subswimlane', 'Sub-swimlane'],
+  ['type', 'Type'], ['shape', 'Shape'], ['parent', 'Rolls up to'], ['shift', 'Dates — move by'],
+];
+const selectedItems = () => state.items.filter(m => gridSel.has(m.id));
+
+function toggleSelected(box, range) {
+  const boxes = [...document.querySelectorAll('#editor-body [data-sel]')];
+  const from = boxes.findIndex(b => b.dataset.sel === gridSelAnchor);
+  const to = boxes.indexOf(box);
+  const targets = range && from >= 0 ? boxes.slice(Math.min(from, to), Math.max(from, to) + 1) : [box];
+  for (const b of targets) setSelected(b, box.checked);
+  gridSelAnchor = box.dataset.sel;
+  renderBulkBar();
+}
+
+function setSelected(box, on) {
+  box.checked = on;
+  if (on) gridSel.add(box.dataset.sel); else gridSel.delete(box.dataset.sel);
+  box.closest('tr').classList.toggle('selected', on);
+}
+
+function selectAllShown(on) {
+  document.querySelectorAll('#editor-body [data-sel]').forEach(b => setSelected(b, on));
+  gridSelAnchor = null;
+  renderBulkBar();
+}
+
+function bulkValueControl() {
+  const lanes = (list) => `<input id="bulk-input" list="${list}" placeholder="Leave blank to clear" />`;
+  switch (bulkField) {
+    case 'status': return `<span>to</span><select id="bulk-input">${statusOptions(DEFAULT_STATUS)}</select>`;
+    case 'owner': return `<span>to</span>${lanes('owner-list')}`;
+    case 'swimlane': return '<span>to</span><input id="bulk-input" list="lane-list" placeholder="Swimlane" />';
+    case 'subswimlane': return `<span>to</span>${lanes('sublane-list')}`;
+    case 'type': return `<span>to</span><select id="bulk-input">${typeOptions('milestone')}</select>`;
+    case 'shape': return `<span>to</span><select id="bulk-input">${optionList(SHAPES)}</select>`;
+    case 'parent': return `<span>to</span><select id="bulk-input"><option value="">— none —</option>${state.items.filter(m => !isTask(m)).sort(cmpRef)
+      .map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select>`;
+    case 'shift': return '<input id="bulk-input" type="number" step="1" value="7" /><span>days (negative for earlier)</span>';
+  }
+}
+
+function renderBulkBar() {
+  const n = gridSel.size;
+  const shown = document.querySelectorAll('#editor-body [data-sel]').length;
+  const all = document.getElementById('grid-sel-all');
+  if (all) {
+    all.checked = n > 0 && n === shown;
+    all.indeterminate = n > 0 && n < shown;
+  }
+  const bar = document.getElementById('bulk-bar');
+  const wasHidden = bar.hidden;
+  bar.hidden = !n;
+  if (!n) return;
+  document.getElementById('bulk-count').textContent = `${count(n, T.item, T.items)} selected`;
+  const field = document.getElementById('bulk-field');
+  field.innerHTML = BULK_FIELDS().map(([k, label]) => `<option value="${k}" ${k === bulkField ? 'selected' : ''}>${label}</option>`).join('');
+  if (wasHidden) document.getElementById('bulk-value').innerHTML = bulkValueControl();
+}
+
+function applyBulk() {
+  syncEditorToState();
+  const items = selectedItems();
+  if (!items.length) return;
+  const v = document.getElementById('bulk-input').value.trim();
+  const snapshot = new Map(state.items.map(x => [x.id, x.start + x.end]));
+  const others = () => state.items.filter(x => !gridSel.has(x.id) && snapshot.get(x.id) !== x.start + x.end).map(x => x.id);
+  const also = (ids) => (ids.length ? ` · ${ids.length} downstream ${ids.length > 1 ? T.items : T.item} rescheduled` : '');
+
+  if (bulkField === 'shift') {
+    const n = Math.round(+v);
+    if (!n) return flashStatus('Enter a number of days to move by, e.g. 7 or -3', false);
+    for (const m of items) shiftItem(m, n);
+    cascadeShift(items.map(m => m.id), n);
+    enforceConstraints();
+    const moved = others();
+    renderEditor([...items.map(m => m.id), ...moved]);
+    return scheduleSave(`Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}${also(moved)}`);
+  }
+  if (bulkField === 'swimlane' && !v) return flashStatus('Enter a swimlane', false);
+
+  let done = 0, skipped = 0;
+  for (const m of items) {
+    if (bulkField === 'parent' && v === m.id) { skipped++; continue; } // can't roll up to itself
+    if (updateItem(m, { [bulkField]: v }).error) skipped++; else done++;
+  }
+  const moved = others();
+  const label = BULK_FIELDS().find(([k]) => k === bulkField)[1];
+  renderEditor(moved);
+  scheduleSave(`${label} updated on ${count(done, T.item, T.items)}` +
+    (skipped ? ` · ${skipped} skipped (would roll up to itself or create a loop)` : '') + also(moved));
+}
+
+function bulkDelete() {
+  syncEditorToState();
+  const items = selectedItems();
+  if (!items.length) return;
+  const reports = items.reduce((n, m) => n + reportsFor(m.id).length, 0);
+  const what = count(items.length, T.item, T.items);
+  if (!confirm(`Delete ${what}? Any links to ${items.length > 1 ? 'them' : 'it'} will be removed.` +
+    (reports ? `\n\nTheir ${reports} report${reports > 1 ? 's are' : ' is'} kept in reports.csv.` : ''))) return;
+  for (const m of items) removeItem(m.id);
+  gridSel.clear();
+  renderEditor();
+  scheduleSave(`Deleted ${what}`);
+}
+
+function wireBulk() {
+  document.getElementById('editor-table').querySelector('thead').addEventListener('change', (e) => {
+    if (e.target.id === 'grid-sel-all') selectAllShown(e.target.checked);
+  });
+  document.getElementById('bulk-field').onchange = (e) => {
+    bulkField = e.target.value;
+    document.getElementById('bulk-value').innerHTML = bulkValueControl();
+  };
+  document.getElementById('bulk-value').addEventListener('keydown', (e) => { if (e.key === 'Enter') applyBulk(); });
+  document.getElementById('bulk-apply').onclick = applyBulk;
+  document.getElementById('bulk-delete').onclick = bulkDelete;
+  document.getElementById('bulk-clear').onclick = () => selectAllShown(false);
 }
 
 /* ================= reports ================= */
@@ -4256,6 +4395,7 @@ function wireEvents() {
 
   document.getElementById('editor-body').addEventListener('change', onEditorChange);
   document.getElementById('editor-body').addEventListener('click', onEditorClick);
+  wireBulk();
 
   wireReports();
 

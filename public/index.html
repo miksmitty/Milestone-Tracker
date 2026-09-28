@@ -218,6 +218,15 @@
         <button id="btn-reload" class="btn btn-ghost" title="Reload from milestones.csv (e.g. after editing it in a spreadsheet)">Reload</button>
       </div>
     </div>
+    <div id="bulk-bar" class="bulk-bar" hidden>
+      <span id="bulk-count" class="bulk-count"></span>
+      <label class="bulk-set">Set <select id="bulk-field"></select></label>
+      <span id="bulk-value" class="bulk-value"></span>
+      <button type="button" id="bulk-apply" class="btn btn-sm btn-primary">Apply</button>
+      <span class="spacer"></span>
+      <button type="button" id="bulk-delete" class="btn btn-sm btn-danger">Delete selected</button>
+      <button type="button" id="bulk-clear" class="btn btn-sm btn-ghost">Clear selection</button>
+    </div>
     <div class="table-wrap">
       <table id="editor-table">
         <colgroup></colgroup>
@@ -226,6 +235,7 @@
       </table>
     </div>
     <p class="hint"><b>Quick update</b> shows the fields that change most — ref, title, type, owner, RAG and dates: click a RAG to change it, or edit any cell. Switch to <b>All fields</b> for lanes, links, shape and the rest.
+      Tick the boxes on the left (shift-click for a range, or the header box for everything shown) to change a field on many rows at once, move their dates, or delete them.
       Click a column header to sort, use the filter row to narrow the list, and drag a header edge to resize (double-click to reset). <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
       Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.
       <b>Type</b> says whether something is a <b data-term="milestone">milestone</b> (one date, drawn as a shape: changing either date moves it) or a <b data-term="task">task</b> (a start and end, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to one date.
