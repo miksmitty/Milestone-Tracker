@@ -12,6 +12,8 @@ Then open http://localhost:3100 (set `PORT=xxxx` to use another port).
 
 No `npm install` needed — plain Node (18+) and vanilla JS.
 
+Always open the app through `node server.js`: it serves both the page and the CSV data, so opening `index.html` as a file or from another web server won't load anything. It works behind a proxy that serves it under a path (e.g. `https://host/proxy/3100/`), and reads CSVs re-saved by Excel (semicolon separated, Windows encoding or with a byte order mark); they are written back as UTF-8 CSV. If data doesn't load, the message at the top right of the page and the server's console say why.
+
 ## Workspaces
 
 Everything belongs to a **workspace**. The left-hand menu has **All workspaces**, a workspace switcher, and the current workspace's **Gantt chart**, **Items**, **Reports** and **Workspace settings**. Collapse the menu to icons with **Collapse** at the bottom; the app remembers the open workspace, view and menu state per browser.
@@ -77,6 +79,19 @@ RAG and dates change far more often than anything else, so they are the quickest
 - **Gantt chart**: click (or right-click) an item to open the quick update panel. Change its RAG, switch it between milestone and task, or change its dates, then **Save** (or Enter) — nothing changes until you do, and **Cancel** / Esc throws the changes away. Switching the type back and forth keeps both dates, and moving a milestone's date keeps the task's length if you switch back. Clicking away with unsaved changes gives the panel a nudge instead of losing them. The panel says how many dependent items will move. From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
 - **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. Click a RAG to set it, or edit any cell. Switch to **All fields** for lanes, links, shape and so on.
 - The quick update panel on the chart also has a **Type** switch.
+
+### Importing
+
+**Items → Import…** brings a list of milestones and tasks into the current workspace, from a CSV file (comma, semicolon or tab separated; UTF-8 or Excel's Windows encoding) or from cells copied out of Excel or Sheets and pasted in. Excel workbooks can't be read directly: save as CSV, or copy and paste.
+
+- **Columns** are matched to fields by their headings (e.g. *WBS* → Ref, *Task Name* → Title, *Finish* / *Due* → End date, *Status* → RAG, *Assigned To* → Owner, *Workstream* → Swimlane, *Predecessors* → Depends on), and each can be changed or left out. `workspace_id` is ignored: everything goes into the workspace you're in
+- **Dates** can be written almost any way: `2026-03-31`, `31/03/2026`, `3/31/2026`, `31.03.26`, `31-Mar-26`, `31 March 2026`, `March 31, 2026`, `Tue 31st March 2026`, `20260331`, Excel date numbers, with or without a time. Whether `03/04/2026` is 3 April or 4 March is detected from the file (any day over 12 gives it away), otherwise it follows the browser's locale; you can override it. Each date column shows how its examples will be read
+- **Type**: a type column (*milestone* / *task*, the workspace's own words, or yes/no from a *Milestone?* column), otherwise a start before the end makes a task and a single date a milestone
+- **What to do**: *Add new, update matching refs* (the default), *Add all as new*, or *Replace all*, which also deletes items that aren't in the file (their reports are kept). Blank cells leave an existing item's value alone; a filled *depends on* cell replaces its dependencies
+- **Links** (rolls up to, depends on) can name refs or ids, separated by `;` `,` or spaces; MS Project style `3FS+2d` works too. Links that would make a circular dependency are left out
+- A **preview** shows every row as Add, Update, No change or Skip, with notes on anything it couldn't read (an unreadable date, a RAG the workspace doesn't use, an unknown link, a repeated ref). Nothing changes until you click **Import**
+
+A file from **Download CSV** imports straight back in, matched on ref (or id), so you can edit a workspace's items in a spreadsheet and bring them back.
 
 Edit items in the app — in the **Items** table or by clicking an item on the chart. Every change saves to the CSV automatically. In the table, click a column header to sort (▲ / ▼ / off), use the filter row to narrow the list, and drag a header edge to resize a column (double-click to reset); sort and column widths are remembered per browser and never change the CSV order. You can also edit the CSV in a spreadsheet tool; hit *Reload* in the app afterwards.
 

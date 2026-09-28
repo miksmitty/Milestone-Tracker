@@ -139,7 +139,9 @@ const cmpRef = (a, b) => (!a.ref) - (!b.ref) || a.ref.localeCompare(b.ref, undef
 
 /* ================= CSV ================= */
 
-function parseCSV(text) {
+// Reads CSV (or another delimiter — see detectDelimiter). A leading byte order mark is dropped.
+function parseCSV(text, delim = ',') {
+  text = text.replace(/^\ufeff/, '');
   const rows = [];
   let row = [], field = '', inQuotes = false;
   for (let i = 0; i < text.length; i++) {
@@ -151,7 +153,7 @@ function parseCSV(text) {
       } else field += c;
     } else if (c === '"') {
       inQuotes = true;
-    } else if (c === ',') {
+    } else if (c === delim) {
       row.push(field); field = '';
     } else if (c === '\n' || c === '\r') {
       if (c === '\r' && text[i + 1] === '\n') i++;
@@ -164,6 +166,16 @@ function parseCSV(text) {
   if (row.some(f => f !== '')) rows.push(row);
   return rows;
 }
+
+// Tab (pasted from a spreadsheet), semicolon (Excel in many European locales) or comma:
+// whichever appears most often in the first line, outside quotes.
+function detectDelimiter(text) {
+  const line = text.replace(/^\ufeff/, '').split(/\r?\n/).find(l => l.trim()) || '';
+  const bare = line.replace(/"[^"]*"/g, '');
+  const n = (c) => bare.split(c).length - 1;
+  return ['\t', ';', ','].reduce((best, c) => (n(c) > n(best) ? c : best), ',');
+}
+const parseAny = (text) => parseCSV(text, detectDelimiter(text));
 
 function csvEscape(v) {
   v = String(v ?? '');
@@ -297,20 +309,23 @@ function normaliseShape(v) {
 /* ================= data load/save ================= */
 
 async function loadData() {
-  const [workspaces, statuses, items, reports] = await Promise.all(['/api/workspaces', '/api/statuses', '/api/milestones', '/api/reports'].map(async (u) => {
+  if (location.protocol === 'file:') throw new Error('the page was opened as a file — run node server.js and open the address it prints');
+  const [workspaces, statuses, items, reports] = await Promise.all(['api/workspaces', 'api/statuses', 'api/milestones', 'api/reports'].map(async (u) => {
     const r = await fetch(u);
     // e.g. a server started before workspaces existed: stop rather than save items under the wrong workspace
-    if (!r.ok) throw new Error(`${u} returned ${r.status} — restart the server (node server.js)`);
-    return r.text();
+    if (!r.ok) throw new Error(`${u} returned ${r.status} ${r.statusText} — the app must be opened through its own server (node server.js), not a separate web server or file://`);
+    const text = await r.text();
+    if (/^\s*</.test(text)) throw new Error(`${u} returned a web page instead of CSV — something between the browser and node server.js (a proxy or another web server) is answering instead`);
+    return text;
   }));
-  state.workspaces = rowsToWorkspaces(parseCSV(workspaces));
-  state.statuses = rowsToStatuses(parseCSV(statuses));
+  state.workspaces = rowsToWorkspaces(parseAny(workspaces));
+  state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
   const created = !state.workspaces.length;
   if (created) state.workspaces.push(newWorkspace({ name: 'My workspace' }));
-  const allItems = rowsToItems(parseCSV(items));
-  const allReports = rowsToReports(parseCSV(reports), allItems);
-  if (created) await saveCSV('/api/workspaces', workspacesToCSV(state.workspaces));
+  const allItems = rowsToItems(parseAny(items));
+  const allReports = rowsToReports(parseAny(reports), allItems);
+  if (created) await saveCSV('api/workspaces', workspacesToCSV(state.workspaces));
   state.items = allItems;
   state.reports = allReports;
   state.otherItems = [];
@@ -353,16 +368,16 @@ let pendingMsg = '';
 
 function saveData(msg) {
   syncEditorToState();
-  return saveCSV('/api/milestones', toCSV(allItems()), msg);
+  return saveCSV('api/milestones', toCSV(allItems()), msg);
 }
 function saveReports(msg) {
-  return saveCSV('/api/reports', reportsToCSV(allReports()), msg);
+  return saveCSV('api/reports', reportsToCSV(allReports()), msg);
 }
 function saveStatuses(msg) {
-  return saveCSV('/api/statuses', statusesToCSV(state.statuses), msg);
+  return saveCSV('api/statuses', statusesToCSV(state.statuses), msg);
 }
 function saveWorkspaces(msg) {
-  return saveCSV('/api/workspaces', workspacesToCSV(state.workspaces), msg);
+  return saveCSV('api/workspaces', workspacesToCSV(state.workspaces), msg);
 }
 
 function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if the queue is busy
@@ -3156,6 +3171,451 @@ function downloadReportsCSV() {
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
 
+/* ================= import ================= */
+// Brings a list of milestones and tasks into the current workspace, from a CSV file or cells
+// pasted from a spreadsheet. Each column is matched to a field by its heading (and can be
+// changed), dates are read in whatever format they're written, and a preview shows what will be
+// added, updated, deleted or skipped before anything is saved. Blank cells leave an existing
+// item's value alone. Links (rolls up to, depends on) can name a ref or an id.
+
+const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'deps', 'id'];
+const importFieldLabel = (k) => ({
+  ref: 'Ref', title: 'Title', type: `Type (${T.milestone} or ${T.task})`, description: 'Description', swimlane: 'Swimlane',
+  subswimlane: 'Sub-swimlane', owner: 'Owner', start: 'Start date', end: `End date / ${T.milestone} date`, status: 'RAG',
+  shape: 'Shape', parent: 'Rolls up to (ref or id)', deps: 'Depends on (refs or ids)', id: 'ID (used to match links)',
+}[k]);
+// Headings are compared with everything but letters and digits removed.
+const IMPORT_ALIASES = {
+  id: ['id', 'itemid', 'uniqueid', 'uid'],
+  ref: ['ref', 'reference', 'refno', 'wbs', 'no', 'number', 'key', 'outlinenumber'],
+  title: ['title', 'name', 'milestone', 'milestonename', 'task', 'taskname', 'item', 'itemname', 'summary', 'deliverable', 'activity', 'activityname'],
+  type: ['type', 'kind', 'itemtype', 'milestoneortask'],
+  description: ['description', 'desc', 'details', 'notes', 'comments', 'comment'],
+  swimlane: ['swimlane', 'lane', 'workstream', 'stream', 'category', 'group', 'area', 'team', 'theme', 'project'],
+  subswimlane: ['subswimlane', 'sublane', 'subworkstream', 'substream', 'subcategory', 'subgroup'],
+  owner: ['owner', 'assignee', 'assignedto', 'responsible', 'accountable', 'resource', 'resourcenames', 'lead'],
+  start: ['start', 'startdate', 'begin', 'begindate', 'from', 'plannedstart', 'baselinestart', 'forecaststart', 'actualstart'],
+  end: ['end', 'enddate', 'date', 'due', 'duedate', 'finish', 'finishdate', 'deadline', 'target', 'targetdate', 'to', 'plannedend',
+    'plannedfinish', 'baselinefinish', 'forecastend', 'forecastfinish', 'completiondate', 'milestonedate', 'deliverydate'],
+  status: ['rag', 'status', 'ragstatus', 'health', 'rating'],
+  shape: ['shape'],
+  parent: ['parent', 'parentref', 'parentid', 'rollsupto', 'rollup'],
+  deps: ['dependson', 'dependencies', 'dependency', 'deps', 'predecessors', 'predecessor'],
+};
+
+const imp = { name: '', rows: [], hasHeader: true, map: [], order: 'auto', mode: 'merge', plan: null };
+
+function guessImportMap(header) {
+  const norm = header.map(h => (h.trim() === '#' ? 'no' : h.toLowerCase().replace(/[^a-z0-9]+/g, '')));
+  const map = norm.map(() => '');
+  const take = (i, k) => { if (!map.includes(k)) map[i] = k; };
+  for (const k of IMPORT_FIELDS) {
+    const i = norm.findIndex((h, j) => !map[j] && IMPORT_ALIASES[k].includes(h));
+    if (i >= 0) take(i, k);
+  }
+  // Looser second pass, e.g. "Planned start (baseline)" or "Forecast due".
+  norm.forEach((h, i) => {
+    if (map[i]) return;
+    if (/start|begin/.test(h)) take(i, 'start');
+    else if (/finish|due|deadline|enddate/.test(h)) take(i, 'end');
+    else if (/rag|status/.test(h)) take(i, 'status');
+    else if (/owner|assign/.test(h)) take(i, 'owner');
+    else if (/predecessor|depend/.test(h)) take(i, 'deps');
+    else if (/milestone|type/.test(h)) take(i, 'type'); // e.g. a yes/no "Milestone?" column
+  });
+  return map;
+}
+
+/* ---- dates ---- */
+const MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+const DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const NUMERIC_DATE = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/;
+
+function ymd(y, m, d) {
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d ? fmtISO(dt) : null;
+}
+const fullYear = (y) => (y.length <= 2 ? 2000 + +y : +y);
+const stripTime = (s) => String(s ?? '').trim()
+  .replace(/(?:T|\s+)\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:[ap]\.?m\.?)?\s*(?:z|[+-]\d{2}:?\d{2})?$/i, '').trim();
+
+// Reads a date written almost any way into YYYY-MM-DD. `order` says how to read 03/04/2026:
+// 'dmy' (3 April) or 'mdy' (4 March). Returns '' for a blank cell and null if it can't be read.
+function readDate(raw, order) {
+  const s = stripTime(raw);
+  if (!s) return '';
+  let m;
+  if ((m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/))) return ymd(+m[1], +m[2], +m[3]);
+  if ((m = s.match(NUMERIC_DATE))) {
+    const y = fullYear(m[3]);
+    return order === 'mdy' ? ymd(y, +m[1], +m[2]) : ymd(y, +m[2], +m[1]);
+  }
+  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})$/))) return ymd(+m[1], +m[2], +m[3]);
+  if (/^\d{5}(\.\d+)?$/.test(s)) { // an Excel date number: days since 30 Dec 1899
+    const n = Math.floor(+s);
+    return n > 20000 && n < 80000 ? fmtISO(new Date(1899, 11, 30 + n)) : null;
+  }
+  // Words: 31 Mar 2026, 31-Mar-26, March 31, 2026, Tue 31st March 2026…
+  let month = 0;
+  const nums = [];
+  for (const w of s.toLowerCase().replace(/(\d)(st|nd|rd|th)\b/g, '$1').split(/[\s,./'-]+/).filter(Boolean)) {
+    if (/^\d+$/.test(w)) { nums.push(w); continue; }
+    const mi = w.length >= 3 ? MONTH_NAMES.findIndex(n => n.startsWith(w) || (w === 'sept' && n === 'september')) : -1;
+    if (mi >= 0 && !month) month = mi + 1;
+    else if (!(w.length >= 3 && DAY_NAMES.some(n => n.startsWith(w)))) return null;
+  }
+  if (!month || nums.length !== 2) return null;
+  const [a, b] = nums;
+  return a.length === 4 ? ymd(+a, month, +b) : ymd(fullYear(b), month, +a);
+}
+
+// Which way round the file writes numeric dates, if any of them give it away (a day over 12).
+function detectDateOrder(values) {
+  let dmy = false, mdy = false, ambiguous = false;
+  for (const v of values) {
+    const m = stripTime(v).match(NUMERIC_DATE);
+    if (!m) continue;
+    if (+m[1] > 12) dmy = true;
+    else if (+m[2] > 12) mdy = true;
+    else if (m[1] !== m[2]) ambiguous = true;
+  }
+  return { found: dmy !== mdy ? (dmy ? 'dmy' : 'mdy') : null, ambiguous, conflict: dmy && mdy };
+}
+const localDateOrder = () => (/^en-(us|ph)|^(fil|es-us)/i.test(navigator.language || '') ? 'mdy' : 'dmy');
+
+/* ---- values ---- */
+// The workspace's own words count, as do yes/no from a "Milestone?" column.
+function readType(v) {
+  const s = v.trim().toLowerCase();
+  if (!s) return '';
+  if ([T.task, T.tasks].some(w => w.toLowerCase() === s) || /^(no|n|false)$/.test(s)) return 'task';
+  if ([T.milestone, T.milestones].some(w => w.toLowerCase() === s) || /^(yes|y|true)$/.test(s)) return 'milestone';
+  if (/^(t|tasks?|bars?|activit(y|ies)|phases?|work ?packages?|ranges?|summary( task)?)$/.test(s)) return 'task';
+  if (/^(m|milestones?|gates?|checkpoints?|deliverables?|points?|key dates?)$/.test(s)) return 'milestone';
+  return null;
+}
+// Link cells: refs or ids separated by ; , | or spaces. MS Project style suffixes (3FS+2d) are dropped.
+const readLinks = (v) => v.split(/[;,|\s]+/).map(t => t.replace(/(fs|ss|ff|sf)([+-].*)?$/i, '').trim()).filter(Boolean);
+
+/* ---- plan ---- */
+// Works out, row by row, what the import will do. Nothing changes until applyImport.
+function planImport() {
+  const order = imp.order === 'auto' ? imp.detected.found || localDateOrder() : imp.order;
+  const data = imp.hasHeader ? imp.rows.slice(1) : imp.rows;
+  const col = Object.fromEntries(IMPORT_FIELDS.map(k => [k, imp.map.indexOf(k)]));
+  const has = (k) => col[k] >= 0;
+  const statuses = STATUSES.map(s => s.toLowerCase());
+  const rows = [], usedTargets = new Set(), refRow = new Map();
+  // Rows are matched to items by ref. Ids are only trusted from this workspace's own download:
+  // another tool's ID column (1, 2, 3…) would otherwise land on unrelated items.
+  const wsCol = imp.hasHeader ? imp.rows[0].findIndex(h => h.toLowerCase().replace(/[^a-z]/g, '') === 'workspaceid') : -1;
+  const ownExport = wsCol >= 0 && data.every(r => (r[wsCol] ?? '').trim() === state.workspaceId);
+
+  data.forEach((r, i) => {
+    const line = i + (imp.hasHeader ? 2 : 1);
+    const cell = (k) => (has(k) ? String(r[col[k]] ?? '').trim() : '');
+    const row = { line, action: 'add', notes: [], fields: {}, target: null, links: null };
+    if (r.every(v => !String(v).trim())) return;
+
+    const ref = cell('ref');
+    if (ref && refRow.has(ref)) {
+      row.action = 'skip';
+      row.notes.push(`Ref ${ref} is already used on row ${refRow.get(ref).line}`);
+    } else if (ref) refRow.set(ref, row);
+    const existing = (ref && state.items.find(m => m.ref === ref))
+      || (!ref && ownExport && state.items.find(m => m.id === cell('id'))) || null;
+    if (existing && imp.mode === 'add') row.notes.push(`Ref ${ref} is also used by an existing ${T.item}`);
+    else if (existing && row.action !== 'skip' && !usedTargets.has(existing)) {
+      row.target = existing;
+      row.action = 'update';
+      usedTargets.add(existing);
+    }
+    const t = row.target;
+    const f = row.fields;
+
+    for (const k of ['ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner']) if (cell(k)) f[k] = cell(k);
+    if (row.action === 'add' && !f.title) { row.action = 'skip'; row.notes.push('No title'); }
+
+    // Dates
+    const dates = {};
+    for (const k of ['start', 'end']) {
+      const v = cell(k);
+      const d = readDate(v, order);
+      if (d === null) row.notes.push(`Couldn't read the date “${v}”`);
+      dates[k] = d || '';
+    }
+    let type = has('type') ? readType(cell('type')) : '';
+    if (type === null) { row.notes.push(`Type “${cell('type')}” isn't ${withArticle(T.milestone)} or ${withArticle(T.task)}; worked out from the dates`); type = ''; }
+    // Only one date: a new item is a milestone on it, an existing one keeps its type.
+    let { start, end } = dates;
+    if (start && end && end < start) { [start, end] = [end, start]; row.notes.push('The end date was before the start date, so they were swapped'); }
+    if (!type) type = start && end ? (start < end ? 'task' : 'milestone') : t ? t.type : 'milestone';
+    if (type === 'milestone') start = end = end || start || t?.end || '';
+    else {
+      start ||= t?.start || end;
+      end ||= t?.end || start;
+      if (end < start) { if (dates.end) start = end; else end = start; }
+    }
+    if (row.action === 'add' && !end) { row.action = 'skip'; row.notes.push('No date'); }
+    if (!t || type !== t.type) f.type = type;
+    if (!t || start !== t.start) f.start = start;
+    if (!t || end !== t.end) f.end = end;
+
+    const rag = cell('status');
+    if (rag) {
+      f.status = normaliseStatus(rag, state.workspaceId);
+      if (!statuses.includes(f.status.toLowerCase())) {
+        f.status = t ? t.status : DEFAULT_STATUS;
+        row.notes.push(`RAG “${rag}” isn't one of this workspace's options, so ${t ? 'it stays' : 'it starts at'} ${f.status}`);
+      }
+    } else if (!t) f.status = DEFAULT_STATUS;
+    if (!t && !f.swimlane) f.swimlane = 'General';
+    const shape = cell('shape');
+    if (shape) {
+      f.shape = normaliseShape(shape);
+      if (f.shape !== shape.toLowerCase()) row.notes.push(`Shape “${shape}” isn't known; using ${f.shape}`);
+    }
+    if (has('parent') && cell('parent')) row.links = { ...row.links, parent: cell('parent') };
+    if (has('deps') && cell('deps')) row.links = { ...row.links, deps: readLinks(cell('deps')) };
+    row.fileId = cell('id');
+    if (t) for (const k of Object.keys(f)) if (f[k] === t[k]) delete f[k];
+    rows.push(row);
+  });
+
+  // Link cells name a ref or an id: this file's ids first, then refs (file, then workspace), then workspace ids.
+  const live = rows.filter(r => r.action !== 'skip');
+  const byFileId = new Map(live.filter(r => r.fileId).map(r => [r.fileId, r]));
+  const resolve = (tok) => byFileId.get(tok) || (refRow.get(tok)?.action !== 'skip' && refRow.get(tok))
+    || state.items.find(m => m.ref === tok) || state.items.find(m => m.id === tok) || null;
+  for (const r of live) {
+    if (!r.links) continue;
+    if (r.links.parent) {
+      r.parent = resolve(r.links.parent);
+      if (!r.parent) r.notes.push(`Rolls up to “${r.links.parent}”, which isn't in the file or this workspace`);
+    }
+    if (r.links.deps) {
+      r.deps = r.links.deps.map(tok => [tok, resolve(tok)]);
+      const missing = r.deps.filter(([, x]) => !x).map(([tok]) => tok);
+      if (missing.length) r.notes.push(`Depends on ${missing.join(', ')}, not found`);
+      r.deps = r.deps.map(([, x]) => x).filter(Boolean);
+    }
+  }
+  // An update that changes nothing, links included, is left alone.
+  const idOf = (x) => (x.line ? x.target?.id : x.id);
+  for (const r of live) {
+    if (r.action !== 'update' || Object.keys(r.fields).length) continue;
+    const t = r.target;
+    const parentSame = !r.links?.parent || (r.parent && idOf(r.parent) === t.parent);
+    const ids = (r.deps || []).map(idOf);
+    const depsSame = !r.links?.deps || (ids.every(Boolean) && new Set(ids).size === t.deps.length && ids.every(id => t.deps.includes(id)));
+    if (parentSame && depsSame) r.action = 'same';
+  }
+
+  const matched = new Set(rows.map(r => r.target).filter(Boolean));
+  const deletes = imp.mode === 'replace' ? state.items.filter(m => !matched.has(m)) : [];
+  return { rows, deletes, order };
+}
+
+// Applies the plan to the workspace. Links that would make a loop are left out (and reported).
+async function applyImport() {
+  const plan = planImport();
+  const itemOf = new Map();
+  let added = 0, updated = 0;
+  for (const m of plan.deletes) removeItem(m.id);
+  for (const r of plan.rows) {
+    if (r.action === 'skip') continue;
+    let m = r.target;
+    if (!m) {
+      m = {
+        id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: '', description: '', swimlane: 'General',
+        subswimlane: '', owner: '', start: '', end: '', status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
+      };
+      state.items.push(m);
+      added++;
+    } else if (r.action === 'update') updated++;
+    Object.assign(m, r.fields);
+    itemOf.set(r, m);
+  }
+  const target = (x) => (x && (itemOf.get(x) || (state.items.includes(x) ? x : null)));
+  let dropped = 0;
+  for (const r of plan.rows) {
+    const m = itemOf.get(r);
+    if (!m) continue;
+    const parent = target(r.parent);
+    if (parent && parent !== m) {
+      const before = m.parent;
+      m.parent = parent.id;
+      if (hasCycle()) { m.parent = before; dropped++; }
+    }
+    if (r.links?.deps) m.deps = []; // the file's list replaces the item's
+    for (const d of (r.deps || []).map(target)) {
+      if (!d || d === m || m.deps.includes(d.id)) continue;
+      m.deps.push(d.id);
+      if (hasCycle()) { m.deps.pop(); dropped++; }
+    }
+  }
+  document.getElementById('import-dialog').close();
+  clearTableFilters(grid);
+  autoRange();
+  renderEditor();
+  renderGantt();
+  const parts = [added && `${added} added`, updated && `${updated} updated`, plan.deletes.length && `${plan.deletes.length} deleted`,
+    dropped && `${count(dropped, 'link', 'links')} left out to avoid a circular dependency`].filter(Boolean);
+  await saveData(`Imported: ${parts.join(', ') || 'nothing changed'}`);
+}
+
+/* ---- dialog ---- */
+function openImportDialog() {
+  syncEditorToState();
+  document.getElementById('im-workspace').textContent = currentWorkspace().name;
+  document.getElementById('im-paste').value = '';
+  document.getElementById('im-file').value = '';
+  showImportStep('source');
+  document.getElementById('import-dialog').showModal();
+}
+
+function showImportStep(step) {
+  document.getElementById('im-step-source').hidden = step !== 'source';
+  document.getElementById('im-step-map').hidden = step !== 'map';
+  document.getElementById('im-error').textContent = '';
+  document.getElementById('im-submit').disabled = step !== 'map';
+}
+
+function loadImportText(text, name) {
+  const rows = parseAny(text.replace(/\u0000/g, '')).map(r => r.map(v => v.trim()));
+  const err = document.getElementById('im-error');
+  if (rows.length < 2) return (err.textContent = rows.length ? 'Only one row found: include the column headings and at least one row.' : 'Nothing to import.');
+  Object.assign(imp, { name, rows, hasHeader: true, order: 'auto', mode: 'merge' });
+  imp.map = guessImportMap(rows[0]);
+  document.getElementById('im-has-header').checked = true;
+  document.querySelector('[name="im-mode"][value="merge"]').checked = true;
+  showImportStep('map');
+  renderImport();
+}
+
+async function readImportFile(file) {
+  const err = document.getElementById('im-error');
+  if (/\.(xlsx|xlsm|xls|numbers|ods)$/i.test(file.name)) {
+    return (err.textContent = `${file.name} is a workbook, which can't be read directly. Save it as CSV (in Excel: File › Save As › CSV), or copy the cells and paste them.`);
+  }
+  const buf = await file.arrayBuffer();
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+  catch {
+    // UTF-16 (Excel "Unicode text") or Windows-1252 (Excel's plain CSV on Windows)
+    const b = new Uint8Array(buf);
+    text = new TextDecoder(b[0] === 0xff && b[1] === 0xfe ? 'utf-16le' : b[0] === 0xfe && b[1] === 0xff ? 'utf-16be' : 'windows-1252').decode(buf);
+  }
+  loadImportText(text, file.name);
+}
+
+function renderImport() {
+  const data = imp.hasHeader ? imp.rows.slice(1) : imp.rows;
+  const width = Math.max(...imp.rows.map(r => r.length));
+  const header = Array.from({ length: width }, (_, i) =>
+    (imp.hasHeader && imp.rows[0][i]) || `Column ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`);
+  while (imp.map.length < width) imp.map.push('');
+
+  const dateCols = imp.map.map((k, i) => (k === 'start' || k === 'end' ? i : -1)).filter(i => i >= 0);
+  imp.detected = detectDateOrder(dateCols.flatMap(i => data.map(r => r[i] ?? '')));
+  const d = imp.detected, local = localDateOrder();
+  const label = { dmy: 'day first (3 April 2026)', mdy: 'month first (4 March 2026)' };
+  document.getElementById('im-order').innerHTML = [
+    ['auto', d.found ? `Detected: ${label[d.found]}` : `Automatic: ${label[local]}`], ['dmy', `Day first: 03/04 is 3 April`], ['mdy', `Month first: 03/04 is 4 March`],
+  ].map(([v, t]) => `<option value="${v}" ${v === imp.order ? 'selected' : ''}>${t}</option>`).join('');
+  document.getElementById('im-source-name').textContent = `${imp.name} · ${count(data.length, 'row', 'rows')}`;
+
+  const plan = imp.plan = planImport();
+  const opts = (sel) => `<option value="">— don't import —</option>` +
+    IMPORT_FIELDS.map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${escAttr(importFieldLabel(k))}</option>`).join('');
+  document.getElementById('im-cols').innerHTML = header.map((h, i) => {
+    const samples = [...new Set(data.map(r => (r[i] ?? '').trim()).filter(Boolean))].slice(0, 3);
+    const k = imp.map[i];
+    const ex = samples.map(v => {
+      if (k !== 'start' && k !== 'end') return escAttr(v);
+      const iso = readDate(v, plan.order);
+      return iso ? `${escAttr(v)} <span class="im-date">→ ${fmtNice(iso)}</span>` : `${escAttr(v)} <span class="im-bad">→ can't read</span>`;
+    }).join(' · ');
+    return `<tr><td>${escAttr(h)}</td><td title="${escAttr(samples.join(' · '))}">${ex || '<span class="im-bad">empty</span>'}</td>
+      <td><select data-col="${i}" class="${k ? '' : 'unmapped'}">${opts(k)}</select></td></tr>`;
+  }).join('');
+
+  // Preview
+  const shown = ['ref', 'title', 'type', 'start', 'end', 'status', 'owner', 'swimlane'];
+  document.getElementById('im-preview-head').innerHTML = `<tr><th>Row</th><th></th>${shown.map(k =>
+    `<th>${escAttr({ ref: 'Ref', title: 'Title', type: 'Type', start: 'Start', end: 'End', status: 'RAG', owner: 'Owner', swimlane: 'Swimlane' }[k])}</th>`).join('')}<th>Links</th><th>Notes</th></tr>`;
+  const actLabel = { add: 'Add', update: 'Update', same: 'No change', skip: 'Skip', delete: 'Delete' };
+  const cellFor = (r, k) => {
+    const v = k in r.fields ? r.fields[k] : r.target ? r.target[k] : '';
+    const text = k === 'type' ? (v === 'task' ? T.Task : v ? T.Milestone : '') : k === 'start' || k === 'end' ? (v ? fmtNice(v) : '') : v;
+    return `<td class="${k === 'title' ? 'im-title' : ''} ${r.target && k in r.fields ? 'changed' : ''}">${escAttr(text)}</td>`;
+  };
+  // A link points at a row of the file or at an item already in the workspace.
+  const linkName = (x) => (x.line ? x.fields.ref || x.target?.ref || `row ${x.line}` : itemLabel(x));
+  const links = (r) => [r.parent && `rolls up to ${linkName(r.parent)}`,
+    r.deps?.length && `after ${r.deps.map(linkName).join(', ')}`].filter(Boolean).join(' · ');
+  document.getElementById('im-preview').innerHTML = plan.rows.map(r => `<tr class="${r.action}"><td>${r.line}</td>
+      <td><span class="im-act ${r.action === 'same' ? 'skip' : r.action}">${actLabel[r.action]}</span></td>
+      ${shown.map(k => cellFor(r, k)).join('')}<td>${escAttr(links(r))}</td><td class="im-notes">${escAttr(r.notes.join('. '))}</td></tr>`).join('')
+    + plan.deletes.map(m => `<tr class="delete"><td></td><td><span class="im-act delete">Delete</span></td>${shown.map(k =>
+      `<td>${escAttr(k === 'type' ? typeName(m) : k === 'start' || k === 'end' ? fmtNice(m[k]) : m[k])}</td>`).join('')}<td></td>
+      <td class="im-notes">Not in the file${reportsFor(m.id).length ? `; its ${count(reportsFor(m.id).length, 'report is', 'reports are')} kept` : ''}</td></tr>`).join('');
+
+  const n = (a) => plan.rows.filter(r => r.action === a).length;
+  const warned = plan.rows.filter(r => r.action !== 'skip' && r.notes.length).length;
+  const summary = [n('add') && `${n('add')} to add`, n('update') && `${n('update')} to update`, n('same') && `${n('same')} unchanged`,
+    plan.deletes.length && `${plan.deletes.length} to delete`, n('skip') && `${n('skip')} skipped`, warned && `${count(warned, 'row has', 'rows have')} notes`].filter(Boolean);
+  document.getElementById('im-summary').textContent = summary.join(' · ');
+  const btn = document.getElementById('im-submit');
+  const does = [n('add') && `add ${n('add')}`, n('update') && `update ${n('update')}`, plan.deletes.length && `delete ${plan.deletes.length}`].filter(Boolean);
+  btn.disabled = !does.length;
+  btn.textContent = does.length ? `Import: ${does.join(', ')}` : 'Import';
+  document.getElementById('im-error').textContent = d.conflict
+    ? 'Some dates are written day first and others month first: check the dates in the preview.'
+    : !imp.map.includes('title') ? `No column is imported as the title, so only existing ${T.items} (matched by ref) can be updated.` : '';
+}
+
+function wireImport() {
+  const dlg = document.getElementById('import-dialog');
+  const close = () => dlg.close();
+  document.getElementById('btn-items-import').onclick = openImportDialog;
+  document.getElementById('im-close').onclick = close;
+  document.getElementById('im-cancel').onclick = close;
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
+  document.getElementById('im-change').onclick = () => { document.getElementById('im-file').value = ''; showImportStep('source'); };
+  document.getElementById('im-file').addEventListener('change', (e) => { if (e.target.files[0]) readImportFile(e.target.files[0]); });
+  const drop = document.getElementById('im-drop');
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (e.dataTransfer.files[0]) readImportFile(e.dataTransfer.files[0]);
+  });
+  document.getElementById('im-paste').addEventListener('paste', () => {
+    setTimeout(() => { const t = document.getElementById('im-paste').value; if (t.trim()) loadImportText(t, 'Pasted rows'); }, 0);
+  });
+  document.getElementById('im-has-header').onchange = (e) => {
+    imp.hasHeader = e.target.checked;
+    imp.map = imp.hasHeader ? guessImportMap(imp.rows[0]) : imp.map.map(() => '');
+    renderImport();
+  };
+  document.getElementById('im-order').onchange = (e) => { imp.order = e.target.value; renderImport(); };
+  document.getElementById('im-mode').addEventListener('change', (e) => { imp.mode = e.target.value; renderImport(); });
+  document.getElementById('im-cols').addEventListener('change', (e) => {
+    const i = +e.target.dataset.col, k = e.target.value;
+    if (k) imp.map = imp.map.map(x => (x === k ? '' : x)); // one column per field
+    imp.map[i] = k;
+    renderImport();
+  });
+  document.getElementById('import-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const plan = imp.plan;
+    if (plan.deletes.length && !confirm(`Delete ${count(plan.deletes.length, T.item, T.items)} that ${plan.deletes.length === 1 ? "isn't" : "aren't"} in the file? Their reports are kept.`)) return;
+    applyImport();
+  });
+}
+
 /* ================= workspaces ================= */
 // A workspace groups a set of items and their reports. The Workspaces screen lists them all
 // with a summary of each; the one being viewed drives the Gantt chart, Items and Reports.
@@ -3785,6 +4245,7 @@ function wireEvents() {
     renderEditor();
   };
   document.getElementById('btn-items-csv').onclick = downloadItemsCSV;
+  wireImport();
   document.getElementById('btn-reload').onclick = async () => {
     await flushSave(); // don't lose a pending edit
     await loadData();
@@ -3802,7 +4263,7 @@ function wireEvents() {
   window.addEventListener('pagehide', () => {
     if (saveTimer === null) return;
     syncEditorToState();
-    navigator.sendBeacon('/api/milestones', toCSV(allItems()));
+    navigator.sendBeacon('api/milestones', toCSV(allItems()));
   });
 
   // Auto-fit while the user hasn't chosen a zoom; re-render otherwise.

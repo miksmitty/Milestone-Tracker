@@ -213,6 +213,7 @@
       </div>
       <div class="toolbar-group toolbar-right">
         <span class="autosave-note">Changes save automatically</span>
+        <button id="btn-items-import" class="btn" title="Bring in a list from a CSV file or cells pasted from a spreadsheet">Import…</button>
         <button id="btn-items-csv" class="btn" title="Download the items shown (filters and sort applied) as a CSV">Download CSV</button>
         <button id="btn-reload" class="btn btn-ghost" title="Reload from milestones.csv (e.g. after editing it in a spreadsheet)">Reload</button>
       </div>
@@ -395,6 +396,59 @@
       </footer>
     </form>
   </dialog>
+  <!-- ============ IMPORT DIALOG ============ -->
+  <dialog id="import-dialog" class="edit-dialog import-dialog">
+    <form id="import-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge imp">Import</span>
+        <h2>Import <span data-term="items">items</span> into <span id="im-workspace"></span></h2>
+        <button type="button" id="im-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="im-body">
+        <section id="im-step-source" class="im-source">
+          <label id="im-drop" class="im-drop">
+            <input type="file" id="im-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" />
+            <strong>Choose a CSV file</strong> or drop it here
+            <small>Comma, semicolon or tab separated. The first row should be the column headings.</small>
+          </label>
+          <div class="im-or"><span>or</span></div>
+          <div class="form-grid im-paste">
+            <div class="span3 field"><span class="field-label">Paste rows from a spreadsheet</span>
+              <textarea id="im-paste" rows="7" placeholder="Copy the cells in Excel or Sheets, headings included, and paste them here"></textarea></div>
+          </div>
+          <p class="dlg-hint">Columns are matched to fields by their headings, and you can change the matching before anything is imported. Dates can be in most formats: 2026-03-31, 31/03/2026, 3/31/2026, 31-Mar-26, 31 March 2026, Excel date numbers and so on. Excel workbooks (.xlsx) can't be read directly: save as CSV, or copy and paste the cells.</p>
+        </section>
+        <section id="im-step-map" class="im-map" hidden>
+          <div class="im-bar">
+            <span id="im-source-name" class="im-source-name"></span>
+            <button type="button" id="im-change" class="link-btn">Choose a different file</button>
+            <label class="check"><input type="checkbox" id="im-has-header" checked /> First row is headings</label>
+          </div>
+          <div class="form-grid im-options">
+            <div class="span2 field"><span class="field-label">What to do</span>
+              <div class="seg" id="im-mode">
+                <label title="Rows whose ref matches an existing item update it; the rest are added"><input type="radio" name="im-mode" value="merge" checked /><span>Add new, update matching refs</span></label>
+                <label title="Every row becomes a new item"><input type="radio" name="im-mode" value="add" /><span>Add all as new</span></label>
+                <label title="Make this workspace's items match the file: matching refs are updated, the rest added, and items not in the file deleted"><input type="radio" name="im-mode" value="replace" /><span>Replace all</span></label>
+              </div>
+            </div>
+            <label>Dates like 03/04/2026<select id="im-order"></select></label>
+          </div>
+          <h3 class="im-h">Columns</h3>
+          <div class="im-scroll im-cols-wrap"><table class="im-table im-cols"><thead><tr><th>Column in file</th><th>Example</th><th>Import as</th></tr></thead><tbody id="im-cols"></tbody></table></div>
+          <h3 class="im-h">Preview <span id="im-summary" class="im-summary"></span></h3>
+          <div class="im-scroll im-preview-wrap"><table class="im-table im-preview"><thead id="im-preview-head"></thead><tbody id="im-preview"></tbody></table></div>
+        </section>
+      </div>
+      <p id="im-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" id="im-cancel" class="btn">Cancel</button>
+        <button type="submit" id="im-submit" class="btn btn-primary" disabled>Import</button>
+      </footer>
+    </form>
+  </dialog>
+
   <datalist id="term-item"><option value="Item"></option><option value="Work item"></option><option value="Activity"></option><option value="Deliverable"></option></datalist>
   <datalist id="term-milestone"><option value="Milestone"></option><option value="Deliverable"></option><option value="Gate"></option><option value="Checkpoint"></option></datalist>
   <datalist id="term-task"><option value="Task"></option><option value="Activity"></option><option value="Work package"></option><option value="Phase"></option></datalist>
