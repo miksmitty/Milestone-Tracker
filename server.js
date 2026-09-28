@@ -6,6 +6,21 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3100;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const CONFIG_FILE = path.join(__dirname, 'config.json');
+const CONFIG_DEFAULTS = { title: 'Tracker', logo: '' };
+
+// config.json sets the app's title and logo. It's read on every request, so edits show on the
+// next page load without restarting. A missing or invalid file falls back to the defaults.
+function readConfig() {
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (err) {
+    if (err.code !== 'ENOENT') console.error(`Couldn't read config.json: ${err.message}`);
+  }
+  return { ...CONFIG_DEFAULTS, ...cfg };
+}
+// A logo is either a web address (http(s):// or data:), used as-is, or a file path relative to
+// config.json, which is served from /api/logo.
+const isLogoURL = (logo) => /^(https?:|data:)/i.test(logo);
 
 // Each API path is backed by one CSV file; the header is served when the file doesn't exist yet.
 const DATASETS = {
@@ -34,6 +49,10 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
   '.ico': 'image/x-icon',
 };
 
@@ -80,8 +99,36 @@ function serveStatic(req, res) {
   }
 }
 
+function serveConfig(req, res) {
+  const cfg = readConfig();
+  const logo = cfg.logo && !isLogoURL(cfg.logo) ? 'api/logo' : cfg.logo;
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({ title: String(cfg.title ?? ''), logo }));
+}
+
+function serveLogo(req, res) {
+  const { logo } = readConfig();
+  if (!logo || isLogoURL(logo)) {
+    res.writeHead(404);
+    return res.end('Not found');
+  }
+  const file = path.resolve(__dirname, logo);
+  fs.readFile(file, (err, data) => {
+    if (err) {
+      console.error(`Couldn't read logo ${logo}: ${err.message}`);
+      res.writeHead(404);
+      return res.end('Not found');
+    }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.end(data);
+  });
+}
+
 const server = http.createServer((req, res) => {
-  const ds = datasetFor(new URL(req.url, 'http://x').pathname);
+  const pathname = new URL(req.url, 'http://x').pathname;
+  if (req.method === 'GET' && pathname.endsWith('/api/config')) return serveConfig(req, res);
+  if (req.method === 'GET' && pathname.endsWith('/api/logo')) return serveLogo(req, res);
+  const ds = datasetFor(pathname);
   if (ds) {
     if (req.method === 'GET') {
       const send = (err, data) => {
@@ -127,5 +174,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Tracker running at http://localhost:${PORT}`);
+  console.log(`${readConfig().title || 'Tracker'} running at http://localhost:${PORT}`);
 });

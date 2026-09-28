@@ -14,6 +14,22 @@ No `npm install` needed — plain Node (18+) and vanilla JS.
 
 Always open the app through `node server.js`: it serves both the page and the CSV data, so opening `index.html` as a file or from another web server won't load anything. It works behind a proxy that serves it under a path (e.g. `https://host/proxy/3100/`), and reads CSVs re-saved by Excel (semicolon separated, Windows encoding or with a byte order mark); they are written back as UTF-8 CSV. If data doesn't load, the message at the top right of the page and the server's console say why.
 
+## Title and logo
+
+`config.json`, next to `server.js`, sets the name shown at the top of the menu and in the browser tab, and an optional logo:
+
+```json
+{
+  "title": "Tracker",
+  "logo": "logo.png"
+}
+```
+
+- **title**: the app's name (default *Tracker*). Leave it empty (`""`) to show only the logo.
+- **logo**: an image file (PNG, JPG, SVG, GIF or WebP), as a path relative to `config.json`, or a web address (`https://…`). It replaces the red diamond at the top of the menu, 28px tall and as wide as its shape needs. Leave it empty for the default mark.
+
+Changes show when the page is reloaded; there's no need to restart the server. If the file is missing, the defaults are used.
+
 ## Workspaces
 
 Everything belongs to a **workspace**. The left-hand menu has **All workspaces**, a workspace switcher, and the current workspace's **Gantt chart**, **Items**, **Reports** and **Workspace settings**. Collapse the menu to icons with **Collapse** at the bottom; the app remembers the open workspace, view and menu state per browser.

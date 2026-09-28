@@ -3965,7 +3965,8 @@ function updatePageHead() {
   const crumb = document.getElementById('page-workspace');
   crumb.hidden = !inWorkspace;
   crumb.innerHTML = inWorkspace ? `${p.code ? `<b>${escAttr(p.code)}</b> ` : ''}${escAttr(p.name)}` : '';
-  document.title = inWorkspace ? `${VIEW_TITLES[view]()} · ${p.name} — Tracker` : 'Workspaces — Tracker';
+  const suffix = APP_CONFIG.title ? ` — ${APP_CONFIG.title}` : '';
+  document.title = inWorkspace ? `${VIEW_TITLES[view]()} · ${p.name}${suffix}` : `Workspaces${suffix}`;
 }
 
 function workspaceStats(p) {
@@ -4533,6 +4534,25 @@ function wireEvents() {
   }).observe(document.getElementById('gantt-scroll'));
 }
 
+// config.json (via the server) sets the app's title and logo. Without it, the defaults stay.
+const APP_CONFIG = { title: 'Tracker', logo: '' };
+async function loadConfig() {
+  try {
+    const res = await fetch('api/config', { cache: 'no-store' });
+    if (res.ok) Object.assign(APP_CONFIG, await res.json());
+  } catch { /* keep the defaults */ }
+  const name = document.getElementById('brand-name');
+  name.textContent = APP_CONFIG.title;
+  name.hidden = !APP_CONFIG.title;
+  document.title = APP_CONFIG.title;
+  if (APP_CONFIG.logo) {
+    const img = document.getElementById('brand-logo');
+    img.alt = APP_CONFIG.title;
+    img.onload = () => { img.hidden = false; document.getElementById('brand-mark').style.display = 'none'; };
+    img.src = APP_CONFIG.logo;
+  }
+}
+
 (async function init() {
   const f = document.getElementById('edit-form').elements;
   f.shape.innerHTML = optionList(SHAPES);
@@ -4540,6 +4560,7 @@ function wireEvents() {
   const prefs = loadAppPrefs();
   setNavCollapsed(!!prefs.navCollapsed);
   wireEvents();
+  await loadConfig();
   try {
     await loadData();
   } catch (err) {
