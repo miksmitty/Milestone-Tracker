@@ -692,6 +692,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   font: inherit; font-size: 13px; color: var(--text); background: #fff;
 }
 .pop-field input[type="range"] { width: 100%; }
+.pop-field .rag-pick.sm { flex-wrap: wrap; gap: 5px; }
 .pop-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
 .pop-reset { align-self: flex-start; font-size: 12.5px; }
 .pop-seg, .tb-seg { display: flex; padding: 2px; background: #f4f3ee; border-radius: 8px; }
