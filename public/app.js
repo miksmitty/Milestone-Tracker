@@ -330,6 +330,7 @@ async function loadData() {
   const allReports = rowsToReports(parseAny(reports), allItems);
   state.updates = rowsToUpdates(parseAny(updates));
   state.lanes = rowsToLanes(parseAny(lanes));
+  dataLoaded = true;
   if (created) await saveCSV('api/workspaces', workspacesToCSV(state.workspaces));
   state.items = allItems;
   state.reports = allReports;
@@ -369,6 +370,8 @@ const allReports = () => allRecords(state.reports, state.otherReports);
 // Every change is written back to its CSV. Saves are queued so they reach the server in order.
 let saveQueue = Promise.resolve();
 let saveTimer = null;
+// Until every file has loaded nothing is written: saving the half-empty state would overwrite them.
+let dataLoaded = false;
 let pendingMsg = '';
 
 function saveData(msg) {
@@ -392,6 +395,10 @@ function saveLanes(msg) {
 }
 
 function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if the queue is busy
+  if (!dataLoaded) {
+    flashStatus('Not saved — the data hasn’t loaded, so saving would overwrite it', false, true);
+    return Promise.resolve(false);
+  }
   saveQueue = saveQueue.then(async () => {
     flashStatus('Saving…', null);
     try {
@@ -2866,6 +2873,19 @@ async function deleteReport() {
   await saveReports('Report deleted');
 }
 
+// Reports whose item no longer exists, e.g. after the items file was replaced.
+const orphanReports = () => state.reports.filter(r => !itemById(r.item_id));
+
+async function deleteOrphanReports() {
+  const gone = new Set(orphanReports());
+  if (!gone.size || !leavePaneEdit()) return;
+  if (!confirm(`Delete ${count(gone.size, 'report', 'reports')} on ${T.items} that no longer exist in this workspace?\n\nThis can’t be undone.`)) return;
+  state.reports = state.reports.filter(r => !gone.has(r));
+  paneEditing = false;
+  rerenderCurrentView();
+  await saveReports(`${count(gone.size, 'report', 'reports')} deleted`);
+}
+
 function rerenderCurrentView() {
   if (isShown('gantt')) renderGantt();
   if (isShown('reports')) renderReports();
@@ -2989,6 +3009,10 @@ function renderReports() {
     ? `Showing ${rows.length} of ${state.reports.length}`
     : `${state.reports.length} report${state.reports.length === 1 ? '' : 's'}`;
   document.getElementById('rpf-clear').hidden = !filtered;
+  const orphans = orphanReports().length;
+  const ob = document.getElementById('btn-rp-orphans');
+  ob.hidden = !orphans;
+  ob.textContent = `Delete ${count(orphans, 'report', 'reports')} on deleted ${T.items}`;
   document.getElementById('rp-split').classList.toggle('no-preview', !rptPreview);
   if (!rptPreview) return;
   if (paneEditing) updatePanePos(); // leave the form (and what's been typed) alone
@@ -3400,6 +3424,7 @@ function wireReports() {
   wireTable(rptTable);
   document.getElementById('rpf-q').addEventListener('input', (e) => { rptSearch = e.target.value; renderReports(); });
   document.getElementById('rpf-clear').onclick = () => { clearReportFilters(); renderReports(); };
+  document.getElementById('btn-rp-orphans').onclick = deleteOrphanReports;
 }
 
 // Downloads the items currently listed on the Items tab (filters and sort applied), in the
@@ -4876,7 +4901,7 @@ function wireEvents() {
 
   // Leaving the page with a save still pending: send it anyway.
   window.addEventListener('pagehide', () => {
-    if (saveTimer === null) return;
+    if (saveTimer === null || !dataLoaded) return;
     syncEditorToState();
     navigator.sendBeacon('api/milestones', toCSV(allItems()));
   });
@@ -4920,6 +4945,10 @@ async function loadConfig() {
     await loadData();
   } catch (err) {
     flashStatus(`Couldn’t load data: ${err.message}`, false, true);
+    // Cover the app so nothing can be edited: changes couldn't be saved without losing the files.
+    document.getElementById('load-failed-msg').textContent = err.message;
+    document.getElementById('load-failed').hidden = false;
+    document.getElementById('load-failed-retry').onclick = () => location.reload();
     return;
   }
   applyWorkspaceChrome();

@@ -7,6 +7,14 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<div id="load-failed" class="load-failed" role="alertdialog" aria-labelledby="load-failed-title" hidden>
+  <div class="load-failed-box">
+    <h2 id="load-failed-title">The data couldn’t be loaded</h2>
+    <p id="load-failed-msg"></p>
+    <p>Nothing can be changed until it loads, so your files aren’t overwritten. Check the server is running (restart it after updating the app), then try again.</p>
+    <button id="load-failed-retry" class="btn btn-primary">Try again</button>
+  </div>
+</div>
 <div class="app">
   <!-- ============ SIDEBAR ============ -->
   <aside class="sidebar" aria-label="Main menu">
@@ -349,6 +357,7 @@
         <button id="btn-new-report" class="btn btn-primary">+ New report</button>
         <button id="btn-reports-csv" class="btn" title="Download the reports shown (filters applied) as a CSV">Download CSV</button>
         <span id="rp-count" class="grid-count"></span>
+        <button id="btn-rp-orphans" class="btn btn-danger" hidden></button>
       </div>
       <div class="toolbar-group rp-filters">
         <input id="rpf-q" type="search" placeholder="Search report text…" />

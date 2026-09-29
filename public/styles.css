@@ -902,3 +902,17 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .up-trend input:checked + .trend-up { color: #15803d; }
 .up-trend input:checked + .trend-flat { color: #7a7870; }
 .up-trend input:checked + .trend-down { color: #e60000; }
+
+/* ---------- data failed to load: covers the app so nothing is edited and saved over the files ---------- */
+.load-failed {
+  position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(28, 28, 28, .55);
+}
+.load-failed[hidden] { display: none; }
+.load-failed-box {
+  max-width: 520px; padding: 24px 26px; border-radius: 12px; background: var(--panel);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .25); display: flex; flex-direction: column; gap: 12px; align-items: flex-start;
+}
+.load-failed-box h2 { font-size: 18px; }
+.load-failed-box p { font-size: 13.5px; line-height: 1.5; }
+#load-failed-msg { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }

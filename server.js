@@ -52,6 +52,28 @@ const DATASETS = {
   },
 };
 
+// Before a CSV is first overwritten each day, the day's starting copy is kept in backups/
+// (e.g. backups/reports.2026-09-29.csv), so a bad save can be undone. The newest 30 per file are kept.
+const BACKUP_DIR = path.join(__dirname, 'backups');
+const BACKUPS_KEPT = 30;
+function backupDaily(file, done) {
+  const d = new Date();
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const base = path.basename(file, '.csv');
+  const target = path.join(BACKUP_DIR, `${base}.${day}.csv`);
+  fs.mkdir(BACKUP_DIR, { recursive: true }, () => {
+    fs.copyFile(file, target, fs.constants.COPYFILE_EXCL, (err) => {
+      if (err && err.code !== 'EEXIST' && err.code !== 'ENOENT') console.error(`Couldn't back up ${path.basename(file)}: ${err.message}`);
+      if (!err) fs.readdir(BACKUP_DIR, (err2, names) => {
+        if (err2) return;
+        const mine = names.filter(n => n.startsWith(base + '.') && /^\d{4}-\d{2}-\d{2}$/.test(n.slice(base.length + 1, -4))).sort();
+        for (const n of mine.slice(0, -BACKUPS_KEPT)) fs.unlink(path.join(BACKUP_DIR, n), () => {});
+      });
+      done();
+    });
+  });
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -155,7 +177,7 @@ const server = http.createServer((req, res) => {
       let body = '';
       req.setEncoding('utf8'); // keeps a character split across chunks intact
       req.on('data', (chunk) => { body += chunk; });
-      req.on('end', () => {
+      req.on('end', () => backupDaily(ds.file, () => {
         const tmp = ds.file + '.tmp';
         fs.writeFile(tmp, body, 'utf8', (err) => {
           if (err) {
@@ -173,7 +195,7 @@ const server = http.createServer((req, res) => {
             fs.writeFile(ds.file, body, 'utf8', (err3) => { fs.unlink(tmp, () => {}); done(err3); });
           });
         });
-      });
+      }));
       return;
     }
     res.writeHead(405);
