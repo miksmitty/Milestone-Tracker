@@ -1,6 +1,6 @@
 // Tracker — zero-dependency Node server.
-// Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv
-// and updates.csv.
+// Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv,
+// updates.csv and swimlanes.csv.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -44,7 +44,11 @@ const DATASETS = {
   },
   '/api/updates': {
     file: path.join(__dirname, 'updates.csv'),
-    header: 'id,workspace_id,week_ending,rag,summary,author,created,updated\n',
+    header: 'id,workspace_id,swimlane,week_ending,rag,summary,author,created,updated\n',
+  },
+  '/api/swimlanes': {
+    file: path.join(__dirname, 'swimlanes.csv'),
+    header: 'workspace_id,name,lead,trend\n',
   },
 };
 

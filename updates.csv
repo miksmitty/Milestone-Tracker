@@ -1,8 +1,11 @@
-id,workspace_id,week_ending,rag,summary,author,created,updated
-1,1,2026-09-25,Amber,"- Data migration dry run 2 slipped a week
+id,workspace_id,swimlane,week_ending,rag,summary,author,created,updated
+1,1,,2026-09-25,Amber,"- Data migration dry run 2 slipped a week
 - Supplier contract signed",Helen Carter,2026-09-29T07:32:25.880Z,2026-09-29T07:32:25.880Z
-2,1,2026-10-02,Green,"- **Dry run 2 completed** with 99.8% records reconciled
+2,1,,2026-10-02,Green,"- **Dry run 2 completed** with 99.8% records reconciled
 - Cutover plan approved by steering group",Helen Carter,2026-09-29T07:32:26.187Z,2026-09-29T07:32:26.187Z
-3,2,2026-09-25,Green,Fit-out on schedule.,Helen Carter,2026-09-29T07:32:26.491Z,2026-09-29T07:32:26.491Z
-4,2,2026-10-02,Red,"- Network install delayed by landlord access
+3,2,,2026-09-25,Green,Fit-out on schedule.,Helen Carter,2026-09-29T07:32:26.491Z,2026-09-29T07:32:26.491Z
+4,2,,2026-10-02,Red,"- Network install delayed by landlord access
 - **Decision needed:** approve weekend working",Helen Carter,2026-09-29T07:32:26.799Z,2026-09-29T07:32:26.799Z
+5,1,Leadership,2026-09-25,Green,On plan.,,2026-09-29T07:37:19.854Z,2026-09-29T07:37:19.854Z
+6,1,Leadership,2026-10-02,Amber,"- Vendor environment late
+- Mitigation agreed",,2026-09-29T07:37:20.157Z,2026-09-29T07:37:20.157Z

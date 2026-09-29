@@ -86,7 +86,8 @@ const MS_DAY = 86400000;
 const state = {
   statuses: [],         // RAG options: {workspace_id, position, name, color, description, get_to_green, is_default}
   workspaces: [],       // {id, number, name, code, description, owner, lead, start, end, status, trend, item_term, milestone_term, task_term, created, updated}
-  updates: [],          // weekly program updates, every workspace: {id, workspace_id, week_ending, status, summary, author, created, updated}
+  updates: [],          // weekly updates, every workspace: {id, workspace_id, swimlane ('' for the whole program), week_ending, status, summary, author, created, updated}
+  lanes: [],            // swimlane details, every workspace: {workspace_id, name, lead, trend}
   lastWorkspaceId: 0,
   workspaceId: '',        // the workspace being viewed
   otherItems: [],       // items of every other workspace, kept so saves write the whole file
@@ -312,7 +313,7 @@ function normaliseShape(v) {
 
 async function loadData() {
   if (location.protocol === 'file:') throw new Error('the page was opened as a file — run node server.js and open the address it prints');
-  const [workspaces, statuses, items, reports, updates] = await Promise.all(['api/workspaces', 'api/statuses', 'api/milestones', 'api/reports', 'api/updates'].map(async (u) => {
+  const [workspaces, statuses, items, reports, updates, lanes] = await Promise.all(['api/workspaces', 'api/statuses', 'api/milestones', 'api/reports', 'api/updates', 'api/swimlanes'].map(async (u) => {
     const r = await fetch(u);
     // e.g. a server started before workspaces existed: stop rather than save items under the wrong workspace
     if (!r.ok) throw new Error(`${u} returned ${r.status} ${r.statusText} — the app must be opened through its own server (node server.js), not a separate web server or file://`);
@@ -328,6 +329,7 @@ async function loadData() {
   const allItems = rowsToItems(parseAny(items));
   const allReports = rowsToReports(parseAny(reports), allItems);
   state.updates = rowsToUpdates(parseAny(updates));
+  state.lanes = rowsToLanes(parseAny(lanes));
   if (created) await saveCSV('api/workspaces', workspacesToCSV(state.workspaces));
   state.items = allItems;
   state.reports = allReports;
@@ -384,6 +386,9 @@ function saveWorkspaces(msg) {
 }
 function saveUpdates(msg) {
   return saveCSV('api/updates', updatesToCSV(state.updates), msg);
+}
+function saveLanes(msg) {
+  return saveCSV('api/swimlanes', lanesToCSV(state.lanes), msg);
 }
 
 function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if the queue is busy
@@ -2866,6 +2871,7 @@ function rerenderCurrentView() {
   if (isShown('reports')) renderReports();
   if (isShown('workspaces')) renderWorkspaces();
   if (isShown('overview')) renderOverview();
+  if (isShown('lanes')) renderLaneOverview();
 }
 
 /* ---- reports list ---- */
@@ -3963,7 +3969,7 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { overview: () => 'Program overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports' };
+const VIEW_TITLES = { overview: () => 'Program overview', lanes: () => 'Swimlane overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
@@ -3994,11 +4000,11 @@ function workspaceStats(p) {
 // green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and
 // the rest (Green, or any other on-track status) count as Green, so the five add up to the total.
 const MS_BUCKETS = [['notStarted', 'Not started'], ['green', 'Green'], ['redAmber', 'Red/Amber'], ['closed', 'Closed'], ['total', 'Total']];
-function milestoneOverview(workspaceId) {
+function milestoneOverview(workspaceId, lane = null) { // lane: only that swimlane's milestones
   const rg = ragOf(workspaceId);
   const out = { notStarted: 0, green: 0, redAmber: 0, closed: 0, total: 0 };
   for (const m of allItems()) {
-    if (m.workspace_id !== workspaceId || isTask(m)) continue;
+    if (m.workspace_id !== workspaceId || isTask(m) || (lane != null && m.swimlane !== lane)) continue;
     out.total++;
     if (isDoneStatus(m.status, workspaceId)) out.closed++;
     else if (rg.offTrack.includes(m.status)) out.redAmber++;
@@ -4358,9 +4364,11 @@ async function deleteWorkspace() {
   state.statuses = state.statuses.filter(s => s.workspace_id !== p.id);
   const hadUpdates = state.updates.some(u => u.workspace_id === p.id);
   state.updates = state.updates.filter(u => u.workspace_id !== p.id);
+  const hadLanes = state.lanes.some(l => l.workspace_id === p.id);
+  state.lanes = state.lanes.filter(l => l.workspace_id !== p.id);
   applyWorkspaceChrome();
   rerenderCurrentView();
-  await Promise.all([saveData(), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates()]);
+  await Promise.all([saveData(), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadLanes && saveLanes()]);
 }
 
 function wireWorkspaces() {
@@ -4393,12 +4401,15 @@ function wireWorkspaces() {
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
-/* ================= program overview ================= */
-// One row per workspace (program) for management: its number, area lead, the RAG of its last two
-// weekly updates, trend, the latest update's summary and a count of its milestones by status.
-// Weekly updates live in updates.csv, one per workspace per week; the newest is "current".
+/* ================= program and swimlane overviews ================= */
+// Management tables: one row per workspace (program) across the app, or per swimlane within a
+// workspace. Each row has an area lead, the RAG of its last two weekly updates, trend, the latest
+// update's summary and a count of its milestones by status. Weekly updates live in updates.csv,
+// one per program or swimlane per week (swimlane blank for the program); the newest is "current".
+// A program's area lead and trend are workspace fields; a swimlane's are kept in swimlanes.csv.
 
-const UPDATE_COLUMNS = ['id', 'workspace_id', 'week_ending', 'status', 'summary', 'author', 'created', 'updated'];
+const UPDATE_COLUMNS = ['id', 'workspace_id', 'swimlane', 'week_ending', 'status', 'summary', 'author', 'created', 'updated'];
+const LANE_COLUMNS = ['workspace_id', 'name', 'lead', 'trend'];
 
 function rowsToUpdates(rows) {
   if (!rows.length) return [];
@@ -4423,8 +4434,29 @@ function updatesToCSV(updates) {
 }
 const nextUpdateId = () => String(Math.max(0, ...state.updates.map(u => +u.id || 0)) + 1);
 
-// A workspace's weekly updates, newest first.
-const updatesFor = (workspaceId) => state.updates.filter(u => u.workspace_id === workspaceId)
+function rowsToLanes(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const ids = new Set(state.workspaces.map(p => p.id));
+  return rows.slice(1).map(r => {
+    const o = {};
+    for (const k of LANE_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
+    return o;
+  }).filter(l => ids.has(l.workspace_id) && l.name);
+}
+function lanesToCSV(lanes) {
+  return [LANE_COLUMNS.join(','), ...lanes.map(l => LANE_COLUMNS.map(k => csvEscape(l[k])).join(','))].join('\n') + '\n';
+}
+// A swimlane's details; a blank one (not yet stored) when it has none.
+const laneRecord = (workspaceId, name) => state.lanes.find(l => l.workspace_id === workspaceId && l.name === name)
+  || { workspace_id: workspaceId, name, lead: '', trend: '' };
+
+// What a row is about: a program, or one swimlane of it. `rec` holds its area lead and trend.
+const programSubject = (p) => ({ p, lane: '', rec: p, label: programLabel(p) });
+const laneSubject = (p, name) => ({ p, lane: name, rec: laneRecord(p.id, name), label: `${p.code || p.name} · ${name}` });
+
+// Weekly updates for a program (lane '') or one of its swimlanes, newest first.
+const updatesFor = (workspaceId, lane = '') => state.updates.filter(u => u.workspace_id === workspaceId && (u.swimlane || '') === lane)
   .sort((a, b) => b.week_ending.localeCompare(a.week_ending) || b.updated.localeCompare(a.updated));
 
 // Programs in number order (numbers compared naturally), unnumbered ones last by name.
@@ -4432,96 +4464,130 @@ function programsInOrder() {
   return [...state.workspaces].sort((a, b) => (!a.number) - (!b.number)
     || a.number.localeCompare(b.number, undefined, { numeric: true }) || a.name.localeCompare(b.name));
 }
+// The current workspace's swimlanes in the order the Gantt chart lists them (first appearance).
+const lanesInOrder = () => [...new Set(state.items.map(m => m.swimlane))];
 
-function overviewRow(p) {
-  const [cur, prev] = updatesFor(p.id);
+const isStale = (u) => !u || u.week_ending < addDays(defaultPeriodEnd('Weekly'), -6);
+
+function overviewRow(sub) {
+  const { p, lane, rec } = sub;
+  const [cur, prev] = sub.forLane && !lane ? [] : updatesFor(p.id, lane); // a lane without a name has no updates
   const rg = ragOf(p.id);
-  const ov = milestoneOverview(p.id);
-  const stale = cur && cur.week_ending < addDays(defaultPeriodEnd('Weekly'), -6);
+  const ov = milestoneOverview(p.id, sub.forLane ? lane : null);
+  const stale = cur && isStale(cur);
   const ragCell = (u, isCur) => (u
     ? `${statusPill(u.status, rg.map)}<small class="ov-week${isCur && stale ? ' stale' : ''}" ${isCur && stale ? 'title="No update since this week"' : ''}>w/e ${fmtShort(u.week_ending)}</small>`
     : '<span class="muted">—</span>');
-  return { p, cur, prev, ov, html: `
-    <tr data-pid="${p.id}" style="--rag:${pal(p.status, rg.map).base}">
-      <td class="ov-num">${p.number ? escAttr(p.number) : '<span class="muted">—</span>'}</td>
+  const nameCell = sub.forLane
+    ? `<td class="ov-prog">${lane
+      ? `<button type="button" class="ov-name" data-open-lane="${escAttr(lane)}" title="Show this swimlane on the Gantt chart">${escAttr(lane)}</button>`
+      : '<span class="muted">(No swimlane)</span>'}</td>`
+    : `<td class="ov-num">${p.number ? escAttr(p.number) : '<span class="muted">—</span>'}</td>
       <td class="ov-prog">
         <button type="button" class="ov-name" data-open-workspace="${p.id}" title="Open the Gantt chart">${escAttr(p.name)}</button>
         ${p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : ''}
         <small class="ov-overall">Overall ${statusPill(p.status, rg.map)}</small>
-      </td>
-      <td class="ov-lead">${p.lead ? escAttr(p.lead) : '<span class="muted">—</span>'}</td>
+      </td>`;
+  const key = sub.forLane ? `data-lane="${escAttr(lane)}"` : `data-pid="${p.id}"`;
+  const canUpdate = !sub.forLane || lane; // a lane needs a name to hold updates
+  return { sub, cur, prev, ov, html: `
+    <tr ${key} style="--rag:${sub.forLane ? 'var(--border)' : pal(p.status, rg.map).base}">
+      ${nameCell}
+      <td class="ov-lead">${rec.lead ? escAttr(rec.lead) : '<span class="muted">—</span>'}</td>
       <td class="ov-rag">${ragCell(prev, false)}</td>
       <td class="ov-rag">${ragCell(cur, true)}</td>
-      <td class="ov-trend">${trendBadge(p.trend)}</td>
+      <td class="ov-trend">${trendBadge(rec.trend)}</td>
       <td class="ov-summary">${cur?.summary ? `<div class="md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No update yet</span>'}</td>
       ${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}${ov[k] ? '' : ' zero'}">${ov[k]}</td>`).join('')}
-      <td class="ov-act"><button type="button" class="btn btn-sm" data-update="${p.id}">Update</button></td>
+      <td class="ov-act">${canUpdate ? `<button type="button" class="btn btn-sm" data-update>Update</button>` : ''}</td>
     </tr>` };
 }
 
-function renderOverview() {
-  const rows = programsInOrder().map(overviewRow);
-  document.getElementById('overview-body').innerHTML = rows.map(r => r.html).join('')
-    || '<tr><td colspan="13" class="grid-empty">No programs yet.</td></tr>';
+// Fill one of the overview tables (programs or swimlanes) and its totals row.
+function renderOverviewTable(id, subjects, one, many) {
+  const rows = subjects.map(overviewRow);
+  const cols = document.querySelectorAll(`#${id}-table thead tr:first-child th:not(.ov-ms-group)`).length - 1;
+  document.getElementById(`${id}-body`).innerHTML = rows.map(r => r.html).join('')
+    || `<tr><td colspan="${cols + MS_BUCKETS.length + 1}" class="grid-empty">No ${many} yet.</td></tr>`;
   const sum = Object.fromEntries(MS_BUCKETS.map(([k]) => [k, rows.reduce((a, r) => a + r.ov[k], 0)]));
-  document.getElementById('overview-foot').innerHTML = `
-    <tr><td colspan="7">All programs</td>${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}">${sum[k]}</td>`).join('')}<td></td></tr>`;
-  const thisWeek = defaultPeriodEnd('Weekly');
-  const missing = rows.filter(r => !r.cur || r.cur.week_ending < addDays(thisWeek, -6)).length;
-  document.getElementById('overview-count').textContent = `${count(rows.length, 'program', 'programs')}`
-    + (missing ? ` · ${missing} without an update this week` : ' · all updated this week');
+  document.getElementById(`${id}-foot`).innerHTML = `
+    <tr><td colspan="${cols}">All ${many}</td>${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}">${sum[k]}</td>`).join('')}<td></td></tr>`;
+  const missing = rows.filter(r => (!r.sub.forLane || r.sub.lane) && isStale(r.cur)).length;
+  document.getElementById(`${id}-count`).textContent = count(rows.length, one, many)
+    + (!rows.length ? '' : missing ? ` · ${missing} without an update this week` : ' · all updated this week');
+  return rows;
 }
 
-function downloadOverviewCSV() {
-  const head = ['Program number', 'Program', 'Area lead', 'Overall RAG', 'Previous weekly RAG', 'Previous week ending',
-    'Current weekly RAG', 'Current week ending', 'Trend', 'Summary', ...MS_BUCKETS.map(([, l]) => `Milestones ${l.toLowerCase()}`)];
-  const lines = programsInOrder().map(overviewRow).map(({ p, cur, prev, ov }) => [
-    p.number, p.name, p.lead, p.status, prev?.status, prev?.week_ending, cur?.status, cur?.week_ending, p.trend,
+let overviewRows = [], laneRows = []; // as last rendered, for clicks and the CSV
+function renderOverview() {
+  overviewRows = renderOverviewTable('overview', programsInOrder().map(programSubject), 'program', 'programs');
+}
+function renderLaneOverview() {
+  const p = currentWorkspace();
+  laneRows = renderOverviewTable('lanes', lanesInOrder().map(name => ({ ...laneSubject(p, name), forLane: true })), 'swimlane', 'swimlanes');
+}
+
+function downloadOverviewCSV(forLane) {
+  const rows = forLane ? (renderLaneOverview(), laneRows) : (renderOverview(), overviewRows);
+  const head = [...(forLane ? ['Swimlane'] : ['Program number', 'Program']), 'Area lead', ...(forLane ? [] : ['Overall RAG']),
+    'Previous weekly RAG', 'Previous week ending', 'Current weekly RAG', 'Current week ending', 'Trend', 'Summary',
+    ...MS_BUCKETS.map(([, l]) => `Milestones ${l.toLowerCase()}`)];
+  const lines = rows.map(({ sub: { p, lane, rec }, cur, prev, ov }) => [
+    ...(forLane ? [lane] : [p.number, p.name]), rec.lead, ...(forLane ? [] : [p.status]),
+    prev?.status, prev?.week_ending, cur?.status, cur?.week_ending, rec.trend,
     mdToText(cur?.summary || ''), ...MS_BUCKETS.map(([k]) => ov[k]),
   ].map(csvEscape).join(','));
   const blob = new Blob(['﻿' + [head.map(csvEscape).join(','), ...lines].join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
-  a.download = `program-overview-${fmtISO(new Date())}.csv`;
+  const p = currentWorkspace();
+  const slug = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
+  a.download = `${forLane ? `${slug}-swimlane` : 'program'}-overview-${fmtISO(new Date())}.csv`;
   a.href = URL.createObjectURL(blob);
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
 
 /* ---- weekly update dialog ---- */
-// Opens on this week's update if there is one, otherwise a new one starting from last week's RAG.
-// Picking a week that already has an update loads it. The trend is saved to the workspace, and
-// is suggested from the change in RAG until it's chosen by hand.
+// For a program or a swimlane. Opens on this week's update if there is one, otherwise a new one
+// starting from last week's RAG. Picking a week that already has an update loads it. The area
+// lead and trend are saved to the program or swimlane; the trend is suggested from the change in
+// RAG until it's chosen by hand.
 
-let upWorkspace = null; // workspace being updated
+let upSubject = null;   // {p, lane, rec, label} being updated
 let upEditing = null;   // update being edited; null for a new one
 let upTrendTouched = false;
 const RAG_RANK = { red: 0, amber: 1, green: 2, complete: 3 };
 
-function openUpdateDialog(p) {
+function openUpdateDialog(sub) {
   hideQuick();
-  upWorkspace = p;
+  upSubject = sub;
   const f = document.getElementById('update-form').elements;
-  const rg = ragOf(p.id);
-  document.getElementById('up-heading').textContent = `Weekly update · ${programLabel(p)}`;
+  const rg = ragOf(sub.p.id);
+  document.getElementById('up-heading').textContent = `Weekly update · ${sub.label}`;
+  document.getElementById('up-badge').textContent = sub.lane ? 'Swimlane update' : 'Weekly update';
   document.getElementById('up-status').innerHTML = rg.names.map(st => `
     <label style="--c:${rg.map[st].base};--t:${rg.map[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('');
   document.getElementById('up-trend').innerHTML = TRENDS.map(t => `
     <label><input type="radio" name="trend" value="${t.name}" /><span class="trend trend-${t.cls}"><i aria-hidden="true">${t.icon}</i>${t.name}</span></label>`).join('');
   f.week_ending.value = defaultPeriodEnd('Weekly');
+  f.lead.value = sub.rec.lead;
+  upEditing = null;
   loadUpdateWeek(true);
   document.getElementById('up-error').textContent = '';
   refreshDatalists();
   document.getElementById('update-dialog').showModal();
 }
 
+const subjectUpdates = () => updatesFor(upSubject.p.id, upSubject.lane);
+
 // Fill the form for the chosen week: its update if there is one, otherwise a fresh one
 // (keeping what's been typed, unless the dialog has just opened).
 function loadUpdateWeek(opening) {
   const f = document.getElementById('update-form').elements;
-  const p = upWorkspace;
+  const { p, rec } = upSubject;
   const week = f.week_ending.value;
-  const found = updatesFor(p.id).find(u => u.week_ending === week) || null;
-  const before = updatesFor(p.id).find(u => u.week_ending < week);
+  const found = subjectUpdates().find(u => u.week_ending === week) || null;
+  const before = subjectUpdates().find(u => u.week_ending < week);
   if (found || opening || upEditing) {
     const v = found || { status: before?.status || ragOf(p.id).def, summary: '', author: before?.author || '' };
     document.querySelectorAll('#up-status input').forEach(r => { r.checked = r.value === v.status; });
@@ -4530,8 +4596,8 @@ function loadUpdateWeek(opening) {
     edLoad(f.summary);
   }
   upEditing = found;
-  upTrendTouched = !!p.trend && !!found;
-  for (const r of f.trend) r.checked = r.value === p.trend;
+  upTrendTouched = !!rec.trend && !!found;
+  for (const r of f.trend) r.checked = r.value === rec.trend;
   if (!upTrendTouched) suggestTrend();
   const rg = ragOf(p.id);
   document.getElementById('up-prev').innerHTML = before
@@ -4547,7 +4613,7 @@ function loadUpdateWeek(opening) {
 function suggestTrend() {
   const f = document.getElementById('update-form').elements;
   const now = document.querySelector('#up-status input:checked')?.value || '';
-  const before = updatesFor(upWorkspace.id).find(u => u.week_ending < f.week_ending.value);
+  const before = subjectUpdates().find(u => u.week_ending < f.week_ending.value);
   const a = RAG_RANK[before?.status.toLowerCase()], b = RAG_RANK[now.toLowerCase()];
   if (a == null || b == null) return;
   const name = b > a ? 'Improving' : b < a ? 'Declining' : 'Stable';
@@ -4562,17 +4628,22 @@ async function submitUpdate(e) {
   if (!parseDate(week)) return (err.textContent = 'Choose the week ending date.');
   const status = document.querySelector('#up-status input:checked')?.value;
   if (!status) return (err.textContent = 'Choose this week’s RAG.');
-  const p = upWorkspace;
+  const { p, lane, rec } = upSubject;
   const now = new Date().toISOString();
   const v = { week_ending: week, status, summary: f.summary.value.trim(), author: f.author.value.trim(), updated: now };
   if (upEditing) Object.assign(upEditing, v);
-  else state.updates.push({ id: nextUpdateId(), workspace_id: p.id, created: now, ...v });
+  else state.updates.push({ id: nextUpdateId(), workspace_id: p.id, swimlane: lane, created: now, ...v });
   const saves = [saveUpdates(upEditing ? 'Update saved' : 'Update submitted')];
-  const trend = f.trend.value;
-  if (trend !== p.trend) {
-    p.trend = trend;
-    p.updated = now;
-    saves.push(saveWorkspaces());
+  const changes = { lead: f.lead.value.trim(), trend: f.trend.value };
+  if (changes.lead !== rec.lead || changes.trend !== rec.trend) {
+    Object.assign(rec, changes);
+    if (lane) {
+      if (!state.lanes.includes(rec)) state.lanes.push(rec);
+      saves.push(saveLanes());
+    } else {
+      p.updated = now;
+      saves.push(saveWorkspaces());
+    }
   }
   document.getElementById('update-dialog').close();
   rerenderCurrentView();
@@ -4587,13 +4658,27 @@ async function deleteUpdate() {
   await saveUpdates('Update deleted');
 }
 
+// Show one swimlane on the Gantt chart.
+function openLaneOnGantt(name) {
+  clearGanttFilters();
+  ganttFilter.lane = name;
+  switchView('gantt');
+}
+
 function wireOverview() {
-  document.getElementById('btn-overview-csv').onclick = downloadOverviewCSV;
+  document.getElementById('btn-overview-csv').onclick = () => downloadOverviewCSV(false);
+  document.getElementById('btn-lanes-csv').onclick = () => downloadOverviewCSV(true);
   document.getElementById('overview-body').addEventListener('click', (e) => {
-    const up = e.target.closest('[data-update]');
-    if (up) return openUpdateDialog(workspaceById(up.dataset.update));
+    const row = e.target.closest('[data-pid]');
+    if (e.target.closest('[data-update]')) return openUpdateDialog(programSubject(workspaceById(row.dataset.pid)));
     const open = e.target.closest('[data-open-workspace]');
     if (open) switchWorkspace(open.dataset.openWorkspace, 'gantt');
+  });
+  document.getElementById('lanes-body').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-lane]');
+    if (!row) return;
+    if (e.target.closest('[data-update]')) return openUpdateDialog(laneSubject(currentWorkspace(), row.dataset.lane));
+    if (e.target.closest('[data-open-lane]')) openLaneOnGantt(row.dataset.lane);
   });
   const dlg = document.getElementById('update-dialog');
   const form = document.getElementById('update-form');
@@ -4639,7 +4724,7 @@ function downloadPNG() {
 
 /* ================= wiring ================= */
 
-const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports'];
+const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'lanes'];
 const APP_VIEWS = ['overview', 'workspaces']; // views across every workspace
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 const currentView = () => VIEWS.find(isShown) || 'gantt';
@@ -4656,6 +4741,7 @@ function switchView(view) {
   else if (view === 'editor') renderEditor();
   else if (view === 'reports') renderReports();
   else if (view === 'overview') renderOverview();
+  else if (view === 'lanes') renderLaneOverview();
   else renderWorkspaces();
   for (const v of VIEWS) {
     document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);

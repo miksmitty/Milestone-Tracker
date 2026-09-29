@@ -49,6 +49,10 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5.5M7.5 13h5.5"/></svg>
         <span class="nav-text">Reports</span>
       </button>
+      <button id="nav-lanes" class="nav-item" title="Swimlane overview">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M7 3.5v13"/><path d="M10 9.75h4.5M10 14.25h3"/></svg>
+        <span class="nav-text">Swimlane overview</span>
+      </button>
       <button id="nav-settings" class="nav-item" title="Workspace settings">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
         <span class="nav-text">Workspace settings</span>
@@ -111,6 +115,49 @@
       The milestones overview counts each program’s milestones by RAG: done statuses are <i>Closed</i>, statuses that need a get to green plan are <i>Red/Amber</i>, the default status is <i>Not started</i> and the rest count as <i>Green</i>.
       Set the program number, area lead and trend in <b>Workspace settings</b>. Weekly updates are stored in <code>updates.csv</code>.</p>
   </main>
+
+  <!-- ============ SWIMLANE OVERVIEW ============ -->
+  <main id="view-lanes" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="btn-lanes-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
+        <span id="lanes-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-group toolbar-right">
+        <span class="autosave-note">Use <b>Update</b> on a row to record its weekly RAG and summary</span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="lanes-table" class="ov-table">
+        <thead>
+          <tr>
+            <th rowspan="2">Swimlane</th>
+            <th rowspan="2">Area lead</th>
+            <th rowspan="2">Previous weekly RAG</th>
+            <th rowspan="2">Current weekly RAG</th>
+            <th rowspan="2">Trend</th>
+            <th rowspan="2" class="ov-summary">Summary of last week’s progress — key points for management</th>
+            <th colspan="5" class="ov-ms-group">Milestones overview</th>
+            <th rowspan="2"></th>
+          </tr>
+          <tr>
+            <th class="ov-ms ms-notStarted">Not started</th>
+            <th class="ov-ms ms-green">Green</th>
+            <th class="ov-ms ms-redAmber">Red/Amber</th>
+            <th class="ov-ms ms-closed">Closed</th>
+            <th class="ov-ms ms-total">Total</th>
+          </tr>
+        </thead>
+        <tbody id="lanes-body"></tbody>
+        <tfoot id="lanes-foot"></tfoot>
+      </table>
+    </div>
+    <p class="hint">One row per swimlane of this workspace, in the order the Gantt chart lists them. Click a swimlane to see just its items on the Gantt chart.
+      <b>Current weekly RAG</b> and the summary come from the swimlane’s latest weekly update, and <b>Previous weekly RAG</b> from the one before it; a week-ending date in red means there’s no update for this week yet.
+      The milestones overview counts the swimlane’s milestones as on the program overview. Use <b>Update</b> to record the week’s update and to set the swimlane’s area lead and trend.
+      Swimlane updates are stored in <code>updates.csv</code> (with the swimlane’s name) and area leads and trends in <code>swimlanes.csv</code>. Renaming a swimlane starts it afresh.</p>
+  </main>
+
 
   <!-- ============ WORKSPACES VIEW ============ -->
   <main id="view-workspaces" class="view hidden">
@@ -465,7 +512,7 @@
   <dialog id="update-dialog" class="edit-dialog update-dialog">
     <form id="update-form" novalidate>
       <header class="dlg-head">
-        <span class="type-badge upd">Weekly update</span>
+        <span id="up-badge" class="type-badge upd">Weekly update</span>
         <h2 id="up-heading">Weekly update</h2>
         <button type="button" id="up-close" class="dlg-close" title="Close">✕</button>
       </header>
@@ -475,6 +522,7 @@
         <div class="span3 field"><span class="field-label">Weekly RAG</span><div id="up-status" class="rag"></div></div>
         <div class="span3 field"><span class="field-label">Trend</span><div id="up-trend" class="seg up-trend"></div></div>
         <div class="span3 field"><span class="field-label">Summary of last week’s progress — key points for management</span><textarea name="summary" rows="4" placeholder="What moved this week, what management needs to know and any decisions needed."></textarea></div>
+        <label>Area lead<input name="lead" list="people-list" /></label>
         <label>Updated by<input name="author" list="people-list" /></label>
         <div id="up-prev" class="span3 up-prev"></div>
       </div>

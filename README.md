@@ -32,7 +32,7 @@ Changes show when the page is reloaded; there's no need to restart the server. I
 
 ## Workspaces
 
-Everything belongs to a **workspace**. The left-hand menu has **Program overview**, **All workspaces**, a workspace switcher, and the current workspace's **Gantt chart**, **Items**, **Reports** and **Workspace settings**. Collapse the menu to icons with **Collapse** at the bottom; the app remembers the open workspace, view and menu state per browser.
+Everything belongs to a **workspace**. The left-hand menu has **Program overview**, **All workspaces**, a workspace switcher, and the current workspace's **Gantt chart**, **Items**, **Reports**, **Swimlane overview** and **Workspace settings**. Collapse the menu to icons with **Collapse** at the bottom; the app remembers the open workspace, view and menu state per browser.
 
 **All workspaces** shows a card per workspace: its RAG, code, program number, owner and area lead, trend, timeline, last report, a RAG breakdown of its items, its milestone overview and counts. Click a card to open it, **Edit** to change it, or **+ New workspace**. A workspace has:
 
@@ -50,12 +50,22 @@ Everything belongs to a **workspace**. The left-hand menu has **Program overview
 - **Trend**, and the **summary of last week's progress** (key points for management) from the latest update
 - **Milestones overview**: the program's milestones counted as **Not started**, **Green**, **Red/Amber**, **Closed** and **Total**. Done statuses (named or described as complete) are Closed, statuses that need a get to green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and anything else counts as Green, so the four add up to the total. A totals row sums every program
 
-**Update** on a row records that program's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend and summary (with formatting). If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one, and is saved as the workspace's trend. **Download CSV** saves the table.
+**Update** on a row records that program's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend, summary (with formatting) and area lead. If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one; the trend and area lead are saved to the workspace. **Download CSV** saves the table.
 
-Weekly updates live in [updates.csv](updates.csv), one row per program per week:
+### Swimlane overview
+
+**Swimlane overview** is the same table for the current workspace, one row per swimlane in the order the Gantt chart lists them: **Swimlane** (click to show just that swimlane on the Gantt chart), **Area lead**, **Previous / Current weekly RAG**, **Trend**, the **summary** and the **milestones overview** of that swimlane's milestones, with a totals row that matches the program's. Each swimlane has its own weekly updates, area lead and trend, recorded with **Update** exactly as for a program. Swimlanes are matched by name, so renaming one starts it afresh.
+
+Weekly updates live in [updates.csv](updates.csv), one row per program or swimlane per week (`swimlane` is blank for the program itself):
 
 ```
-id,workspace_id,week_ending,rag,summary,author,created,updated
+id,workspace_id,swimlane,week_ending,rag,summary,author,created,updated
+```
+
+A swimlane's area lead and trend live in [swimlanes.csv](swimlanes.csv), created the first time one is set:
+
+```
+workspace_id,name,lead,trend
 ```
 
 ### RAG options
