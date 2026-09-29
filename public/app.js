@@ -1114,7 +1114,8 @@ function syncGanttSticky() {
 // The sort is a per-browser preference.
 
 const ganttFilter = { q: '', lane: '', owner: '', type: '', rag: [] };
-const ganttSort = { lanes: 'list', rows: 'packed', dir: 1 };
+const GANTT_SORT_DEFAULT = { lanes: 'name', rows: 'packed', dir: 1 }; // swimlanes A–Z, items packed by date
+const ganttSort = { ...GANTT_SORT_DEFAULT };
 
 const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.lane || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length);
 
@@ -1214,7 +1215,7 @@ function renderGanttFilters() {
     b.disabled = packed;
     b.setAttribute('aria-pressed', !packed && +b.dataset.dir === ganttSort.dir);
   });
-  document.getElementById('gs-badge').hidden = ganttSort.lanes === 'list' && packed;
+  document.getElementById('gs-badge').hidden = ganttSort.lanes === GANTT_SORT_DEFAULT.lanes && packed;
 
   const fmtR = (d) => d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }).replace(' ', ' ’');
   if (state.rangeStart) document.getElementById('range-label').textContent = `${fmtR(state.rangeStart)} – ${fmtR(state.rangeEnd)}`;
@@ -1275,7 +1276,7 @@ function wireGanttFilters() {
     const b = e.target.closest('[data-dir]');
     if (b && !b.disabled) { ganttSort.dir = +b.dataset.dir; saveSort(); }
   });
-  document.getElementById('gs-reset').onclick = () => { Object.assign(ganttSort, { lanes: 'list', rows: 'packed', dir: 1 }); saveSort(); };
+  document.getElementById('gs-reset').onclick = () => { Object.assign(ganttSort, GANTT_SORT_DEFAULT); saveSort(); };
 }
 
 /* ================= hover card ================= */
