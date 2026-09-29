@@ -47,7 +47,7 @@ Everything belongs to a **workspace**. The left-hand menu has **Program overview
 
 - **Program no.**, **Program** (click to open its Gantt chart; its overall RAG is shown underneath) and **Area lead**
 - **Previous weekly RAG** and **Current weekly RAG**: from the two most recent weekly updates, with their week-ending dates. The date turns red when there's no update for this week yet
-- **Trend**, and the **summary of last week's progress** (key points for management) from the latest update
+- **Trend**, shown as an arrow (↑ improving, → stable, ↓ declining; hover for the word), and the **summary of last week's progress** (key points for management) from the latest update
 - **Milestones overview**: the program's milestones counted as **Not started**, **Green**, **Red/Amber**, **Closed** and **Total**. Done statuses (named or described as complete) are Closed, statuses that need a get to green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and anything else counts as Green, so the four add up to the total. A totals row sums every program
 
 **Update** on a row records that program's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend, summary (with formatting) and area lead. If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one; the trend and area lead are saved to the workspace. **Download CSV** saves the table.

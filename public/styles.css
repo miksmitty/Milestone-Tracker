@@ -873,8 +873,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .ov-table tfoot td { font-weight: 700; background: #f9f8f5; border-top: 1px solid var(--border); border-bottom: 0; }
 .ov-act { text-align: right; white-space: nowrap; }
 
-.trend { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
-.trend i { font-style: normal; font-size: 10px; }
+.trend { display: inline-block; font-size: 20px; font-weight: 700; line-height: 1; cursor: default; }
 .trend-up { color: #15803d; }
 .trend-flat { color: #7a7870; }
 .trend-down { color: #e60000; }
@@ -898,5 +897,8 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .up-prev .field-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-right: 6px; }
 .up-prev .md { margin-top: 6px; color: #404040; line-height: 1.45; }
 .up-trend input:checked + span.trend { background: #f9f8f5; border-color: currentColor; }
-.up-trend span.trend { display: inline-flex; }
+.up-trend span.trend { min-width: 46px; text-align: center; padding: 5px 12px; cursor: pointer; }
 .ov-table td.ov-lead { white-space: nowrap; }
+.up-trend input:checked + .trend-up { color: #15803d; }
+.up-trend input:checked + .trend-flat { color: #7a7870; }
+.up-trend input:checked + .trend-down { color: #e60000; }

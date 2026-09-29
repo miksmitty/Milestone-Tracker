@@ -4019,16 +4019,17 @@ function milestoneStrip(workspaceId) {
   return `<div class="ms-strip">${MS_BUCKETS.map(([k, label]) => `<div class="ms-${k}"><b>${ov[k]}</b><span>${label}</span></div>`).join('')}</div>`;
 }
 
-// Trend is set by hand (or from the weekly update) and shown as an arrow.
+// Trend is set by hand (or from the weekly update) and shown as just an arrow; its name is the tooltip.
 const TRENDS = [
-  { name: 'Improving', icon: '▲', cls: 'up' },
-  { name: 'Stable', icon: '▶', cls: 'flat' },
-  { name: 'Declining', icon: '▼', cls: 'down' },
+  { name: 'Improving', icon: '↑', cls: 'up' },
+  { name: 'Stable', icon: '→', cls: 'flat' },
+  { name: 'Declining', icon: '↓', cls: 'down' },
 ];
+const trendArrow = (t) => `<span class="trend trend-${t.cls}" title="${t.name}" aria-label="${t.name}">${t.icon}</span>`;
 function trendBadge(v) {
   const t = TRENDS.find(x => x.name.toLowerCase() === (v || '').toLowerCase());
   if (!t) return v ? escAttr(v) : '<span class="muted">—</span>';
-  return `<span class="trend trend-${t.cls}"><i aria-hidden="true">${t.icon}</i>${t.name}</span>`;
+  return trendArrow(t);
 }
 const programLabel = (p) => (p.number ? `${p.number} · ${p.name}` : p.name);
 
@@ -4568,7 +4569,7 @@ function openUpdateDialog(sub) {
   document.getElementById('up-status').innerHTML = rg.names.map(st => `
     <label style="--c:${rg.map[st].base};--t:${rg.map[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('');
   document.getElementById('up-trend').innerHTML = TRENDS.map(t => `
-    <label><input type="radio" name="trend" value="${t.name}" /><span class="trend trend-${t.cls}"><i aria-hidden="true">${t.icon}</i>${t.name}</span></label>`).join('');
+    <label><input type="radio" name="trend" value="${t.name}" />${trendArrow(t)}</label>`).join('');
   f.week_ending.value = defaultPeriodEnd('Weekly');
   f.lead.value = sub.rec.lead;
   upEditing = null;
