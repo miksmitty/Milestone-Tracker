@@ -20,6 +20,10 @@
     </div>
 
     <nav class="nav">
+      <button id="nav-overview" class="nav-item" title="Program overview">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M8 7.5v9"/></svg>
+        <span class="nav-text">Program overview</span>
+      </button>
       <button id="nav-workspaces" class="nav-item" title="Workspaces">
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>
         <span class="nav-text">All workspaces</span>
@@ -65,6 +69,48 @@
     </div>
     <span id="save-status" class="save-status"></span>
   </header>
+
+  <!-- ============ PROGRAM OVERVIEW ============ -->
+  <main id="view-overview" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="btn-overview-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
+        <span id="overview-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-group toolbar-right">
+        <span class="autosave-note">Use <b>Update</b> on a row to record its weekly RAG and summary</span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="overview-table" class="ov-table">
+        <thead>
+          <tr>
+            <th rowspan="2" class="ov-num">Program no.</th>
+            <th rowspan="2">Program</th>
+            <th rowspan="2">Area lead</th>
+            <th rowspan="2">Previous weekly RAG</th>
+            <th rowspan="2">Current weekly RAG</th>
+            <th rowspan="2">Trend</th>
+            <th rowspan="2" class="ov-summary">Summary of last week’s progress — key points for management</th>
+            <th colspan="5" class="ov-ms-group">Milestones overview</th>
+            <th rowspan="2"></th>
+          </tr>
+          <tr>
+            <th class="ov-ms ms-notStarted">Not started</th>
+            <th class="ov-ms ms-green">Green</th>
+            <th class="ov-ms ms-redAmber">Red/Amber</th>
+            <th class="ov-ms ms-closed">Closed</th>
+            <th class="ov-ms ms-total">Total</th>
+          </tr>
+        </thead>
+        <tbody id="overview-body"></tbody>
+        <tfoot id="overview-foot"></tfoot>
+      </table>
+    </div>
+    <p class="hint">One row per workspace, in program number order. <b>Current weekly RAG</b> and the summary come from the latest weekly update, and <b>Previous weekly RAG</b> from the one before it; a week-ending date in red means there’s no update for this week yet.
+      The milestones overview counts each program’s milestones by RAG: done statuses are <i>Closed</i>, statuses that need a get to green plan are <i>Red/Amber</i>, the default status is <i>Not started</i> and the rest count as <i>Green</i>.
+      Set the program number, area lead and trend in <b>Workspace settings</b>. Weekly updates are stored in <code>updates.csv</code>.</p>
+  </main>
 
   <!-- ============ WORKSPACES VIEW ============ -->
   <main id="view-workspaces" class="view hidden">
@@ -375,12 +421,14 @@
         <button type="button" role="tab" data-pg-tab="rag" aria-selected="false">RAG options</button>
       </div>
       <div id="pg-panel-details" class="form-grid" role="tabpanel">
-        <label class="span2">Name<input name="name" placeholder="e.g. Platform Replacement" /></label>
+        <label class="span3">Name<input name="name" placeholder="e.g. Platform Replacement" /></label>
+        <label>Program number<input name="number" placeholder="e.g. 101" maxlength="20" /></label>
         <label>Code<input name="code" placeholder="e.g. PLT" maxlength="12" /></label>
+        <label>Trend<select name="trend"><option value="">—</option><option>Improving</option><option>Stable</option><option>Declining</option></select></label>
         <label class="span3">Description<textarea name="description" rows="2" placeholder="What this workspace is for"></textarea></label>
         <label>Owner<input name="owner" list="people-list" /></label>
-        <label>Lead<input name="lead" list="people-list" /></label>
-        <label>Workspace RAG<select name="status"></select></label>
+        <label>Area lead<input name="lead" list="people-list" /></label>
+        <label>Overall RAG<select name="status"></select></label>
         <label>Planned start<input name="start" type="date" /></label>
         <label>Planned end<input name="end" type="date" /></label>
         <p class="pg-date-note">Leave blank to use the dates of its items.</p>
@@ -413,6 +461,33 @@
       </footer>
     </form>
   </dialog>
+  <!-- ============ WEEKLY UPDATE DIALOG ============ -->
+  <dialog id="update-dialog" class="edit-dialog update-dialog">
+    <form id="update-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge upd">Weekly update</span>
+        <h2 id="up-heading">Weekly update</h2>
+        <button type="button" id="up-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="form-grid">
+        <label>Week ending<input name="week_ending" type="date" /></label>
+        <p id="up-mode" class="span2 up-mode"></p>
+        <div class="span3 field"><span class="field-label">Weekly RAG</span><div id="up-status" class="rag"></div></div>
+        <div class="span3 field"><span class="field-label">Trend</span><div id="up-trend" class="seg up-trend"></div></div>
+        <div class="span3 field"><span class="field-label">Summary of last week’s progress — key points for management</span><textarea name="summary" rows="4" placeholder="What moved this week, what management needs to know and any decisions needed."></textarea></div>
+        <label>Updated by<input name="author" list="people-list" /></label>
+        <div id="up-prev" class="span3 up-prev"></div>
+      </div>
+      <p id="up-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <button type="button" id="up-delete" class="btn btn-danger">Delete update</button>
+        <span class="spacer"></span>
+        <button type="button" id="up-cancel" class="btn">Cancel</button>
+        <button type="submit" id="up-submit" class="btn btn-primary">Submit update</button>
+      </footer>
+    </form>
+  </dialog>
+
   <!-- ============ IMPORT DIALOG ============ -->
   <dialog id="import-dialog" class="edit-dialog import-dialog">
     <form id="import-form" novalidate>

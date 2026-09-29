@@ -839,3 +839,64 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .im-act.update { background: #dcebf7; color: #134a7a; }
 .im-act.delete { background: #fdecec; color: #e60000; }
 .im-act.skip { background: #ecebe4; color: var(--muted); }
+
+/* ---------- program overview ---------- */
+.ov-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ov-table th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; vertical-align: bottom;
+  color: var(--muted); padding: 8px 10px; background: #f9f8f5; border-bottom: 1px solid var(--border);
+}
+.ov-table th.ov-ms-group { text-align: center; border-bottom: 1px solid var(--border); border-left: 1px solid var(--border); }
+.ov-table th.ov-summary { min-width: 280px; }
+.ov-table td { padding: 10px; border-bottom: 1px solid #f4f3ee; vertical-align: top; }
+.ov-table tbody tr:hover td { background: #fcfbf8; }
+.ov-table td.ov-num { font-weight: 700; white-space: nowrap; box-shadow: inset 4px 0 0 var(--rag); }
+.ov-prog { min-width: 170px; }
+.ov-name { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; font-size: 14px; color: var(--text); cursor: pointer; text-align: left; }
+.ov-name:hover { color: var(--accent); text-decoration: underline; }
+.ov-prog .prog-code { margin-left: 4px; vertical-align: 1px; }
+.ov-overall { display: flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 11px; color: var(--muted); }
+.ov-rag { white-space: nowrap; }
+.ov-rag .pill { font-size: 11.5px; padding: 2px 10px; }
+.ov-week { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.ov-week.stale { color: #e60000; font-weight: 700; }
+.ov-trend { white-space: nowrap; }
+.ov-summary .md { font-size: 12.5px; line-height: 1.45; color: #262626; }
+.ov-table .ov-ms { text-align: center; width: 64px; font-variant-numeric: tabular-nums; }
+.ov-table td.ov-ms { font-size: 14px; font-weight: 700; }
+.ov-table .ov-ms.ms-notStarted { border-left: 1px solid var(--border); }
+.ov-table td.ov-ms.zero { color: #cccabc; font-weight: 400; }
+.ov-table td.ms-green:not(.zero) { color: #15803d; }
+.ov-table td.ms-redAmber:not(.zero) { color: #c2410c; }
+.ov-table td.ms-closed:not(.zero) { color: #1f6fb2; }
+.ov-table .ov-ms.ms-total { background: #f9f8f5; }
+.ov-table tfoot td { font-weight: 700; background: #f9f8f5; border-top: 1px solid var(--border); border-bottom: 0; }
+.ov-act { text-align: right; white-space: nowrap; }
+
+.trend { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.trend i { font-style: normal; font-size: 10px; }
+.trend-up { color: #15803d; }
+.trend-flat { color: #7a7870; }
+.trend-down { color: #e60000; }
+
+/* milestone overview on the workspace cards */
+.prog-num { font-size: 11px; font-weight: 700; color: #1c1c1c; background: #ecebe4; padding: 2px 7px; border-radius: 5px; }
+.prog-ms-label { display: block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 5px; }
+.ms-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.ms-strip div { display: flex; flex-direction: column; align-items: center; padding: 5px 2px; border-radius: 7px; background: #f9f8f5; }
+.ms-strip b { font-size: 15px; }
+.ms-strip span { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.ms-strip .ms-green b { color: #15803d; }
+.ms-strip .ms-redAmber b { color: #c2410c; }
+.ms-strip .ms-closed b { color: #1f6fb2; }
+.ms-strip .ms-total { background: #ecebe4; }
+
+/* weekly update dialog */
+.type-badge.upd { background: #fef3c7; color: #92400e; }
+.up-mode { align-self: end; padding-bottom: 9px; font-size: 12.5px; color: var(--muted); }
+.up-prev { padding: 10px 12px; background: #f9f8f5; border-radius: 10px; font-size: 12.5px; }
+.up-prev .field-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-right: 6px; }
+.up-prev .md { margin-top: 6px; color: #404040; line-height: 1.45; }
+.up-trend input:checked + span.trend { background: #f9f8f5; border-color: currentColor; }
+.up-trend span.trend { display: inline-flex; }
+.ov-table td.ov-lead { white-space: nowrap; }

@@ -32,14 +32,31 @@ Changes show when the page is reloaded; there's no need to restart the server. I
 
 ## Workspaces
 
-Everything belongs to a **workspace**. The left-hand menu has **All workspaces**, a workspace switcher, and the current workspace's **Gantt chart**, **Items**, **Reports** and **Workspace settings**. Collapse the menu to icons with **Collapse** at the bottom; the app remembers the open workspace, view and menu state per browser.
+Everything belongs to a **workspace**. The left-hand menu has **Program overview**, **All workspaces**, a workspace switcher, and the current workspace's **Gantt chart**, **Items**, **Reports** and **Workspace settings**. Collapse the menu to icons with **Collapse** at the bottom; the app remembers the open workspace, view and menu state per browser.
 
-**All workspaces** shows a card per workspace: its RAG, code, owner and lead, timeline, last report, a RAG breakdown of its items and counts. Click a card to open it, **Edit** to change it, or **+ New workspace**. A workspace has:
+**All workspaces** shows a card per workspace: its RAG, code, program number, owner and area lead, trend, timeline, last report, a RAG breakdown of its items, its milestone overview and counts. Click a card to open it, **Edit** to change it, or **+ New workspace**. A workspace has:
 
-- **Name** (required, unique), **Code** (e.g. `PLT`, shown beside the name), **Description**
-- **Owner**, **Lead** and **Workspace RAG**
+- **Name** (required, unique), **Program number** (optional, unique, e.g. `101`), **Code** (e.g. `PLT`, shown beside the name), **Description**
+- **Owner**, **Area lead**, **Overall RAG** and **Trend** (Improving, Stable or Declining)
 - **Planned start / end**: optional; if blank, the card shows the span of the workspace's items
 - **What does this workspace call things?**: the word for everything (default *Item*), for a single-date item (default *Milestone*) and for one with a date range (default *Task*). For example *Work item*, *Deliverable* and *Task*. The menu, buttons, badges, filters, legend and messages use these words; plurals are worked out automatically
+
+### Program overview
+
+**Program overview** lists every workspace as a program in a table, one row per program, in program number order:
+
+- **Program no.**, **Program** (click to open its Gantt chart; its overall RAG is shown underneath) and **Area lead**
+- **Previous weekly RAG** and **Current weekly RAG**: from the two most recent weekly updates, with their week-ending dates. The date turns red when there's no update for this week yet
+- **Trend**, and the **summary of last week's progress** (key points for management) from the latest update
+- **Milestones overview**: the program's milestones counted as **Not started**, **Green**, **Red/Amber**, **Closed** and **Total**. Done statuses (named or described as complete) are Closed, statuses that need a get to green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and anything else counts as Green, so the four add up to the total. A totals row sums every program
+
+**Update** on a row records that program's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend and summary (with formatting). If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one, and is saved as the workspace's trend. **Download CSV** saves the table.
+
+Weekly updates live in [updates.csv](updates.csv), one row per program per week:
+
+```
+id,workspace_id,week_ending,rag,summary,author,created,updated
+```
 
 ### RAG options
 
@@ -63,7 +80,7 @@ Deleting a workspace also deletes its items and reports (you're told how many fi
 Workspaces live in [workspaces.csv](workspaces.csv):
 
 ```
-id,name,code,description,owner,lead,start,end,rag,item_term,milestone_term,task_term,created,updated
+id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,created,updated
 ```
 
 Items and reports carry a `workspace_id`. Ids stay unique across all workspaces, and dependencies and roll-ups only link items in the same workspace. Files from before workspaces existed still load, as do the earlier `programs.csv`, `program_id`, `manager` and `sponsor` names: rows without a `workspace_id` join the first workspace (reports follow their item), and if `workspaces.csv` is missing one is created.

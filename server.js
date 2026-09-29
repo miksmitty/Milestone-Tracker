@@ -1,5 +1,6 @@
 // Tracker — zero-dependency Node server.
-// Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv and reports.csv.
+// Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv
+// and updates.csv.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -27,7 +28,7 @@ const DATASETS = {
   '/api/workspaces': {
     file: path.join(__dirname, 'workspaces.csv'),
     legacy: path.join(__dirname, 'programs.csv'), // read until workspaces.csv is first saved
-    header: 'id,name,code,description,owner,lead,start,end,rag,item_term,milestone_term,task_term,created,updated\n',
+    header: 'id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,created,updated\n',
   },
   '/api/statuses': {
     file: path.join(__dirname, 'statuses.csv'),
@@ -40,6 +41,10 @@ const DATASETS = {
   '/api/reports': {
     file: path.join(__dirname, 'reports.csv'),
     header: 'id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated\n',
+  },
+  '/api/updates': {
+    file: path.join(__dirname, 'updates.csv'),
+    header: 'id,workspace_id,week_ending,rag,summary,author,created,updated\n',
   },
 };
 

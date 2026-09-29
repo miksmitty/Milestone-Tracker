@@ -85,7 +85,8 @@ const MS_DAY = 86400000;
 
 const state = {
   statuses: [],         // RAG options: {workspace_id, position, name, color, description, get_to_green, is_default}
-  workspaces: [],       // {id, name, code, description, owner, lead, start, end, status, item_term, milestone_term, task_term, created, updated}
+  workspaces: [],       // {id, number, name, code, description, owner, lead, start, end, status, trend, item_term, milestone_term, task_term, created, updated}
+  updates: [],          // weekly program updates, every workspace: {id, workspace_id, week_ending, status, summary, author, created, updated}
   lastWorkspaceId: 0,
   workspaceId: '',        // the workspace being viewed
   otherItems: [],       // items of every other workspace, kept so saves write the whole file
@@ -311,7 +312,7 @@ function normaliseShape(v) {
 
 async function loadData() {
   if (location.protocol === 'file:') throw new Error('the page was opened as a file — run node server.js and open the address it prints');
-  const [workspaces, statuses, items, reports] = await Promise.all(['api/workspaces', 'api/statuses', 'api/milestones', 'api/reports'].map(async (u) => {
+  const [workspaces, statuses, items, reports, updates] = await Promise.all(['api/workspaces', 'api/statuses', 'api/milestones', 'api/reports', 'api/updates'].map(async (u) => {
     const r = await fetch(u);
     // e.g. a server started before workspaces existed: stop rather than save items under the wrong workspace
     if (!r.ok) throw new Error(`${u} returned ${r.status} ${r.statusText} — the app must be opened through its own server (node server.js), not a separate web server or file://`);
@@ -326,6 +327,7 @@ async function loadData() {
   if (created) state.workspaces.push(newWorkspace({ name: 'My workspace' }));
   const allItems = rowsToItems(parseAny(items));
   const allReports = rowsToReports(parseAny(reports), allItems);
+  state.updates = rowsToUpdates(parseAny(updates));
   if (created) await saveCSV('api/workspaces', workspacesToCSV(state.workspaces));
   state.items = allItems;
   state.reports = allReports;
@@ -379,6 +381,9 @@ function saveStatuses(msg) {
 }
 function saveWorkspaces(msg) {
   return saveCSV('api/workspaces', workspacesToCSV(state.workspaces), msg);
+}
+function saveUpdates(msg) {
+  return saveCSV('api/updates', updatesToCSV(state.updates), msg);
 }
 
 function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if the queue is busy
@@ -450,8 +455,8 @@ function daysBetween(a, b) {
 const taskDays = (m) => (m.start && m.end ? Math.max(1, daysBetween(m.start, m.end) + 1) : 0);
 
 // Whether a RAG status means the work is done (named or described as complete / done).
-function isDoneStatus(name) {
-  const st = statusesFor(state.workspaceId).find(s => s.name === name);
+function isDoneStatus(name, workspaceId = state.workspaceId) {
+  const st = statusesFor(workspaceId).find(s => s.name === name);
   return [name, st?.description].some(v => /^\s*(complete|completed|done)\s*$/i.test(v || ''));
 }
 
@@ -2860,6 +2865,7 @@ function rerenderCurrentView() {
   if (isShown('gantt')) renderGantt();
   if (isShown('reports')) renderReports();
   if (isShown('workspaces')) renderWorkspaces();
+  if (isShown('overview')) renderOverview();
 }
 
 /* ---- reports list ---- */
@@ -3873,7 +3879,7 @@ function wireImport() {
 // A workspace groups a set of items and their reports. The Workspaces screen lists them all
 // with a summary of each; the one being viewed drives the Gantt chart, Items and Reports.
 
-const WORKSPACE_COLUMNS = ['id', 'name', 'code', 'description', 'owner', 'lead', 'start', 'end', 'status',
+const WORKSPACE_COLUMNS = ['id', 'number', 'name', 'code', 'description', 'owner', 'lead', 'start', 'end', 'status', 'trend',
   'item_term', 'milestone_term', 'task_term', 'created', 'updated'];
 const WORKSPACE_FIELDS = WORKSPACE_COLUMNS.slice(1, -2);
 
@@ -3931,7 +3937,7 @@ async function switchWorkspace(id, view) {
     state.userZoomed = false;
     applyWorkspaceChrome();
   }
-  switchView(view || (currentView() === 'workspaces' ? 'gantt' : currentView()));
+  switchView(view || (APP_VIEWS.includes(currentView()) ? 'gantt' : currentView()));
 }
 
 // Sidebar, headings and every label that uses the workspace's own terms.
@@ -3957,17 +3963,17 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports' };
+const VIEW_TITLES = { overview: () => 'Program overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
-  const inWorkspace = view !== 'workspaces';
+  const inWorkspace = !APP_VIEWS.includes(view);
   document.getElementById('page-title').textContent = VIEW_TITLES[view]();
   const crumb = document.getElementById('page-workspace');
   crumb.hidden = !inWorkspace;
   crumb.innerHTML = inWorkspace ? `${p.code ? `<b>${escAttr(p.code)}</b> ` : ''}${escAttr(p.name)}` : '';
   const suffix = APP_CONFIG.title ? ` — ${APP_CONFIG.title}` : '';
-  document.title = inWorkspace ? `${VIEW_TITLES[view]()} · ${p.name}${suffix}` : `Workspaces${suffix}`;
+  document.title = inWorkspace ? `${VIEW_TITLES[view]()} · ${p.name}${suffix}` : `${VIEW_TITLES[view]()}${suffix}`;
 }
 
 function workspaceStats(p) {
@@ -3984,6 +3990,42 @@ function workspaceStats(p) {
   };
 }
 
+// A workspace's milestones by where they stand. Done statuses are Closed, those needing a get to
+// green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and
+// the rest (Green, or any other on-track status) count as Green, so the five add up to the total.
+const MS_BUCKETS = [['notStarted', 'Not started'], ['green', 'Green'], ['redAmber', 'Red/Amber'], ['closed', 'Closed'], ['total', 'Total']];
+function milestoneOverview(workspaceId) {
+  const rg = ragOf(workspaceId);
+  const out = { notStarted: 0, green: 0, redAmber: 0, closed: 0, total: 0 };
+  for (const m of allItems()) {
+    if (m.workspace_id !== workspaceId || isTask(m)) continue;
+    out.total++;
+    if (isDoneStatus(m.status, workspaceId)) out.closed++;
+    else if (rg.offTrack.includes(m.status)) out.redAmber++;
+    else if (m.status === rg.def || /^not\s*started$/i.test(m.status)) out.notStarted++;
+    else out.green++;
+  }
+  return out;
+}
+
+function milestoneStrip(workspaceId) {
+  const ov = milestoneOverview(workspaceId);
+  return `<div class="ms-strip">${MS_BUCKETS.map(([k, label]) => `<div class="ms-${k}"><b>${ov[k]}</b><span>${label}</span></div>`).join('')}</div>`;
+}
+
+// Trend is set by hand (or from the weekly update) and shown as an arrow.
+const TRENDS = [
+  { name: 'Improving', icon: '▲', cls: 'up' },
+  { name: 'Stable', icon: '▶', cls: 'flat' },
+  { name: 'Declining', icon: '▼', cls: 'down' },
+];
+function trendBadge(v) {
+  const t = TRENDS.find(x => x.name.toLowerCase() === (v || '').toLowerCase());
+  if (!t) return v ? escAttr(v) : '<span class="muted">—</span>';
+  return `<span class="trend trend-${t.cls}"><i aria-hidden="true">${t.icon}</i>${t.name}</span>`;
+}
+const programLabel = (p) => (p.number ? `${p.number} · ${p.name}` : p.name);
+
 function renderWorkspaces() {
   const cards = state.workspaces.map(p => {
     const st = workspaceStats(p);
@@ -3999,13 +4041,15 @@ function renderWorkspaces() {
       ? shown.filter(s => st.rag[s]).map(s => `<i style="flex:${st.rag[s]};background:${pal(s, rg.map).base}" title="${escAttr(s)}: ${st.rag[s]}"></i>`).join('')
       : '<i class="empty"></i>';
     const ragList = shown.filter(s => st.rag[s]).map(s => `<span><i class="dot" style="background:${pal(s, rg.map).base}"></i>${st.rag[s]} ${escAttr(s)}</span>`).join('');
-    const meta = [['Owner', p.owner], ['Lead', p.lead]].filter(([, v]) => v)
-      .map(([k, v]) => `<div><dt>${k}</dt><dd>${escAttr(v)}</dd></div>`).join('');
+    const meta = [['Owner', p.owner], ['Area lead', p.lead]].filter(([, v]) => v)
+      .map(([k, v]) => `<div><dt>${k}</dt><dd>${escAttr(v)}</dd></div>`).join('')
+      + (p.trend ? `<div><dt>Trend</dt><dd>${trendBadge(p.trend)}</dd></div>` : '');
     return `
       <article class="prog-card${current ? ' current' : ''}" data-pid="${p.id}" style="--rag:${pal(p.status, rg.map).base}">
         <div class="prog-top">
           ${statusPill(p.status, rg.map)}
           ${p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : ''}
+          ${p.number ? `<span class="prog-num" title="Program number">Program ${escAttr(p.number)}</span>` : ''}
           ${current ? '<span class="prog-current">Open</span>' : ''}
           <button type="button" class="btn btn-sm prog-edit" data-edit-workspace="${p.id}" title="Edit workspace settings">Edit</button>
         </div>
@@ -4020,6 +4064,7 @@ function renderWorkspaces() {
           <div class="prog-ragbar">${bar}</div>
           <div class="prog-raglist">${ragList || `<span class="muted">No ${escAttr(t.items)} yet</span>`}</div>
         </div>
+        <div class="prog-ms"><span class="prog-ms-label">${escAttr(t.Milestone)} overview</span>${milestoneStrip(p.id)}</div>
         <footer class="prog-foot">
           <span class="prog-counts">${count(n, t.item, t.items)} · ${count(n - st.tasks, t.milestone, t.milestones)} · ${count(st.tasks, t.task, t.tasks)} · ${count(st.reports.length, 'report', 'reports')}</span>
           <button type="button" class="btn ${current ? '' : 'btn-primary'}" data-open-workspace="${p.id}">${current ? 'Continue' : 'Open'} →</button>
@@ -4247,7 +4292,7 @@ function applyPgStatuses(workspaceId) {
 }
 
 function newWorkspaceDefaults() {
-  return { name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', ...DEFAULT_TERMS };
+  return { number: '', name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', trend: '', ...DEFAULT_TERMS };
 }
 
 function updateTermPreview() {
@@ -4266,6 +4311,8 @@ async function submitWorkspaceDialog(e) {
   if (!v.name) return (err.textContent = 'Give the workspace a name.');
   const clash = state.workspaces.find(p => p !== pgEditing && p.name.toLowerCase() === v.name.toLowerCase());
   if (clash) return (err.textContent = `There’s already a workspace called “${clash.name}”.`);
+  const numClash = v.number && state.workspaces.find(p => p !== pgEditing && p.number.toLowerCase() === v.number.toLowerCase());
+  if (numClash) return (err.textContent = `Program number ${v.number} is already used by “${numClash.name}”.`);
   if (v.start && v.end && v.end < v.start) return (err.textContent = 'The end date is before the start date.');
   for (const k of Object.keys(DEFAULT_TERMS)) v[k] ||= DEFAULT_TERMS[k];
   const ragErr = checkPgStatuses();
@@ -4303,15 +4350,17 @@ async function deleteWorkspace() {
   if (!confirm(`Delete the workspace “${p.name}”?` + (lost.length ? `\n\nThis also permanently deletes its ${lost.join(' and ')}.` : ''))) return;
   document.getElementById('workspace-dialog').close();
   const leaving = p.id === state.workspaceId;
-  if (leaving) await switchWorkspace(state.workspaces.find(x => x !== p).id, 'workspaces');
+  if (leaving) await switchWorkspace(state.workspaces.find(x => x !== p).id, APP_VIEWS.includes(currentView()) ? currentView() : 'workspaces');
   state.workspaces = state.workspaces.filter(x => x !== p);
   state.otherItems = state.otherItems.filter(m => m.workspace_id !== p.id);
   state.otherReports = state.otherReports.filter(r => r.workspace_id !== p.id);
   const hadStatuses = state.statuses.some(s => s.workspace_id === p.id);
   state.statuses = state.statuses.filter(s => s.workspace_id !== p.id);
+  const hadUpdates = state.updates.some(u => u.workspace_id === p.id);
+  state.updates = state.updates.filter(u => u.workspace_id !== p.id);
   applyWorkspaceChrome();
-  renderWorkspaces();
-  await Promise.all([saveData(), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses()]);
+  rerenderCurrentView();
+  await Promise.all([saveData(), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates()]);
 }
 
 function wireWorkspaces() {
@@ -4341,6 +4390,221 @@ function wireWorkspaces() {
   document.getElementById('pg-cancel').onclick = () => dlg.close();
   document.getElementById('pg-close').onclick = () => dlg.close();
   document.getElementById('pg-delete').onclick = deleteWorkspace;
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+}
+
+/* ================= program overview ================= */
+// One row per workspace (program) for management: its number, area lead, the RAG of its last two
+// weekly updates, trend, the latest update's summary and a count of its milestones by status.
+// Weekly updates live in updates.csv, one per workspace per week; the newest is "current".
+
+const UPDATE_COLUMNS = ['id', 'workspace_id', 'week_ending', 'status', 'summary', 'author', 'created', 'updated'];
+
+function rowsToUpdates(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const ids = new Set(state.workspaces.map(p => p.id));
+  const out = rows.slice(1).map(r => {
+    const o = {};
+    for (const k of UPDATE_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
+    return o;
+  }).filter(u => ids.has(u.workspace_id) && parseDate(u.week_ending));
+  let last = Math.max(0, ...out.map(u => (/^\d+$/.test(u.id) ? +u.id : 0)));
+  const seen = new Set();
+  for (const u of out) {
+    if (!/^\d+$/.test(u.id) || seen.has(u.id)) u.id = String(++last);
+    seen.add(u.id);
+    u.status = normaliseStatus(u.status, u.workspace_id);
+  }
+  return out;
+}
+function updatesToCSV(updates) {
+  return [UPDATE_COLUMNS.map(csvName).join(','), ...updates.map(u => UPDATE_COLUMNS.map(k => csvEscape(u[k])).join(','))].join('\n') + '\n';
+}
+const nextUpdateId = () => String(Math.max(0, ...state.updates.map(u => +u.id || 0)) + 1);
+
+// A workspace's weekly updates, newest first.
+const updatesFor = (workspaceId) => state.updates.filter(u => u.workspace_id === workspaceId)
+  .sort((a, b) => b.week_ending.localeCompare(a.week_ending) || b.updated.localeCompare(a.updated));
+
+// Programs in number order (numbers compared naturally), unnumbered ones last by name.
+function programsInOrder() {
+  return [...state.workspaces].sort((a, b) => (!a.number) - (!b.number)
+    || a.number.localeCompare(b.number, undefined, { numeric: true }) || a.name.localeCompare(b.name));
+}
+
+function overviewRow(p) {
+  const [cur, prev] = updatesFor(p.id);
+  const rg = ragOf(p.id);
+  const ov = milestoneOverview(p.id);
+  const stale = cur && cur.week_ending < addDays(defaultPeriodEnd('Weekly'), -6);
+  const ragCell = (u, isCur) => (u
+    ? `${statusPill(u.status, rg.map)}<small class="ov-week${isCur && stale ? ' stale' : ''}" ${isCur && stale ? 'title="No update since this week"' : ''}>w/e ${fmtShort(u.week_ending)}</small>`
+    : '<span class="muted">—</span>');
+  return { p, cur, prev, ov, html: `
+    <tr data-pid="${p.id}" style="--rag:${pal(p.status, rg.map).base}">
+      <td class="ov-num">${p.number ? escAttr(p.number) : '<span class="muted">—</span>'}</td>
+      <td class="ov-prog">
+        <button type="button" class="ov-name" data-open-workspace="${p.id}" title="Open the Gantt chart">${escAttr(p.name)}</button>
+        ${p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : ''}
+        <small class="ov-overall">Overall ${statusPill(p.status, rg.map)}</small>
+      </td>
+      <td class="ov-lead">${p.lead ? escAttr(p.lead) : '<span class="muted">—</span>'}</td>
+      <td class="ov-rag">${ragCell(prev, false)}</td>
+      <td class="ov-rag">${ragCell(cur, true)}</td>
+      <td class="ov-trend">${trendBadge(p.trend)}</td>
+      <td class="ov-summary">${cur?.summary ? `<div class="md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No update yet</span>'}</td>
+      ${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}${ov[k] ? '' : ' zero'}">${ov[k]}</td>`).join('')}
+      <td class="ov-act"><button type="button" class="btn btn-sm" data-update="${p.id}">Update</button></td>
+    </tr>` };
+}
+
+function renderOverview() {
+  const rows = programsInOrder().map(overviewRow);
+  document.getElementById('overview-body').innerHTML = rows.map(r => r.html).join('')
+    || '<tr><td colspan="13" class="grid-empty">No programs yet.</td></tr>';
+  const sum = Object.fromEntries(MS_BUCKETS.map(([k]) => [k, rows.reduce((a, r) => a + r.ov[k], 0)]));
+  document.getElementById('overview-foot').innerHTML = `
+    <tr><td colspan="7">All programs</td>${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}">${sum[k]}</td>`).join('')}<td></td></tr>`;
+  const thisWeek = defaultPeriodEnd('Weekly');
+  const missing = rows.filter(r => !r.cur || r.cur.week_ending < addDays(thisWeek, -6)).length;
+  document.getElementById('overview-count').textContent = `${count(rows.length, 'program', 'programs')}`
+    + (missing ? ` · ${missing} without an update this week` : ' · all updated this week');
+}
+
+function downloadOverviewCSV() {
+  const head = ['Program number', 'Program', 'Area lead', 'Overall RAG', 'Previous weekly RAG', 'Previous week ending',
+    'Current weekly RAG', 'Current week ending', 'Trend', 'Summary', ...MS_BUCKETS.map(([, l]) => `Milestones ${l.toLowerCase()}`)];
+  const lines = programsInOrder().map(overviewRow).map(({ p, cur, prev, ov }) => [
+    p.number, p.name, p.lead, p.status, prev?.status, prev?.week_ending, cur?.status, cur?.week_ending, p.trend,
+    mdToText(cur?.summary || ''), ...MS_BUCKETS.map(([k]) => ov[k]),
+  ].map(csvEscape).join(','));
+  const blob = new Blob(['﻿' + [head.map(csvEscape).join(','), ...lines].join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.download = `program-overview-${fmtISO(new Date())}.csv`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+
+/* ---- weekly update dialog ---- */
+// Opens on this week's update if there is one, otherwise a new one starting from last week's RAG.
+// Picking a week that already has an update loads it. The trend is saved to the workspace, and
+// is suggested from the change in RAG until it's chosen by hand.
+
+let upWorkspace = null; // workspace being updated
+let upEditing = null;   // update being edited; null for a new one
+let upTrendTouched = false;
+const RAG_RANK = { red: 0, amber: 1, green: 2, complete: 3 };
+
+function openUpdateDialog(p) {
+  hideQuick();
+  upWorkspace = p;
+  const f = document.getElementById('update-form').elements;
+  const rg = ragOf(p.id);
+  document.getElementById('up-heading').textContent = `Weekly update · ${programLabel(p)}`;
+  document.getElementById('up-status').innerHTML = rg.names.map(st => `
+    <label style="--c:${rg.map[st].base};--t:${rg.map[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('');
+  document.getElementById('up-trend').innerHTML = TRENDS.map(t => `
+    <label><input type="radio" name="trend" value="${t.name}" /><span class="trend trend-${t.cls}"><i aria-hidden="true">${t.icon}</i>${t.name}</span></label>`).join('');
+  f.week_ending.value = defaultPeriodEnd('Weekly');
+  loadUpdateWeek(true);
+  document.getElementById('up-error').textContent = '';
+  refreshDatalists();
+  document.getElementById('update-dialog').showModal();
+}
+
+// Fill the form for the chosen week: its update if there is one, otherwise a fresh one
+// (keeping what's been typed, unless the dialog has just opened).
+function loadUpdateWeek(opening) {
+  const f = document.getElementById('update-form').elements;
+  const p = upWorkspace;
+  const week = f.week_ending.value;
+  const found = updatesFor(p.id).find(u => u.week_ending === week) || null;
+  const before = updatesFor(p.id).find(u => u.week_ending < week);
+  if (found || opening || upEditing) {
+    const v = found || { status: before?.status || ragOf(p.id).def, summary: '', author: before?.author || '' };
+    document.querySelectorAll('#up-status input').forEach(r => { r.checked = r.value === v.status; });
+    f.summary.value = v.summary;
+    f.author.value = v.author;
+    edLoad(f.summary);
+  }
+  upEditing = found;
+  upTrendTouched = !!p.trend && !!found;
+  for (const r of f.trend) r.checked = r.value === p.trend;
+  if (!upTrendTouched) suggestTrend();
+  const rg = ragOf(p.id);
+  document.getElementById('up-prev').innerHTML = before
+    ? `<span class="field-label">Previous update · w/e ${fmtNice(before.week_ending)}</span> ${statusPill(before.status, rg.map)}
+       ${before.summary ? `<div class="md">${mdToHtml(before.summary)}</div>` : ''}`
+    : '<span class="muted">No earlier update.</span>';
+  document.getElementById('up-mode').textContent = found ? `Editing the update for the week ending ${fmtNice(week)}.` : `New update for the week ending ${fmtNice(week)}.`;
+  document.getElementById('up-delete').hidden = !found;
+  document.getElementById('up-submit').textContent = found ? 'Save update' : 'Submit update';
+}
+
+// Trend from the RAG change since the previous week: better, same or worse.
+function suggestTrend() {
+  const f = document.getElementById('update-form').elements;
+  const now = document.querySelector('#up-status input:checked')?.value || '';
+  const before = updatesFor(upWorkspace.id).find(u => u.week_ending < f.week_ending.value);
+  const a = RAG_RANK[before?.status.toLowerCase()], b = RAG_RANK[now.toLowerCase()];
+  if (a == null || b == null) return;
+  const name = b > a ? 'Improving' : b < a ? 'Declining' : 'Stable';
+  for (const r of f.trend) r.checked = r.value === name;
+}
+
+async function submitUpdate(e) {
+  e.preventDefault();
+  const f = document.getElementById('update-form').elements;
+  const err = document.getElementById('up-error');
+  const week = f.week_ending.value;
+  if (!parseDate(week)) return (err.textContent = 'Choose the week ending date.');
+  const status = document.querySelector('#up-status input:checked')?.value;
+  if (!status) return (err.textContent = 'Choose this week’s RAG.');
+  const p = upWorkspace;
+  const now = new Date().toISOString();
+  const v = { week_ending: week, status, summary: f.summary.value.trim(), author: f.author.value.trim(), updated: now };
+  if (upEditing) Object.assign(upEditing, v);
+  else state.updates.push({ id: nextUpdateId(), workspace_id: p.id, created: now, ...v });
+  const saves = [saveUpdates(upEditing ? 'Update saved' : 'Update submitted')];
+  const trend = f.trend.value;
+  if (trend !== p.trend) {
+    p.trend = trend;
+    p.updated = now;
+    saves.push(saveWorkspaces());
+  }
+  document.getElementById('update-dialog').close();
+  rerenderCurrentView();
+  await Promise.all(saves);
+}
+
+async function deleteUpdate() {
+  if (!upEditing || !confirm(`Delete the update for the week ending ${fmtNice(upEditing.week_ending)}?`)) return;
+  state.updates = state.updates.filter(u => u !== upEditing);
+  document.getElementById('update-dialog').close();
+  rerenderCurrentView();
+  await saveUpdates('Update deleted');
+}
+
+function wireOverview() {
+  document.getElementById('btn-overview-csv').onclick = downloadOverviewCSV;
+  document.getElementById('overview-body').addEventListener('click', (e) => {
+    const up = e.target.closest('[data-update]');
+    if (up) return openUpdateDialog(workspaceById(up.dataset.update));
+    const open = e.target.closest('[data-open-workspace]');
+    if (open) switchWorkspace(open.dataset.openWorkspace, 'gantt');
+  });
+  const dlg = document.getElementById('update-dialog');
+  const form = document.getElementById('update-form');
+  mdEditor(form.elements.summary);
+  form.addEventListener('submit', submitUpdate);
+  form.elements.week_ending.addEventListener('change', () => loadUpdateWeek(false));
+  document.getElementById('up-status').addEventListener('change', () => { if (!upTrendTouched) suggestTrend(); });
+  document.getElementById('up-trend').addEventListener('change', () => { upTrendTouched = true; });
+  document.getElementById('up-cancel').onclick = () => dlg.close();
+  document.getElementById('up-close').onclick = () => dlg.close();
+  document.getElementById('up-delete').onclick = deleteUpdate;
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
@@ -4375,7 +4639,8 @@ function downloadPNG() {
 
 /* ================= wiring ================= */
 
-const VIEWS = ['workspaces', 'gantt', 'editor', 'reports'];
+const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports'];
+const APP_VIEWS = ['overview', 'workspaces']; // views across every workspace
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 const currentView = () => VIEWS.find(isShown) || 'gantt';
 
@@ -4390,6 +4655,7 @@ function switchView(view) {
   if (view === 'gantt') renderGantt();
   else if (view === 'editor') renderEditor();
   else if (view === 'reports') renderReports();
+  else if (view === 'overview') renderOverview();
   else renderWorkspaces();
   for (const v of VIEWS) {
     document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
@@ -4414,6 +4680,7 @@ function wireEvents() {
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
   document.getElementById('app-main').addEventListener('scroll', () => { if (!quickDirty()) hideQuick(); hideTip(); });
   wireWorkspaces();
+  wireOverview();
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
