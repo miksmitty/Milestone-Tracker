@@ -104,10 +104,10 @@ RAG and dates change far more often than anything else, so they are the quickest
 - **Dates** can be written almost any way: `2026-03-31`, `31/03/2026`, `3/31/2026`, `31.03.26`, `31-Mar-26`, `31 March 2026`, `March 31, 2026`, `Tue 31st March 2026`, `20260331`, Excel date numbers, with or without a time. Whether `03/04/2026` is 3 April or 4 March is detected from the file (any day over 12 gives it away), otherwise it follows the browser's locale; you can override it. Each date column shows how its examples will be read
 - **Type**: a type column (*milestone* / *task*, the workspace's own words, or yes/no from a *Milestone?* column), otherwise a start before the end makes a task and a single date a milestone
 - **What to do**: *Add new, update matching refs* (the default), *Add all as new*, or *Replace all*, which also deletes items that aren't in the file (their reports are kept). Blank cells leave an existing item's value alone; a filled *depends on* cell replaces its dependencies
-- **Links** (rolls up to, depends on) can name refs or ids, separated by `;` `,` or spaces; MS Project style `3FS+2d` works too. Links that would make a circular dependency are left out
+- **Links** (rolls up to, depends on) name items by their **ref** (e.g. a parent of `4` rolls up to the item with ref 4, whether it's in the file or already in the workspace), separated by `;` `,` or spaces; MS Project style `3FS+2d` works too. Links that would make a circular dependency are left out
 - A **preview** shows every row as Add, Update, No change or Skip, with notes on anything it couldn't read (an unreadable date, a RAG the workspace doesn't use, an unknown link, a repeated ref). Nothing changes until you click **Import**
 
-A file from **Download CSV** imports straight back in, matched on ref (or id), so you can edit a workspace's items in a spreadsheet and bring them back.
+A file from **Download CSV** imports straight back in, matched on ref (or id, as its links are ids), so you can edit a workspace's items in a spreadsheet and bring them back.
 
 Edit items in the app — in the **Items** table or by clicking an item on the chart. Every change saves to the CSV automatically. In the table, click a column header to sort (▲ / ▼ / off), use the filter row to narrow the list, and drag a header edge to resize a column (double-click to reset); sort and column widths are remembered per browser and never change the CSV order. You can also edit the CSV in a spreadsheet tool; hit *Reload* in the app afterwards.
 

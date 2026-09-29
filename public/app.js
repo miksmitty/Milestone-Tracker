@@ -3428,13 +3428,13 @@ function downloadReportsCSV() {
 // pasted from a spreadsheet. Each column is matched to a field by its heading (and can be
 // changed), dates are read in whatever format they're written, and a preview shows what will be
 // added, updated, deleted or skipped before anything is saved. Blank cells leave an existing
-// item's value alone. Links (rolls up to, depends on) can name a ref or an id.
+// item's value alone. Links (rolls up to, depends on) name an item by its ref.
 
 const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'deps', 'id'];
 const importFieldLabel = (k) => ({
   ref: 'Ref', title: 'Title', type: `Type (${T.milestone} or ${T.task})`, description: 'Description', swimlane: 'Swimlane',
   subswimlane: 'Sub-swimlane', owner: 'Owner', start: 'Start date', end: `End date / ${T.milestone} date`, status: 'RAG',
-  shape: 'Shape', parent: 'Rolls up to (ref or id)', deps: 'Depends on (refs or ids)', id: 'ID (used to match links)',
+  shape: 'Shape', parent: 'Rolls up to (ref)', deps: 'Depends on (refs)', id: 'ID (used to match links)',
 }[k]);
 // Headings are compared with everything but letters and digits removed.
 const IMPORT_ALIASES = {
@@ -3634,11 +3634,12 @@ function planImport() {
     rows.push(row);
   });
 
-  // Link cells name a ref or an id: this file's ids first, then refs (file, then workspace), then workspace ids.
+  // Link cells name a ref: this file's refs first, then the workspace's. Only this workspace's own
+  // download names ids (its parent and depends_on columns hold them), so ids are read from that alone.
   const live = rows.filter(r => r.action !== 'skip');
   const byFileId = new Map(live.filter(r => r.fileId).map(r => [r.fileId, r]));
-  const resolve = (tok) => byFileId.get(tok) || (refRow.get(tok)?.action !== 'skip' && refRow.get(tok))
-    || state.items.find(m => m.ref === tok) || state.items.find(m => m.id === tok) || null;
+  const byRef = (tok) => (refRow.get(tok)?.action !== 'skip' && refRow.get(tok)) || state.items.find(m => m.ref === tok);
+  const resolve = (tok) => (ownExport ? byFileId.get(tok) || state.items.find(m => m.id === tok) || byRef(tok) : byRef(tok)) || null;
   for (const r of live) {
     if (!r.links) continue;
     if (r.links.parent) {
