@@ -206,6 +206,8 @@ tr.shifted td { animation: shifted 2.5s ease-out; }
   margin-top: 7px; padding-top: 7px; border-top: 1px solid #f4f3ee; color: #404040;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.tip-links { margin-top: 5px; font-size: 12px; }
+.tip-links b { color: var(--muted); font-weight: 600; }
 .tip-hint { margin-top: 7px; font-size: 11px; color: #a8a69c; }
 .pill { font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
 
@@ -916,3 +918,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .load-failed-box h2 { font-size: 18px; }
 .load-failed-box p { font-size: 13.5px; line-height: 1.5; }
 #load-failed-msg { color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
+
+/* hovering an item picks out its own dependency and roll-up lines */
+#gantt-container svg.link-focus .gantt-link { opacity: 0.12; }
+#gantt-container svg.link-focus .gantt-link.hl { opacity: 1; stroke-width: 2.4; }

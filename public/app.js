@@ -740,7 +740,7 @@ function metaText(m) {
   return m.owner ? `${dates} · ${m.owner}` : dates;
 }
 
-// Title with the ref in bold ahead of it, and the tag (task duration / milestone % complete) after.
+// Title with the ref in bold ahead of it, and the tag (milestone % complete) after.
 function titleText(attrs, m, refFill, tagFill) {
   const t = svgEl('text', attrs);
   if (m.ref) {
@@ -836,6 +836,9 @@ function drawShape(parent, shape, cx, cy, status, s) {
   parent.appendChild(el);
 }
 
+// Connector colours stay clear of the RAG palette (green, amber, red, blue, grey).
+const LINK_COLOR = { dep: '#0f8b8d', roll: '#7c3aed' };
+
 // Elbow connector from the end of `a` to the start of `b`.
 function drawLink(svg, a, b, rollup, rm) {
   const fx = a.x2 + (a.task ? 0 : rm.shapeS + 2), fy = a.cy;
@@ -848,8 +851,8 @@ function drawLink(svg, a, b, rollup, rm) {
     d = `M ${fx} ${fy} H ${fx + 7} V ${midY} H ${tx - 9} V ${ty} H ${tx}`;
   }
   svg.appendChild(svgEl('path', {
-    d, fill: 'none',
-    stroke: rollup ? '#a43725' : '#7a7870', 'stroke-width': 1.3, 'stroke-opacity': 0.85,
+    d, fill: 'none', class: 'gantt-link', 'data-from': a.id, 'data-to': b.id,
+    stroke: LINK_COLOR[rollup ? 'roll' : 'dep'], 'stroke-width': 1.4, 'stroke-opacity': 0.9,
     'stroke-dasharray': rollup ? '4 3' : 'none',
     'marker-end': `url(#arrow-${rollup ? 'roll' : 'dep'})`,
   }));
@@ -869,9 +872,9 @@ function renderGantt() {
     // a task's end date is inclusive, so its bar runs to the end of that day
     .map(m => ({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end), _task: isTask(m) }))
     .map(m => {
-      // tag after the title: a task's duration, a milestone's % complete
+      // tag after a milestone's title: its % complete (a task's duration is in the hover card)
       const prog = !m._task && milestoneProgress(m);
-      return { ...m, _tag: m._task ? `${taskDays(m)}d` : prog ? `${prog.pct}%` : '' };
+      return { ...m, _tag: prog ? `${prog.pct}%` : '' };
     })
     .filter(m => m._s && m._e && m._e >= state.rangeStart && m._s <= state.rangeEnd && ganttMatches(m));
   renderGanttFilters();
@@ -905,7 +908,7 @@ function renderGantt() {
   const f = svgEl('filter', { id: 'ms-shadow', x: '-40%', y: '-40%', width: '180%', height: '180%' });
   f.appendChild(svgEl('feDropShadow', { dx: 0, dy: 1.2, stdDeviation: 1.2, 'flood-color': '#1c1c1c', 'flood-opacity': '0.30' }));
   defs.appendChild(f);
-  for (const [id, color] of [['dep', '#7a7870'], ['roll', '#a43725']]) {
+  for (const [id, color] of Object.entries(LINK_COLOR)) {
     const mk = svgEl('marker', { id: `arrow-${id}`, viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: 'auto' });
     mk.appendChild(svgEl('path', { d: 'M 0 0 L 8 4 L 0 8 Z', fill: color }));
     defs.appendChild(mk);
@@ -1019,20 +1022,6 @@ function renderGantt() {
   if (state.showQuarters) drawTier(scale.top, 0, QUARTER_H, true);
   const gridTop = headerH;
 
-  // ---- today line ----
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  if (state.showToday && today >= state.rangeStart && today <= state.rangeEnd) {
-    const tx = rawX(today);
-    svg.appendChild(svgEl('line', {
-      x1: tx, y1: gridTop, x2: tx, y2: gridBottom,
-      stroke: '#1c1c1c', 'stroke-width': 1.5, 'stroke-dasharray': '5 4',
-    }));
-    const pill = svgEl('g', {});
-    pill.appendChild(svgEl('rect', { x: tx - 24, y: gridTop + 4, width: 48, height: 17, rx: 8.5, fill: '#1c1c1c' }));
-    pill.appendChild(svgEl('text', { x: tx, y: gridTop + 16, 'text-anchor': 'middle', 'font-size': 10.5, 'font-weight': 700, fill: '#fff' }, 'TODAY'));
-    svg.appendChild(pill);
-  }
-
   // ---- positions ----
   const pos = new Map();
   for (const lane of lanes) {
@@ -1040,7 +1029,7 @@ function renderGantt() {
       for (const m of sub.items) {
         m._cy = sub._y + rm.pad + m._row * rm.h + rm.h / 2 - rm.offset;
         m._sub = sub;
-        pos.set(m.id, { x1: xOf(m._s), x2: xOf(m._e), cy: m._cy, task: m._task });
+        pos.set(m.id, { id: m.id, x1: xOf(m._s), x2: xOf(m._e), cy: m._cy, task: m._task });
       }
     }
   }
@@ -1087,6 +1076,20 @@ function renderGantt() {
     svg.appendChild(g);
   }
 
+  // ---- today line (on top of the items, but see-through so labels stay readable) ----
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (state.showToday && today >= state.rangeStart && today <= state.rangeEnd) {
+    const tx = rawX(today);
+    const pill = svgEl('g', { 'pointer-events': 'none' });
+    pill.appendChild(svgEl('line', {
+      x1: tx, y1: gridTop, x2: tx, y2: gridBottom,
+      stroke: '#1c1c1c', 'stroke-width': 1.5, 'stroke-dasharray': '5 4', 'stroke-opacity': 0.4,
+    }));
+    pill.appendChild(svgEl('rect', { x: tx - 24, y: gridTop + 4, width: 48, height: 17, rx: 8.5, fill: '#1c1c1c', 'fill-opacity': 0.7 }));
+    pill.appendChild(svgEl('text', { x: tx, y: gridTop + 16, 'text-anchor': 'middle', 'font-size': 10.5, 'font-weight': 700, fill: '#fff' }, 'TODAY'));
+    svg.appendChild(pill);
+  }
+
   if (!items.length && ganttFiltered()) {
     svg.appendChild(svgEl('text', { x: LABEL_W + 20, y: headerH + 64, 'font-size': 13, fill: '#7a7870' },
       `No ${T.items} match the filters in this date range.`));
@@ -1094,6 +1097,20 @@ function renderGantt() {
   svg.append(head, col, corner);
   container.appendChild(svg);
   syncGanttSticky();
+}
+
+// Pick out the hovered item's connectors and fade the rest.
+function focusLinks(m) {
+  const svg = document.querySelector('#gantt-container svg');
+  if (!svg) return;
+  const links = svg.querySelectorAll('.gantt-link');
+  let any = false;
+  for (const l of links) {
+    const on = !!m && (l.dataset.from === m.id || l.dataset.to === m.id);
+    l.classList.toggle('hl', on);
+    any ||= on;
+  }
+  svg.classList.toggle('link-focus', any);
 }
 
 // Keep the label column and timescale header in view while the chart panel scrolls.
@@ -1297,11 +1314,22 @@ function showTip(m, e) {
     <div class="tip-row"><span class="pill" style="background:${c.base};color:${c.text}">${m.status}</span><span>${escAttr(typeName(m))} · ${when}</span></div>
     ${progress}
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
+    ${tipLinks(m)}
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
     ${lastReportLine(m)}
     <div class="tip-hint">Click to update RAG or dates, or to report</div>`;
   tip.classList.add('show');
   moveTip(e);
+}
+// Roll-up links both ways: what this item rolls up to, and what rolls up to it.
+function tipLinks(m) {
+  const parent = m.parent && state.items.find(p => p.id === m.parent);
+  const kids = state.items.filter(k => k.parent === m.id).sort(cmpRef);
+  const ref = (x) => `<span class="tip-ref">${escAttr(itemLabel(x))}</span>`;
+  return [
+    parent && `<div class="tip-links"><b>Rolls up to</b> ${ref(parent)} ${escAttr(parent.title)}</div>`,
+    kids.length && `<div class="tip-links"><b>Rolled up from</b> ${kids.map(ref).join(', ')}</div>`,
+  ].filter(Boolean).join('');
 }
 function moveTip(e) {
   const tip = document.getElementById('tip');
@@ -1340,7 +1368,9 @@ function openEditDialog(m) {
   if (v.parent && !parents.some(p => p.id === v.parent)) parents.push(state.items.find(p => p.id === v.parent));
   f.parent.innerHTML = '<option value="">— none —</option>' +
     parents.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('');
+  f.swimlane.innerHTML = laneOptions(v.swimlane);
   for (const k of EDIT_FIELDS) f[k].value = v[k];
+  f.swimlane.dataset.prev = f.swimlane.value;
   edDeps = [...v.deps];
 
   document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : `New ${T.item}`;
@@ -1357,6 +1387,22 @@ function openEditDialog(m) {
   updateEdType();
   document.getElementById('edit-dialog').showModal();
   f.title.focus();
+}
+
+// The workspace's existing swimlanes (A–Z), plus a way to start a new one.
+const NEW_LANE = '\u0000new';
+function laneOptions(current) {
+  const names = [...new Set([...lanesInOrder(), ...state.lanes.filter(l => l.workspace_id === state.workspaceId).map(l => l.name), current])]
+    .filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return names.map(n => `<option value="${escAttr(n)}">${escAttr(n)}</option>`).join('') +
+    `<option value="${NEW_LANE}">+ New swimlane…</option>`;
+}
+function pickEdLane(sel) {
+  if (sel.value !== NEW_LANE) return (sel.dataset.prev = sel.value);
+  const name = (prompt('New swimlane name') || '').trim();
+  if (name && ![...sel.options].some(o => o.value === name)) sel.add(new Option(name, name), sel.options.length - 1);
+  sel.value = name || sel.dataset.prev || '';
+  sel.dataset.prev = sel.value;
 }
 
 function renderEdDeps() {
@@ -4833,9 +4879,10 @@ function wireEvents() {
   gc.addEventListener('mouseover', (e) => {
     const m = !document.getElementById('edit-dialog').open && document.getElementById('quick').hidden && itemAt(e);
     if (m) showTip(m, e); else hideTip();
+    focusLinks(itemAt(e));
   });
   gc.addEventListener('mousemove', (e) => { if (document.getElementById('tip').classList.contains('show')) moveTip(e); });
-  gc.addEventListener('mouseleave', hideTip);
+  gc.addEventListener('mouseleave', () => { hideTip(); focusLinks(null); });
   for (const type of ['click', 'contextmenu']) gc.addEventListener(type, (e) => { const m = itemAt(e); if (m) showQuick(m, e); });
 
   // edit dialog
@@ -4843,6 +4890,7 @@ function wireEvents() {
   const form = document.getElementById('edit-form');
   form.addEventListener('submit', submitEditDialog);
   form.elements.type.addEventListener('change', updateEdType);
+  form.elements.swimlane.addEventListener('change', (e) => pickEdLane(e.target));
   form.elements.end.addEventListener('input', updateEdType); // keeps a milestone's hidden start in step
   document.getElementById('ed-cancel').onclick = () => dlg.close();
   document.getElementById('ed-close').onclick = () => dlg.close();
