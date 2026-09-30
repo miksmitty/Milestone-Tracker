@@ -3475,12 +3475,24 @@ function wireReports() {
 }
 
 // Downloads the items currently listed on the Items tab (filters and sort applied), in the
-// same columns as milestones.csv so the file loads straight back in.
+// milestones.csv columns except that links name items by ref, as Import expects, so the file
+// loads straight back in (into this workspace or another). An item without a ref is named #id.
+const EXPORT_COLUMNS = COLUMNS.map(c => (c === 'parent' ? 'rolls_up_to' : c));
+function itemsExportCSV(items) {
+  const byId = new Map(state.items.map(m => [m.id, m]));
+  const name = (id) => { const x = byId.get(id); return x?.ref || `#${id}`; };
+  const lines = [EXPORT_COLUMNS.join(',')];
+  for (const m of items) {
+    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
+      m.status, m.shape, m.parent ? name(m.parent) : '', m.deps.map(name).join(';')].map(csvEscape).join(','));
+  }
+  return lines.join('\n') + '\n';
+}
 function downloadItemsCSV() {
   syncEditorToState();
   const p = currentWorkspace();
   const name = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
-  const csv = toCSV(gridRows().map(r => r.m));
+  const csv = itemsExportCSV(gridRows().map(r => r.m));
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.download = `${name}-items-${fmtISO(new Date())}.csv`;
@@ -3718,12 +3730,16 @@ function planImport() {
     rows.push(row);
   });
 
-  // Link cells name a ref: this file's refs first, then the workspace's. Only this workspace's own
-  // download names ids (its parent and depends_on columns hold them), so ids are read from that alone.
+  // Link cells name a ref: this file's refs first, then the workspace's. "#12" names an item by id
+  // (the download does this for items without a ref). Downloads from before links were written as
+  // refs (a "parent" column) hold bare ids, trusted only from this workspace's own download.
   const live = rows.filter(r => r.action !== 'skip');
   const byFileId = new Map(live.filter(r => r.fileId).map(r => [r.fileId, r]));
+  const byId = (id) => byFileId.get(id) || (ownExport && state.items.find(m => m.id === id));
   const byRef = (tok) => (refRow.get(tok)?.action !== 'skip' && refRow.get(tok)) || state.items.find(m => m.ref === tok);
-  const resolve = (tok) => (ownExport ? byFileId.get(tok) || state.items.find(m => m.id === tok) || byRef(tok) : byRef(tok)) || null;
+  const legacyIds = ownExport && has('parent') && imp.rows[0][col.parent].toLowerCase().replace(/[^a-z]/g, '') === 'parent';
+  const resolve = (tok) => (tok.startsWith('#') ? byId(tok.slice(1))
+    : legacyIds ? byId(tok) || byRef(tok) : byRef(tok)) || null;
   for (const r of live) {
     if (!r.links) continue;
     if (r.links.parent) {
