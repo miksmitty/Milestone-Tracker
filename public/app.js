@@ -3240,7 +3240,17 @@ function savePane() {
   const v = paneValues();
   const problem = paneProblem(r, v);
   if (problem) {
-    paneForm().querySelector('.pane-error').textContent = problem;
+    // The message sits at the foot of a long form, so also flash it and take the user to the field.
+    const err = paneForm().querySelector('.pane-error');
+    err.textContent = problem;
+    flashStatus(problem, false);
+    const f = paneForm().elements;
+    const key = !parseDate(v.period_end) ? 'period_end' : !v.exec_summary ? 'exec_summary'
+      : OFF_TRACK.includes(v.status) && !v.get_to_green ? 'get_to_green' : null;
+    const field = key && (f[key]._ed?.wrap || f[key]);
+    (field || err).scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (key && REPORT_TEXTS.includes(key)) focusText(f[key]);
+    else if (key) f[key].focus({ preventScroll: true });
     return false;
   }
   const sync = !document.getElementById('pane-sync').hidden && paneForm().elements.sync_status.checked;
