@@ -4223,7 +4223,7 @@ function planImport() {
   const rows = [], usedTargets = new Set(), refRow = new Map();
   // Rows are matched to items by ref. Ids are only trusted from this workspace's own download:
   // another tool's ID column (1, 2, 3…) would otherwise land on unrelated items.
-  const wsCol = imp.hasHeader ? imp.rows[0].findIndex(h => h.toLowerCase().replace(/[^a-z]/g, '') === 'workspaceid') : -1;
+  const wsCol = imp.hasHeader ? imp.rows[0].findIndex(h => ['workspaceid', 'programid', 'programmeid'].includes(h.toLowerCase().replace(/[^a-z]/g, ''))) : -1;
   const ownExport = wsCol >= 0 && data.every(r => (r[wsCol] ?? '').trim() === state.workspaceId);
 
   data.forEach((r, i) => {
@@ -4299,12 +4299,13 @@ function planImport() {
 
   // Link cells name a ref: this file's refs first, then the workspace's. "#12" names an item by id
   // (the download does this for items without a ref). Downloads from before links were written as
-  // refs (a "parent" column) hold bare ids, trusted only from this workspace's own download.
+  // refs (a "parent" column alongside id and workspace_id) hold bare ids: those name rows in the
+  // same file wherever it's imported, and the workspace's items only in its own download.
   const live = rows.filter(r => r.action !== 'skip');
   const byFileId = new Map(live.filter(r => r.fileId).map(r => [r.fileId, r]));
   const byId = (id) => byFileId.get(id) || (ownExport && state.items.find(m => m.id === id));
   const byRef = (tok) => (refRow.get(tok)?.action !== 'skip' && refRow.get(tok)) || state.items.find(m => m.ref === tok);
-  const legacyIds = ownExport && has('parent') && imp.rows[0][col.parent].toLowerCase().replace(/[^a-z]/g, '') === 'parent';
+  const legacyIds = wsCol >= 0 && has('id') && has('parent') && imp.rows[0][col.parent].toLowerCase().replace(/[^a-z]/g, '') === 'parent';
   const resolve = (tok) => (tok.startsWith('#') ? byId(tok.slice(1))
     : legacyIds ? byId(tok) || byRef(tok) : byRef(tok)) || null;
   for (const r of live) {
