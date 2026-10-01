@@ -477,8 +477,9 @@ function flashStatus(msg, ok, sticky) {
 
 /* ---- undo ---- */
 // Changes made in one go (deletes, imports, bulk edits, dragging on the chart, quick updates)
-// snapshot every record set first. The toast that reports the change offers Undo — so does
-// ⌘/Ctrl+Z when you're not typing — which puts the snapshot back and saves what it changes.
+// snapshot every record set first. The toast that reports the change offers Undo, as do
+// ⌘/Ctrl+Z when you're not typing and the chart's Undo button (shown while there's something
+// to take back). Undo puts the snapshot back and saves what it changes.
 
 const undoStack = []; // [{ label, snap }], newest last
 const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'lanes'];
@@ -497,12 +498,21 @@ function offerUndo(snap, label) {
   undoStack.push({ label, snap });
   if (undoStack.length > 30) undoStack.shift();
   showToast(label, true);
+  updateUndoButton();
+}
+
+function updateUndoButton() {
+  const btn = document.getElementById('btn-undo');
+  const u = undoStack.at(-1);
+  btn.hidden = !u;
+  btn.title = u ? `Undo: ${u.label} (⌘/Ctrl+Z)` : '';
 }
 
 async function undoLast() {
   const u = undoStack.pop();
   if (!u) return showToast('Nothing to undo');
   if (!leavePaneEdit()) { undoStack.push(u); return; }
+  updateUndoButton();
   hideQuick();
   document.querySelectorAll('dialog[open]').forEach(d => d.close());
   clearTimeout(saveTimer);
@@ -6256,7 +6266,8 @@ function wireEvents() {
   wireDates();
   wirePalette();
 
-  // undo: the toast's button, or ⌘/Ctrl+Z when not typing (typing keeps the browser's own undo)
+  // undo: the toast's button, the chart's Undo button, or ⌘/Ctrl+Z when not typing (typing keeps the browser's own undo)
+  document.getElementById('btn-undo').onclick = undoLast;
   document.getElementById('toast').addEventListener('click', (e) => {
     if (e.target.closest('[data-undo]')) undoLast();
     else if (e.target.closest('.toast-close')) e.currentTarget.hidden = true;
