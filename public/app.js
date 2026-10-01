@@ -97,7 +97,7 @@ const GANTT_THEMES = {
   },
 };
 let G = GANTT_THEMES.light;
-const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on', 'baseline_start', 'baseline_end'];
+const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url'];
 const MS_DAY = 86400000;
 
 const state = {
@@ -207,7 +207,7 @@ function toCSV(items) {
   const lines = [COLUMNS.join(',')];
   for (const m of items) {
     lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
-      m.status, m.shape, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end].map(csvEscape).join(','));
+      m.status, m.shape, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -231,6 +231,8 @@ const HEADER_ALIASES = {
   deps: ['dependson', 'dependencies', 'deps'],
   baseline_start: ['baselinestart'],
   baseline_end: ['baselineend'],
+  gitlab_url: ['gitlaburl', 'gitlab'],
+  use_case_url: ['usecaseurl', 'usecase'],
 };
 
 function rowsToItems(rows) {
@@ -266,6 +268,8 @@ function rowsToItems(rows) {
       deps: get(r, 'deps').split(/[;|\s]+/).filter(Boolean),
       baseline_start: get(r, 'baseline_start'),
       baseline_end: get(r, 'baseline_end'),
+      gitlab_url: get(r, 'gitlab_url'),
+      use_case_url: get(r, 'use_case_url'),
     };
   });
 
@@ -1304,6 +1308,15 @@ function renderGantt() {
       g.appendChild(titleText({ x: m._lx, y: ty, 'text-anchor': anchor, 'font-size': 12.5, 'font-weight': 600, fill: G.text, ...halo() }, m, G.accent, G.muted));
       if (m._meta) g.appendChild(svgEl('text', { x: m._lx, y: cy + 15, 'text-anchor': anchor, 'font-size': 10.5, fill: G.muted, ...halo() }, m._meta));
     }
+    // a use case link: a dark badge with a document on its bottom-right corner
+    if (m.use_case_url) {
+      const ux = m._task ? x2 - 1 : x1 + rm.shapeS + 1, uy = m._task ? cy + rm.barH / 2 : cy + rm.shapeS + 1;
+      const badge = svgEl('g', { class: 'gantt-usecase', 'pointer-events': 'none' });
+      badge.appendChild(svgEl('circle', { cx: ux, cy: uy, r: 7, fill: G.text, stroke: G.bg, 'stroke-width': 1.5 }));
+      badge.appendChild(svgEl('path', { d: `M ${ux - 2.5} ${uy - 3.5} h 3.2 l 1.8 1.8 v 5.2 h -5 Z`, fill: G.bg }));
+      badge.appendChild(svgEl('path', { d: `M ${ux - 1.3} ${uy + 0.2} h 2.6 M ${ux - 1.3} ${uy + 1.9} h 2.6`, stroke: G.text, 'stroke-width': 0.8 }));
+      g.appendChild(badge);
+    }
     // overdue: a red "!" on its top-right corner; a late start gets an amber one
     const late = isLate(m), lateStart = !late && isLateStart(m);
     if (late || lateStart) {
@@ -1764,6 +1777,7 @@ function showTip(m, e) {
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
     ${tipLinks(m)}
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
+    ${itemLinks(m).map(([k, u]) => `<div class="tip-row tip-muted">${k}: ${escAttr(u.replace(/^https?:\/\/(www\.)?/i, ''))}</div>`).join('')}
     ${lastReportLine(m)}
     <div class="tip-hint">Click to update RAG or dates, or to report</div>`;
   const ids = chainOf(m.id);
@@ -1808,7 +1822,18 @@ function hideTip() {
 let editing = null; // item being edited; null when adding a new one
 let edDeps = [];
 
-const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent'];
+const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent',
+  'gitlab_url', 'use_case_url'];
+const URL_FIELDS = { gitlab_url: 'GitLab URL', use_case_url: 'Use case URL' };
+
+const isWebUrl = (u) => { try { return /^https?:$/.test(new URL(u).protocol); } catch { return false; } };
+// "gitlab.example.com/x" → "https://gitlab.example.com/x"; anything else is left as typed.
+const withScheme = (u) => (u && !/^[a-z][\w+.-]*:/i.test(u) ? `https://${u}` : u);
+// A link that opens in a new tab, shown without the https:// prefix.
+const linkOut = (u) => isWebUrl(u)
+  ? `<a href="${escAttr(u)}" target="_blank" rel="noopener noreferrer" title="${escAttr(u)}">${escAttr(u.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, ''))}</a>`
+  : escAttr(u);
+const itemLinks = (m) => Object.entries({ GitLab: m.gitlab_url, 'Use case': m.use_case_url }).filter(([, u]) => u);
 
 function openEditDialog(m) {
   hideTip();
@@ -1817,7 +1842,7 @@ function openEditDialog(m) {
   const last = state.items.at(-1);
   const today = fmtISO(new Date());
   const v = m || {
-    ref: '', title: '', description: '', swimlane: last?.swimlane || 'General', subswimlane: '', owner: '',
+    ref: '', title: '', description: '', swimlane: last?.swimlane || 'General', subswimlane: '', owner: '', gitlab_url: '', use_case_url: '',
     type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
   };
   f.type.innerHTML = typeOptions(v.type);
@@ -1827,7 +1852,7 @@ function openEditDialog(m) {
   f.parent.innerHTML = '<option value="">— none —</option>' +
     parents.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('');
   f.swimlane.innerHTML = laneOptions(v.swimlane);
-  for (const k of EDIT_FIELDS) f[k].value = v[k];
+  for (const k of EDIT_FIELDS) f[k].value = v[k] ?? '';
   f.swimlane.dataset.prev = f.swimlane.value;
   edDeps = [...v.deps];
 
@@ -1894,6 +1919,10 @@ async function submitEditDialog(e) {
   changes.deps = edDeps;
 
   if (!changes.title) return (err.textContent = 'Title is required.');
+  for (const k in URL_FIELDS) {
+    changes[k] = withScheme(changes[k]);
+    if (changes[k] && !isWebUrl(changes[k])) { f[k].focus(); return (err.textContent = `The ${URL_FIELDS[k]} isn’t a web address.`); }
+  }
   if (!changes.start && !changes.end) return (err.textContent = 'Enter a start or end date.');
   const clash = changes.ref && state.items.find(x => x !== editing && x.ref === changes.ref);
   if (clash) return (err.textContent = `Ref ${changes.ref} is already used by “${clash.title}”.`);
@@ -2160,6 +2189,8 @@ const GRID_COLS = [
   { key: 'shape', label: 'Shape', w: 100, filter: opts(SHAPES) },
   { key: 'parent', label: 'Rolls up to', w: 170, filter: 'text' },
   { key: 'deps', label: 'Depends on', w: 190, filter: 'text' },
+  { key: 'gitlab_url', label: 'GitLab URL', w: 200, filter: 'text' },
+  { key: 'use_case_url', label: 'Use case URL', w: 200, filter: 'text' },
   { key: 'actions', label: '', w: 40, fixed: true },
 ];
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
@@ -2253,6 +2284,8 @@ function renderEditor(highlight = []) {
       swimlane: `<input data-i="${i}" data-k="swimlane" value="${escAttr(m.swimlane)}" list="lane-list" placeholder="Swimlane" />`,
       subswimlane: `<input data-i="${i}" data-k="subswimlane" value="${escAttr(m.subswimlane)}" list="sublane-list" placeholder="Sub-swimlane" />`,
       owner: `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
+      gitlab_url: `<input data-i="${i}" data-k="gitlab_url" type="url" value="${escAttr(m.gitlab_url)}" placeholder="https://…" />`,
+      use_case_url: `<input data-i="${i}" data-k="use_case_url" type="url" value="${escAttr(m.use_case_url)}" placeholder="https://…" />`,
       start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}"${dateTitle} />`,
       end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}"${late ? ` class="late" title="${escAttr(lateText(m))}"` : dateTitle} />`,
       status: quick ? `<div class="rag-pick sm compact">${ragButtons(m.status, `data-i="${i}"`)}</div>`
@@ -2701,6 +2734,7 @@ function renderQuick() {
           : `<label>Date<input type="date" name="end" value="${d.end}" /></label>`}
       </div>
     </div>
+    ${itemLinks(m).length ? `<div class="q-links">${itemLinks(m).map(([k, u]) => `<span>${k}: ${linkOut(u)}</span>`).join('')}</div>` : ''}
     ${deps ? `<p class="q-note">Moving the ${task ? 'end ' : ''}date moves ${deps} dependent ${escAttr(deps > 1 ? T.items : T.item)} by the same amount.</p>` : ''}
     <p class="q-msg">${escAttr(quickMsg)}</p>
     <div class="q-save">
@@ -4084,7 +4118,7 @@ function itemsExportCSV(items) {
   const lines = [EXPORT_COLUMNS.join(',')];
   for (const m of items) {
     lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
-      m.status, m.shape, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end].map(csvEscape).join(','));
+      m.status, m.shape, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -4127,13 +4161,14 @@ function downloadReportsCSV() {
 // item's value alone. Links (rolls up to, depends on) name an item by its ref.
 
 const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'deps',
-  'baseline_start', 'baseline_end', 'id'];
+  'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url', 'id'];
 const IMPORT_DATES = ['start', 'end', 'baseline_start', 'baseline_end'];
 const importFieldLabel = (k) => ({
   ref: 'Ref', title: 'Title', type: `Type (${T.milestone} or ${T.task})`, description: 'Description', swimlane: 'Swimlane',
   subswimlane: 'Sub-swimlane', owner: 'Owner', start: 'Start date', end: `End date / ${T.milestone} date`, status: 'RAG',
   shape: 'Shape', parent: 'Rolls up to (ref)', deps: 'Depends on (refs)',
-  baseline_start: 'Baseline start', baseline_end: `Baseline end / ${T.milestone} baseline date`, id: 'ID (used to match links)',
+  baseline_start: 'Baseline start', baseline_end: `Baseline end / ${T.milestone} baseline date`, gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
+  id: 'ID (used to match links)',
 }[k]);
 // Headings are compared with everything but letters and digits removed.
 const IMPORT_ALIASES = {
@@ -4154,6 +4189,8 @@ const IMPORT_ALIASES = {
   deps: ['dependson', 'dependencies', 'dependency', 'deps', 'predecessors', 'predecessor'],
   baseline_start: ['baselinestart', 'baselinestartdate', 'baselinebegin'],
   baseline_end: ['baselineend', 'baselineenddate', 'baselinefinish', 'baselinedate', 'baselinedue'],
+  gitlab_url: ['gitlaburl', 'gitlab', 'gitlablink', 'repo', 'repository', 'repourl'],
+  use_case_url: ['usecaseurl', 'usecase', 'usecaselink'],
 };
 
 const imp = { name: '', rows: [], hasHeader: true, map: [], order: 'auto', mode: 'merge', plan: null };
@@ -4288,6 +4325,7 @@ function planImport() {
     const f = row.fields;
 
     for (const k of ['ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner']) if (cell(k)) f[k] = cell(k);
+    for (const k in URL_FIELDS) if (cell(k)) f[k] = withScheme(cell(k));
     if (row.action === 'add' && !f.title) { row.action = 'skip'; row.notes.push('No title'); }
 
     // Dates

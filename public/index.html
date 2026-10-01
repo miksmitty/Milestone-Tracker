@@ -391,6 +391,7 @@
         <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#7c3aed"/></svg> Rolls up to</span>
         <span class="legend-item" id="legend-baseline" hidden><i class="bar bar-base"></i> Baseline</span>
         <span class="legend-item"><i class="late-dot"></i> Overdue</span>
+        <span class="legend-item"><i class="usecase-dot"></i> Use case linked</span>
       </span>
     </div>
   </main>
@@ -502,6 +503,8 @@
         <label>Shape<select name="shape"></select></label>
         <label>Rolls up to<select name="parent"></select></label>
         <div class="span3 field"><span class="field-label">Depends on</span><div id="ed-deps" class="deps"></div></div>
+        <label class="span3">GitLab URL<input name="gitlab_url" type="url" placeholder="https://gitlab.example.com/group/project" /></label>
+        <label class="span3">Use case URL<input name="use_case_url" type="url" placeholder="https://…" /></label>
       </div>
       <p class="dlg-hint">A <span data-term="milestone">milestone</span> has one date and is drawn as a shape; a <span data-term="task">task</span> has a start and end and is drawn as a bar. Change the type to switch between them. Moving the end date shifts anything that depends on it.</p>
       <p id="ed-error" class="dlg-error"></p>
