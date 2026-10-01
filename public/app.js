@@ -1940,6 +1940,10 @@ async function submitEditDialog(e) {
   }
   document.getElementById('edit-dialog').close();
   rerenderCurrentView();
+  if (!editing && isShown('editor')) { // new on the Items tab: add it at the bottom and show where it went
+    refreshEditor([m.id]);
+    document.querySelector(`#editor-body tr[data-id="${m.id}"]`)?.scrollIntoView({ block: 'nearest' });
+  }
   const note = [editing ? `${itemLabel(m)} saved` : `Added ${fullLabel(m)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
   offerUndo(snap, note);
   await saveData(movedMessage(m, res.moved), editing ? 'Edit dialog' : 'New item dialog');
@@ -2238,29 +2242,85 @@ function matchesFilter(m, key, f, byId) {
 }
 
 // Rows to show: [{ m, i }] where i is the item's index in state.items.
-function gridRows() {
-  const byId = new Map(state.items.map(m => [m.id, m]));
-  const rows = state.items
-    .map((m, i) => ({ m, i }))
-    .filter(({ m }) => Object.entries(grid.filters).every(([k, f]) => matchesFilter(m, k, f, byId)));
-  return sortRows(grid, rows, (r, key) => gridValue(r.m, key, byId), (a, b) => a.i - b.i);
+// While editing (keepOrder) the rows stay where they are, like a spreadsheet: an edited row
+// doesn't jump to its new sort position or vanish from a filter, and new items go at the bottom.
+// Sorting, filtering, switching mode or view puts everything back in order.
+let gridOrder = null; // ids in the order last shown
+let gridKnown = null; // every item id at that point, so new items can be told apart
+function gridRows(keepOrder) {
+  let rows;
+  if (keepOrder && gridOrder) {
+    const index = new Map(state.items.map((m, i) => [m.id, i]));
+    rows = [...gridOrder.filter(id => index.has(id)), ...state.items.filter(m => !gridKnown.has(m.id)).map(m => m.id)]
+      .map(id => ({ m: state.items[index.get(id)], i: index.get(id) }));
+  } else {
+    const byId = new Map(state.items.map(m => [m.id, m]));
+    rows = sortRows(grid, state.items
+      .map((m, i) => ({ m, i }))
+      .filter(({ m }) => Object.entries(grid.filters).every(([k, f]) => matchesFilter(m, k, f, byId))),
+    (r, key) => gridValue(r.m, key, byId), (a, b) => a.i - b.i);
+  }
+  gridOrder = rows.map(r => r.m.id);
+  gridKnown = new Set(state.items.map(m => m.id));
+  return rows;
 }
 
-function renderEditor(highlight = []) {
+// After an edit: redraw without re-sorting, so the row being worked on stays put.
+const refreshEditor = (highlight = []) => renderEditor(highlight, true);
+
+// Put new cell HTML in place. Only cells that changed are touched, and a cell holding the focus
+// keeps its control (attributes and options are copied across), so typing — even halfway
+// through a date — carries on undisturbed.
+function setCell(td, html) {
+  if (td._html === html) return;
+  td._html = html;
+  const live = td.firstElementChild;
+  if (live && live === document.activeElement && td.children.length === 1) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    const next = tpl.content.firstElementChild;
+    if (tpl.content.children.length === 1 && next.tagName === live.tagName) {
+      for (const a of [...live.attributes]) if (!next.hasAttribute(a.name)) live.removeAttribute(a.name);
+      for (const a of [...next.attributes]) if (a.name !== 'value' && live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value);
+      if (live.tagName === 'SELECT') { const v = live.value; live.innerHTML = next.innerHTML; live.value = v; }
+      return;
+    }
+  }
+  const had = td.contains(document.activeElement) ? document.activeElement : null;
+  td.innerHTML = html;
+  const same = had && (had.dataset.k ? `[data-k="${had.dataset.k}"]` : had.dataset.adddep != null ? '[data-adddep]' : null);
+  if (same) td.querySelector(same)?.focus({ preventScroll: true });
+}
+
+function renderEditor(highlight = [], keepOrder = false) {
   const body = document.getElementById('editor-body');
-  body.innerHTML = '';
+  body.querySelector('.grid-empty')?.parentElement.remove();
+  const existing = new Map([...body.children].map(tr => [tr.dataset.id, tr]));
   const byId = new Map(state.items.map(m => [m.id, m]));
   const milestones = state.items.filter(m => !isTask(m)).sort(cmpRef);
   const refCount = new Map();
   for (const m of state.items) if (m.ref) refCount.set(m.ref, (refCount.get(m.ref) || 0) + 1);
 
-  const rows = gridRows();
+  const rows = gridRows(keepOrder);
   const cols = grid.cols();
+  const colKeys = cols.map(c => c.key).join();
+  let prev = null;
   for (const { m, i } of rows) {
     const task = isTask(m);
-    const tr = document.createElement('tr');
-    tr.dataset.id = m.id;
-    tr.classList.toggle('shifted', highlight.includes(m.id));
+    let tr = existing.get(m.id);
+    existing.delete(m.id);
+    if (!tr || tr.dataset.cols !== colKeys) {
+      tr?.remove();
+      tr = document.createElement('tr');
+      tr.dataset.id = m.id;
+      tr.dataset.cols = colKeys;
+      tr.innerHTML = cols.map(c => `<td${c.key === 'id' ? ' class="col-id"' : c.key === 'sel' ? ' class="col-sel"' : ''}></td>`).join('');
+    }
+    if (highlight.includes(m.id)) { // restart the animation on a row that's already showing
+      tr.classList.remove('shifted');
+      void tr.offsetWidth;
+      tr.classList.add('shifted');
+    }
     tr.classList.toggle('selected', gridSel.has(m.id));
 
     const parentOpts = milestones.filter(p => p.id !== m.id);
@@ -2296,9 +2356,12 @@ function renderEditor(highlight = []) {
       actions: quick ? `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this ${escAttr(T.item)}">Report…</button>`
         : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
     };
-    tr.innerHTML = cols.map(c => `<td${c.key === 'id' ? ' class="col-id"' : c.key === 'sel' ? ' class="col-sel"' : ''}>${cells[c.key]}</td>`).join('');
-    body.appendChild(tr);
+    cols.forEach((c, j) => setCell(tr.children[j], cells[c.key]));
+    const at = prev ? prev.nextSibling : body.firstChild;
+    if (tr !== at) body.insertBefore(tr, at); // rows only move when the order really changed
+    prev = tr;
   }
+  for (const tr of existing.values()) tr.remove();
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">${state.items.length ? `No ${escAttr(T.items)} match the filters.` : `No ${escAttr(T.items)} in this workspace yet. Use <b>+ Add ${escAttr(T.item)}</b> to create one.`}</td></tr>`;
   }
@@ -2320,10 +2383,13 @@ function escAttr(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+const pendingDates = new WeakSet(); // date cells typed into but not yet applied
+
 // Copy table edits into state (optionally skipping one control whose change is handled separately).
 function syncEditorToState(skip) {
   document.querySelectorAll('#editor-body [data-k]').forEach(el => {
-    if (el !== skip) state.items[+el.dataset.i][el.dataset.k] = el.value;
+    // A date still being typed is left alone: applyDateEdit moves it, with its dependants, on leaving the field.
+    if (el !== skip && !pendingDates.has(el)) state.items[+el.dataset.i][el.dataset.k] = el.value;
   });
 }
 
@@ -2331,9 +2397,9 @@ function applyTableChange(m, changes, msg) {
   const res = updateItem(m, changes);
   if (res.error) {
     flashStatus(res.error, false);
-    return renderEditor();
+    return refreshEditor();
   }
-  renderEditor(res.moved);
+  refreshEditor(res.moved);
   scheduleSave([msg, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
 }
 
@@ -2354,7 +2420,7 @@ function onEditorChange(e) {
   if (k === 'status') t.style.color = pal(t.value).dark;
   if (k === 'ref') { // refresh duplicate warnings and labels
     syncEditorToState();
-    renderEditor();
+    refreshEditor();
     return scheduleSave();
   }
 
@@ -2369,14 +2435,20 @@ function onEditorChange(e) {
   }
 
   if (k === 'start' || k === 'end') {
-    // Date inputs fire change mid-typing (e.g. year 0002) — wait for a real date.
-    if (t.value && (+t.value.slice(0, 4) < 1900 || !parseDate(t.value))) return;
-    syncEditorToState(t);
-    return applyTableChange(m, { [k]: t.value });
+    // Date inputs fire change on every keystroke, so apply it once you leave the field (or press Enter).
+    if (t === document.activeElement) return void pendingDates.add(t);
+    return applyDateEdit(t);
   }
 
   syncEditorToState(); // plain field (title, owner, status, …) — sync now so a re-render can't drop it
   scheduleSave();
+}
+
+function applyDateEdit(t) {
+  pendingDates.delete(t);
+  if (t.value && (+t.value.slice(0, 4) < 1900 || !parseDate(t.value))) return; // half-typed, e.g. year 0002
+  syncEditorToState(t);
+  applyTableChange(state.items[+t.dataset.i], { [t.dataset.k]: t.value });
 }
 
 function onEditorClick(e) {
@@ -2400,7 +2472,7 @@ function onEditorClick(e) {
     syncEditorToState();
     const m = state.items[+rm.dataset.rmdep];
     m.deps = m.deps.filter(d => d !== rm.dataset.dep);
-    renderEditor();
+    refreshEditor();
     return scheduleSave();
   }
   const del = e.target.closest('[data-del]');
@@ -2409,7 +2481,7 @@ function onEditorClick(e) {
     const m = state.items[+del.dataset.del];
     const snap = snapshotData();
     removeItem(m.id);
-    renderEditor();
+    refreshEditor();
     offerUndo(snap, `Deleted ${fullLabel(m)}`);
     scheduleSave('Deleted');
   }
@@ -2502,7 +2574,7 @@ function applyBulk() {
     const moved = others();
     for (const m of items) directEdits.add(m.id);
     for (const id of moved) knockOn.add(id);
-    renderEditor([...items.map(m => m.id), ...moved]);
+    refreshEditor([...items.map(m => m.id), ...moved]);
     offerUndo(snap, `Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}`);
     return scheduleSave(`Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}${also(moved)}`);
   }
@@ -2515,7 +2587,7 @@ function applyBulk() {
   }
   const moved = others();
   const label = BULK_FIELDS().find(([k]) => k === bulkField)[1];
-  renderEditor(moved);
+  refreshEditor(moved);
   if (done) offerUndo(snap, `${label} updated on ${count(done, T.item, T.items)}`);
   scheduleSave(`${label} updated on ${count(done, T.item, T.items)}` +
     (skipped ? ` · ${skipped} skipped (would roll up to itself or create a loop)` : '') + also(moved));
@@ -2529,7 +2601,7 @@ function bulkDelete() {
   const snap = snapshotData();
   for (const m of items) removeItem(m.id);
   gridSel.clear();
-  renderEditor();
+  refreshEditor();
   offerUndo(snap, `Deleted ${what}`);
   scheduleSave(`Deleted ${what}`);
 }
@@ -6260,23 +6332,7 @@ function wireEvents() {
   });
 
   // editor table
-  document.getElementById('btn-add').onclick = () => {
-    syncEditorToState();
-    const last = state.items.at(-1);
-    const today = fmtISO(new Date());
-    state.items.push({
-      id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: `New ${T.item}`, description: '',
-      swimlane: last?.swimlane || 'General', subswimlane: last?.subswimlane || '', owner: last?.owner || '',
-      start: today, end: today, status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
-    });
-    clearTableFilters(grid); // so the new row is visible
-    if (grid.mode === 'quick') setGridMode('full'); // a new item needs its details filled in
-    renderEditor();
-    const input = document.querySelector(`#editor-body [data-i="${state.items.length - 1}"][data-k="title"]`);
-    input?.scrollIntoView({ block: 'center' });
-    input?.select();
-    scheduleSave(`${T.Item} added`);
-  };
+  document.getElementById('btn-add').onclick = () => { syncEditorToState(); openEditDialog(null); };
 
   wireTable(grid);
   document.querySelectorAll('[name="grid-mode"]').forEach(r => r.addEventListener('change', () => setGridMode(r.value)));
@@ -6297,6 +6353,8 @@ function wireEvents() {
 
   document.getElementById('editor-body').addEventListener('change', onEditorChange);
   document.getElementById('editor-body').addEventListener('click', onEditorClick);
+  document.getElementById('editor-body').addEventListener('focusout', (e) => { if (pendingDates.has(e.target)) applyDateEdit(e.target); });
+  document.getElementById('editor-body').addEventListener('keydown', (e) => { if (e.key === 'Enter' && pendingDates.has(e.target)) applyDateEdit(e.target); });
   wireBulk();
 
   wireReports();
