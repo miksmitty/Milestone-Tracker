@@ -4055,7 +4055,7 @@ function itemsExportCSV(items) {
   const lines = [EXPORT_COLUMNS.join(',')];
   for (const m of items) {
     lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
-      m.status, m.shape, m.parent ? name(m.parent) : '', m.deps.map(name).join(';')].map(csvEscape).join(','));
+      m.status, m.shape, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -4097,11 +4097,14 @@ function downloadReportsCSV() {
 // added, updated, deleted or skipped before anything is saved. Blank cells leave an existing
 // item's value alone. Links (rolls up to, depends on) name an item by its ref.
 
-const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'deps', 'id'];
+const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'deps',
+  'baseline_start', 'baseline_end', 'id'];
+const IMPORT_DATES = ['start', 'end', 'baseline_start', 'baseline_end'];
 const importFieldLabel = (k) => ({
   ref: 'Ref', title: 'Title', type: `Type (${T.milestone} or ${T.task})`, description: 'Description', swimlane: 'Swimlane',
   subswimlane: 'Sub-swimlane', owner: 'Owner', start: 'Start date', end: `End date / ${T.milestone} date`, status: 'RAG',
-  shape: 'Shape', parent: 'Rolls up to (ref)', deps: 'Depends on (refs)', id: 'ID (used to match links)',
+  shape: 'Shape', parent: 'Rolls up to (ref)', deps: 'Depends on (refs)',
+  baseline_start: 'Baseline start', baseline_end: `Baseline end / ${T.milestone} baseline date`, id: 'ID (used to match links)',
 }[k]);
 // Headings are compared with everything but letters and digits removed.
 const IMPORT_ALIASES = {
@@ -4113,13 +4116,15 @@ const IMPORT_ALIASES = {
   swimlane: ['swimlane', 'lane', 'workstream', 'stream', 'category', 'group', 'area', 'team', 'theme', 'project'],
   subswimlane: ['subswimlane', 'sublane', 'subworkstream', 'substream', 'subcategory', 'subgroup'],
   owner: ['owner', 'assignee', 'assignedto', 'responsible', 'accountable', 'resource', 'resourcenames', 'lead'],
-  start: ['start', 'startdate', 'begin', 'begindate', 'from', 'plannedstart', 'baselinestart', 'forecaststart', 'actualstart'],
+  start: ['start', 'startdate', 'begin', 'begindate', 'from', 'plannedstart', 'forecaststart', 'actualstart'],
   end: ['end', 'enddate', 'date', 'due', 'duedate', 'finish', 'finishdate', 'deadline', 'target', 'targetdate', 'to', 'plannedend',
-    'plannedfinish', 'baselinefinish', 'forecastend', 'forecastfinish', 'completiondate', 'milestonedate', 'deliverydate'],
+    'plannedfinish', 'forecastend', 'forecastfinish', 'completiondate', 'milestonedate', 'deliverydate'],
   status: ['rag', 'status', 'ragstatus', 'health', 'rating'],
   shape: ['shape'],
   parent: ['parent', 'parentref', 'parentid', 'rollsupto', 'rollup'],
   deps: ['dependson', 'dependencies', 'dependency', 'deps', 'predecessors', 'predecessor'],
+  baseline_start: ['baselinestart', 'baselinestartdate', 'baselinebegin'],
+  baseline_end: ['baselineend', 'baselineenddate', 'baselinefinish', 'baselinedate', 'baselinedue'],
 };
 
 const imp = { name: '', rows: [], hasHeader: true, map: [], order: 'auto', mode: 'merge', plan: null };
@@ -4135,7 +4140,8 @@ function guessImportMap(header) {
   // Looser second pass, e.g. "Planned start (baseline)" or "Forecast due".
   norm.forEach((h, i) => {
     if (map[i]) return;
-    if (/start|begin/.test(h)) take(i, 'start');
+    if (/baseline/.test(h)) take(i, /start|begin/.test(h) ? 'baseline_start' : 'baseline_end');
+    else if (/start|begin/.test(h)) take(i, 'start');
     else if (/finish|due|deadline|enddate/.test(h)) take(i, 'end');
     else if (/rag|status/.test(h)) take(i, 'status');
     else if (/owner|assign/.test(h)) take(i, 'owner');
@@ -4279,6 +4285,27 @@ function planImport() {
     if (!t || type !== t.type) f.type = type;
     if (!t || start !== t.start) f.start = start;
     if (!t || end !== t.end) f.end = end;
+
+    // Baseline: read like the dates. A milestone's baseline is one date; blank keeps what's there.
+    const base = {};
+    for (const k of ['baseline_start', 'baseline_end']) {
+      const v = cell(k);
+      const d = readDate(v, order);
+      if (d === null) row.notes.push(`Couldn't read the baseline date “${v}”`);
+      base[k] = d || '';
+    }
+    if (base.baseline_start || base.baseline_end) {
+      let bs = base.baseline_start, be = base.baseline_end;
+      if (type === 'milestone') bs = be = be || bs;
+      else {
+        if (bs && be && be < bs) { [bs, be] = [be, bs]; row.notes.push('The baseline end was before the baseline start, so they were swapped'); }
+        bs ||= t?.baseline_start || be;
+        be ||= t?.baseline_end || bs;
+        if (be < bs) { if (base.baseline_end) bs = be; else be = bs; }
+      }
+      f.baseline_start = bs;
+      f.baseline_end = be;
+    }
 
     const rag = cell('status');
     if (rag) {
@@ -4443,7 +4470,7 @@ function renderImport() {
     (imp.hasHeader && imp.rows[0][i]) || `Column ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`);
   while (imp.map.length < width) imp.map.push('');
 
-  const dateCols = imp.map.map((k, i) => (k === 'start' || k === 'end' ? i : -1)).filter(i => i >= 0);
+  const dateCols = imp.map.map((k, i) => (IMPORT_DATES.includes(k) ? i : -1)).filter(i => i >= 0);
   imp.detected = detectDateOrder(dateCols.flatMap(i => data.map(r => r[i] ?? '')));
   const d = imp.detected, local = localDateOrder();
   const label = { dmy: 'day first (3 April 2026)', mdy: 'month first (4 March 2026)' };
@@ -4459,7 +4486,7 @@ function renderImport() {
     const samples = [...new Set(data.map(r => (r[i] ?? '').trim()).filter(Boolean))].slice(0, 3);
     const k = imp.map[i];
     const ex = samples.map(v => {
-      if (k !== 'start' && k !== 'end') return escAttr(v);
+      if (!IMPORT_DATES.includes(k)) return escAttr(v);
       const iso = readDate(v, plan.order);
       return iso ? `${escAttr(v)} <span class="im-date">→ ${fmtNice(iso)}</span>` : `${escAttr(v)} <span class="im-bad">→ can't read</span>`;
     }).join(' · ');
@@ -4469,12 +4496,15 @@ function renderImport() {
 
   // Preview
   const shown = ['ref', 'title', 'type', 'start', 'end', 'status', 'owner', 'swimlane'];
+  if (imp.map.some(k => k.startsWith('baseline_'))) shown.splice(5, 0, 'baseline_start', 'baseline_end');
+  const heads = { ref: 'Ref', title: 'Title', type: 'Type', start: 'Start', end: 'End', baseline_start: 'Baseline start', baseline_end: 'Baseline end',
+    status: 'RAG', owner: 'Owner', swimlane: 'Swimlane' };
   document.getElementById('im-preview-head').innerHTML = `<tr><th>Row</th><th></th>${shown.map(k =>
-    `<th>${escAttr({ ref: 'Ref', title: 'Title', type: 'Type', start: 'Start', end: 'End', status: 'RAG', owner: 'Owner', swimlane: 'Swimlane' }[k])}</th>`).join('')}<th>Links</th><th>Notes</th></tr>`;
+    `<th>${escAttr(heads[k])}</th>`).join('')}<th>Links</th><th>Notes</th></tr>`;
   const actLabel = { add: 'Add', update: 'Update', same: 'No change', skip: 'Skip', delete: 'Delete' };
   const cellFor = (r, k) => {
     const v = k in r.fields ? r.fields[k] : r.target ? r.target[k] : '';
-    const text = k === 'type' ? (v === 'task' ? T.Task : v ? T.Milestone : '') : k === 'start' || k === 'end' ? (v ? fmtNice(v) : '') : v;
+    const text = k === 'type' ? (v === 'task' ? T.Task : v ? T.Milestone : '') : IMPORT_DATES.includes(k) ? (v ? fmtNice(v) : '') : v;
     return `<td class="${k === 'title' ? 'im-title' : ''} ${r.target && k in r.fields ? 'changed' : ''}">${escAttr(text)}</td>`;
   };
   // A link points at a row of the file or at an item already in the workspace.
@@ -4485,7 +4515,7 @@ function renderImport() {
       <td><span class="im-act ${r.action === 'same' ? 'skip' : r.action}">${actLabel[r.action]}</span></td>
       ${shown.map(k => cellFor(r, k)).join('')}<td>${escAttr(links(r))}</td><td class="im-notes">${escAttr(r.notes.join('. '))}</td></tr>`).join('')
     + plan.deletes.map(m => `<tr class="delete"><td></td><td><span class="im-act delete">Delete</span></td>${shown.map(k =>
-      `<td>${escAttr(k === 'type' ? typeName(m) : k === 'start' || k === 'end' ? fmtNice(m[k]) : m[k])}</td>`).join('')}<td></td>
+      `<td>${escAttr(k === 'type' ? typeName(m) : IMPORT_DATES.includes(k) ? (m[k] ? fmtNice(m[k]) : '') : m[k])}</td>`).join('')}<td></td>
       <td class="im-notes">Not in the file${reportsFor(m.id).length ? `; its ${count(reportsFor(m.id).length, 'report is', 'reports are')} kept` : ''}</td></tr>`).join('');
 
   const n = (a) => plan.rows.filter(r => r.action === a).length;
