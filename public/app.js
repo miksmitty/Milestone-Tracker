@@ -5724,6 +5724,95 @@ async function copyLink() {
   catch { showToast('Couldn’t copy the link — copy it from the address bar'); }
 }
 
+/* ================= PNG of a page ================= */
+// The overview tables and What changed download as a PNG, like the Gantt chart: the page's title
+// and content, drawn at 2× in the light colours, without the buttons. The page is copied with every
+// element's computed style written onto it and drawn through an SVG image onto a canvas.
+
+const PNG_TARGETS = { overview: 'overview-table', lanes: 'lanes-table', changes: 'ch-body' };
+
+function pngSlug(s) { return s.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase(); }
+
+async function downloadPagePNG() {
+  const view = currentView();
+  const src = document.getElementById(PNG_TARGETS[view]);
+  if (!src) return;
+  const root = document.documentElement;
+  const theme = root.dataset.theme, dark = 'dark' in root.dataset;
+  root.dataset.theme = 'light'; // light colours, whatever the theme
+  delete root.dataset.dark;
+  let png;
+  try {
+    const box = view === 'changes' ? src : src.closest('.table-wrap');
+    const width = Math.ceil(Math.max(box.scrollWidth, box.offsetWidth));
+    const wrap = document.createElement('div');
+    const p = currentWorkspace();
+    const sub = APP_VIEWS.includes(view) ? '' : `${p.code ? `${p.code} · ` : ''}${p.name}`;
+    const font = FONT.replace(/"/g, "'"); // it sits inside a style="…" attribute
+    wrap.innerHTML = `<div style="font:600 12.5px ${font};color:#7a7870">${escAttr(sub)}${sub ? ' · ' : ''}${fmtNice(todayISO())}</div>
+      <div style="font:700 21px ${font};color:#1c1c1c;letter-spacing:-0.015em;margin:2px 0 12px">${escAttr(VIEW_TITLES[view]())}${view === 'changes' ? ` <span style="font-weight:500;font-size:15px;color:#7a7870">since ${fmtNice(chSince)}</span>` : ''}</div>`;
+    // leave out the Update buttons' column
+    const copy = inlineStyles(box, (el) => el.matches('.ov-act')
+      || (el.matches('thead tr:first-child > th:last-child, tfoot td:last-child') && !el.textContent.trim()));
+    copy.style.width = width + 'px';
+    copy.style.overflow = 'visible';
+    wrap.appendChild(copy);
+    Object.assign(wrap.style, { padding: '20px 22px', background: '#f4f3ee', width: width + 44 + 'px' });
+    document.body.appendChild(wrap); // measure the height as laid out
+    wrap.style.position = 'fixed'; wrap.style.left = '-100000px'; wrap.style.top = '0';
+    const height = wrap.offsetHeight;
+    wrap.remove();
+    wrap.style.position = wrap.style.left = wrap.style.top = '';
+    const xml = new XMLSerializer().serializeToString(wrap);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width + 44}" height="${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
+    png = await svgToPNG(svg, width + 44, height);
+  } finally {
+    if (theme) root.dataset.theme = theme; else delete root.dataset.theme;
+    if (dark) root.dataset.dark = '';
+  }
+  const a = document.createElement('a');
+  const p = currentWorkspace();
+  a.download = `${APP_VIEWS.includes(view) ? '' : `${pngSlug(p.code || p.name)}-`}${pngSlug(VIEW_TITLES[view]())}-${todayISO()}.png`;
+  a.href = png;
+  a.click();
+}
+
+// A copy of an element with each element's computed style written inline, so it draws the same
+// outside the page. Elements `leave(el)` picks out are left out.
+function inlineStyles(el, leave = () => false) {
+  const copy = el.cloneNode(true);
+  const from = [el, ...el.querySelectorAll('*')], to = [copy, ...copy.querySelectorAll('*')];
+  const gone = [];
+  from.forEach((src, i) => {
+    if (i && leave(src)) return gone.push(to[i]);
+    const cs = getComputedStyle(src);
+    let css = '';
+    for (const k of cs) css += `${k}:${cs.getPropertyValue(k)};`;
+    to[i].setAttribute('style', css);
+    to[i].removeAttribute('class');
+  });
+  for (const x of gone) x.remove();
+  return copy;
+}
+
+function svgToPNG(svg, w, h) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2; // retina-quality export
+      const canvas = document.createElement('canvas');
+      canvas.width = w * scale;
+      canvas.height = h * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      try { resolve(canvas.toDataURL('image/png')); } catch (err) { reject(err); }
+    };
+    img.onerror = () => reject(new Error('the page couldn’t be drawn'));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  });
+}
+
 /* ================= wiring ================= */
 
 const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'changes', 'lanes'];
@@ -5760,7 +5849,6 @@ function switchView(view) {
 // Theme: Auto (follows the system), Light or Dark; a per-browser choice. The chart has its own
 // colour set (G), so it's redrawn when the theme changes.
 const THEMES = ['auto', 'light', 'dark'];
-let printTheme = null; // the chart's colours while a print is under way
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
 function applyTheme(theme = loadAppPrefs().theme || 'auto') {
   const root = document.documentElement;
@@ -5785,14 +5873,7 @@ function setNavCollapsed(collapsed) {
 function wireEvents() {
   for (const v of VIEWS) document.getElementById(`nav-${v}`).onclick = () => switchView(v);
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
-  document.querySelectorAll('[data-print]').forEach(b => { b.onclick = () => window.print(); });
-  // Printing: light colours, and the chart drawn from its top-left corner (not its scroll position).
-  window.addEventListener('beforeprint', () => {
-    printTheme = G;
-    G = GANTT_THEMES.light;
-    if (isShown('gantt')) { renderGantt(); const w = document.getElementById('gantt-scroll'); w.scrollLeft = w.scrollTop = 0; syncGanttSticky(); }
-  });
-  window.addEventListener('afterprint', () => { if (printTheme) { G = printTheme; printTheme = null; if (isShown('gantt')) renderGantt(); } });
+  document.querySelectorAll('[data-png]').forEach(b => { b.onclick = downloadPagePNG; });
   document.getElementById('nav-theme').onclick = () => {
     const next = THEMES[(THEMES.indexOf(loadAppPrefs().theme || 'auto') + 1) % THEMES.length];
     saveAppPrefs({ theme: next });

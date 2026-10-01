@@ -34,7 +34,7 @@
   --closed: #1f6fb2;
 }
 /* dark: follows the system unless a theme is picked (data-theme on <html>) */
-@media screen and (prefers-color-scheme: dark) { /* print always uses the light colours */
+@media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --bg: #161615; --panel: #1f1f1d; --panel-2: #252523; --hover: #2c2c29; --row-hover: #262624; --chip: #31312d;
@@ -771,6 +771,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .tb-seg button:hover { background: var(--panel); }
 .tb-scale button { font-weight: 600; color: var(--muted); }
 .tb-scale button[aria-pressed="true"] { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(28,28,28,.12); }
+.btn-png { display: inline-flex; align-items: center; gap: 6px; }
 .gbar #btn-gantt-add, .gbar #btn-png, .gbar #btn-link { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; }
 
 .gbar-chips {
@@ -1120,22 +1121,3 @@ body.nav-collapsed .nav-badge { display: none; }
 .nav-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
 .nav-foot .nav-collapse { margin-top: 0; }
 
-/* ---------- print / save as PDF ---------- */
-@page { size: landscape; margin: 12mm; }
-@media print {
-  :root { color-scheme: light; }
-  html, body { background: #fff !important; }
-  .sidebar, .toolbar, .gbar, .hint, .toast, .tip, .quick, .ov-act, .due-act, .bulk-bar, .save-status, .rp-divider, .rp-pane, #btn-link { display: none !important; }
-  .app, .app-main { display: block; height: auto; overflow: visible; }
-  .view { padding: 0; }
-  .view-fill { display: block; }
-  .page-head { padding: 0 0 10px; }
-  .table-wrap, .gantt-scroll, .ch-sec, .rp-due, .prog-card { box-shadow: none !important; overflow: visible !important; break-inside: auto; }
-  .ov-table tr, .due-table tr, .ch-sec li { break-inside: avoid; }
-  .ov-count { padding: 0; }
-  #gantt-container svg { width: 100%; height: auto; }
-  .legend { margin-top: 6px; }
-  .rp-split { display: block; }
-  .rp-list { overflow: visible; max-height: none; }
-}
-.print-only { display: none; }

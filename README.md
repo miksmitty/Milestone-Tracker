@@ -64,7 +64,7 @@ Deleting (items, reports, weekly updates, a whole workspace), importing, bulk ed
 - **Trend**, shown as an arrow (↑ improving, → stable, ↓ declining; hover for the word), and the **summary of last week's progress** (key points for management) from the latest update
 - **Milestones overview**: the program's milestones counted as **Not started**, **Green**, **Red/Amber**, **Closed** and **Total**. Done statuses (named or described as complete) are Closed, statuses that need a get to green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and anything else counts as Green, so the four add up to the total. A totals row sums every program
 
-Each count in the milestones overview (here, on the swimlane overview and on the workspace cards) opens the Gantt chart showing just those milestones. **Print / PDF** prints the table on a landscape page without the menu and buttons (choose *Save as PDF* in the print dialog for a PDF).
+Each count in the milestones overview (here, on the swimlane overview and on the workspace cards) opens the Gantt chart showing just those milestones. **PNG** downloads the table as an image at 2× resolution, titled and dated, in the light colours and without the Update buttons; the swimlane overview and **What changed** have the same button.
 
 **Update** on a row records that program's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend, summary (with formatting) and area lead. If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one; the trend and area lead are saved to the workspace. **Download CSV** saves the table.
 
@@ -88,7 +88,7 @@ workspace_id,name,lead,trend
 
 **What changed** compares the workspace with how it stood at the start of an earlier day: RAG changes (worst first), dates that moved (by how many days, slips first), items added and removed, and reports written or updated since. Click an item to see it on the Gantt chart. It defaults to about a week ago. The comparison comes from the daily backups (see **Backups** above), so the days you can pick are the days the items file changed, up to 30 back; on a new install there's nothing to compare with until the next day.
 
-The page ends with a **summary** of the changes. **Copy summary** copies it as text (Markdown) for an email or chat, and **Use in weekly update** starts the program's weekly update with it. **Print / PDF** prints the page.
+The page ends with a **summary** of the changes. **Copy summary** copies it as text (Markdown) for an email or chat, and **Use in weekly update** starts the program's weekly update with it.
 
 ### RAG options
 

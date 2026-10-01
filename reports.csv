@@ -1,5 +1,5 @@
 id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated
-1,1,10,Weekly,2026-09-19,2026-09-25,Complete,"kjfdskjfsdb sdfsdf
+1,1,10,Weekly,2026-09-19,2026-09-25,Red,"kjfdskjfsdb sdfsdf
 ds
 sdf
 s
@@ -8,7 +8,7 @@ sf","fdsfs
 sf
 sf
 sf
-sf",fsfsfsfs,,Lucy Chen,2026-09-27T09:42:19.113Z,2026-09-27T09:42:56.868Z
+sf",fsfsfsfs,do the neccesary,Lucy Chen,2026-09-27T09:42:19.113Z,2026-10-01T07:15:26.583Z
 2,1,1,Fortnightly,2025-08-30,2025-09-12,Green,1.1 Project Kickoff: On track. Work is progressing to plan with no significant issues.,"Completed the planned activities for Project Kickoff on schedule.
 Resolved outstanding queries raised by the design authority.","Continue delivery against the Project Kickoff plan.
 Prepare evidence pack for the next governance board.",,Sarah Patel,2025-09-13T08:10:00.000Z,2025-09-13T08:10:00.000Z
