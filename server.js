@@ -1,12 +1,20 @@
 // Tracker — zero-dependency Node server.
 // Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv,
 // updates.csv and swimlanes.csv, and appends every change to an item's dates to date-changes.csv.
+// Several people can use it at once: each file has a version, a save based on an older version is
+// turned back with the current file for the browser to merge, and every save is pushed to the
+// other browsers straight away (see "Working together" below).
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3100;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+// Where the CSVs, the date log, backups and ids.json live: next to server.js unless DATA_DIR says
+// otherwise (on Azure App Service, somewhere under /home, which is kept across deployments).
+const DATA_DIR = path.resolve(process.env.DATA_DIR || __dirname);
+fs.mkdirSync(DATA_DIR, { recursive: true });
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const CONFIG_DEFAULTS = { title: 'Tracker', logo: '' };
 
@@ -26,36 +34,36 @@ const isLogoURL = (logo) => /^(https?:|data:)/i.test(logo);
 // Each API path is backed by one CSV file; the header is served when the file doesn't exist yet.
 const DATASETS = {
   '/api/workspaces': {
-    file: path.join(__dirname, 'workspaces.csv'),
-    legacy: path.join(__dirname, 'programs.csv'), // read until workspaces.csv is first saved
+    file: path.join(DATA_DIR, 'workspaces.csv'),
+    legacy: path.join(DATA_DIR, 'programs.csv'), // read until workspaces.csv is first saved
     header: 'id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,created,updated\n',
   },
   '/api/statuses': {
-    file: path.join(__dirname, 'statuses.csv'),
+    file: path.join(DATA_DIR, 'statuses.csv'),
     header: 'workspace_id,position,name,color,description,get_to_green,is_default\n',
   },
   '/api/milestones': {
-    file: path.join(__dirname, 'milestones.csv'),
+    file: path.join(DATA_DIR, 'milestones.csv'),
     header: 'id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url\n',
     audited: true, // date changes are logged to date-changes.csv
   },
   '/api/reports': {
-    file: path.join(__dirname, 'reports.csv'),
+    file: path.join(DATA_DIR, 'reports.csv'),
     header: 'id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achievements,next_steps,get_to_green,author,created,updated\n',
   },
   '/api/updates': {
-    file: path.join(__dirname, 'updates.csv'),
+    file: path.join(DATA_DIR, 'updates.csv'),
     header: 'id,workspace_id,swimlane,week_ending,rag,summary,author,created,updated\n',
   },
   '/api/swimlanes': {
-    file: path.join(__dirname, 'swimlanes.csv'),
+    file: path.join(DATA_DIR, 'swimlanes.csv'),
     header: 'workspace_id,name,lead,trend\n',
   },
 };
 
 // Before a CSV is first overwritten each day, the day's starting copy is kept in backups/
 // (e.g. backups/reports.2026-09-29.csv), so a bad save can be undone. The newest 30 per file are kept.
-const BACKUP_DIR = path.join(__dirname, 'backups');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const BACKUPS_KEPT = 30;
 function backupDaily(file, done) {
   const d = new Date();
@@ -106,7 +114,7 @@ function serveHistory(pathname, res) {
 // compares each save of milestones.csv with the file it replaces, so no way of changing a date in
 // the app can skip it, and it compares the file with what it last saw, so edits made to the CSV
 // outside the app are logged too. The log is only ever appended to: nothing in the app rewrites it.
-const AUDIT_FILE = path.join(__dirname, 'date-changes.csv');
+const AUDIT_FILE = path.join(DATA_DIR, 'date-changes.csv');
 const AUDIT_COLUMNS = ['id', 'at', 'by', 'workspace_id', 'item_id', 'ref', 'title', 'field', 'from', 'to', 'days', 'action', 'via', 'note'];
 const DATE_FIELDS = ['start', 'end', 'baseline_start', 'baseline_end'];
 const ACTIONS = { added: 'Added', changed: 'Changed', knockOn: 'Knock-on', deleted: 'Deleted', outside: 'Edited outside the app', started: 'Logging started' };
@@ -239,6 +247,96 @@ function serveAudit(res) {
   });
 }
 
+/* ---- Working together ---- */
+// Each file's version is a hash of its contents, sent with every read (X-Version). A save says
+// which version it was made from (X-Base-Version); if the file has changed since, it isn't written:
+// the reply is 409 with the current file and version, the browser merges its changes into it and
+// saves again. Saves to one file run one at a time, so the check and the write can't interleave.
+//
+// Browsers hear about changes on /api/events (server-sent events): a `versions` event on
+// connecting, then a `change` event each time a file changes, whether saved through the app or
+// edited on disk (the files are checked every couple of seconds). Run one instance of the server:
+// two would each keep their own date log counter and only tell their own browsers about saves.
+const nameOf = (ds) => Object.keys(DATASETS).find(k => DATASETS[k] === ds).slice('/api/'.length);
+const versionOf = (buf) => (buf ? crypto.createHash('sha1').update(buf).digest('hex').slice(0, 16) : 'none');
+// The file's bytes (or the legacy file's, until the new one is saved), or null when there's neither.
+function readDataset(ds) {
+  for (const f of [ds.file, ds.legacy].filter(Boolean)) {
+    try { return fs.readFileSync(f); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  }
+  return null;
+}
+
+const listeners = new Set();
+const lastSeen = new Map(); // dataset → { stamp: size and mtime, version } as last told to browsers
+function broadcast(event, data) {
+  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of listeners) res.write(msg);
+}
+function currentVersions() {
+  return Object.fromEntries(Object.values(DATASETS).map(ds => [nameOf(ds), lastSeen.get(ds)?.version ?? versionOf(readDataset(ds))]));
+}
+function serveEvents(req, res) {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.write(`retry: 3000\nevent: versions\ndata: ${JSON.stringify(currentVersions())}\n\n`);
+  listeners.add(res);
+  req.on('close', () => listeners.delete(res));
+}
+// A comment every 20 seconds keeps idle connections open through proxies and load balancers
+// (Azure closes them after about four minutes of silence).
+setInterval(() => { for (const res of listeners) res.write(': ping\n\n'); }, 20000).unref();
+
+const stampOf = (ds) => { try { const s = fs.statSync(ds.file); return `${s.size}:${s.mtimeMs}`; } catch { return 'none'; } };
+// Tell browsers a file has changed, if its version isn't the one they were last told.
+function noteVersion(ds, buf) {
+  const version = versionOf(buf);
+  const was = lastSeen.get(ds)?.version;
+  lastSeen.set(ds, { stamp: stampOf(ds), version });
+  if (was !== undefined && was !== version) broadcast('change', { file: nameOf(ds), version });
+}
+// Edits made on disk (a spreadsheet, a restored backup) are noticed by checking each file's size
+// and modified time.
+function checkFiles() {
+  for (const ds of Object.values(DATASETS)) {
+    if (ds.busy) continue; // a save is under way; it reports its own version
+    const seen = lastSeen.get(ds);
+    if (seen && seen.stamp === stampOf(ds)) continue;
+    try { noteVersion(ds, readDataset(ds)); } catch (err) { console.error(`Couldn't read ${path.basename(ds.file)}: ${err.message}`); }
+  }
+}
+setInterval(checkFiles, 2000).unref();
+
+// New records get their ids from here, so two people adding at the same moment can't both take the
+// next number. A browser reserves a few at a time (POST /api/ids?file=milestones&n=20). The last
+// id given out per file is kept in ids.json; the next is always above every id in the file too.
+const IDS_FILE = path.join(DATA_DIR, 'ids.json');
+const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates'];
+function reserveIds(file, n) {
+  let issued = {};
+  try { issued = JSON.parse(fs.readFileSync(IDS_FILE, 'utf8')); } catch { /* none issued yet */ }
+  const ds = DATASETS['/api/' + file];
+  const buf = readDataset(ds);
+  const [header = [], ...rows] = buf ? parseCSV(decodeCSV(buf)) : [];
+  const col = header.findIndex(h => h.trim().toLowerCase() === 'id');
+  const inFile = Math.max(0, ...rows.map(r => (/^\d+$/.test((r[col] ?? '').trim()) ? +r[col] : 0)));
+  const first = Math.max(+issued[file] || 0, inFile) + 1;
+  issued[file] = first + n - 1;
+  fs.writeFileSync(IDS_FILE, JSON.stringify(issued, null, 2) + '\n');
+  return Array.from({ length: n }, (_, i) => String(first + i));
+}
+function serveIds(req, res) {
+  const q = new URL(req.url, 'http://x').searchParams;
+  const file = q.get('file'), n = Math.min(500, Math.max(1, +q.get('n') || 20));
+  if (!ID_FILES.includes(file)) { res.writeHead(404); return res.end('Not found'); }
+  let ids;
+  try { ids = reserveIds(file, n); } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: false, error: err.message }));
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({ ok: true, ids }));
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -326,54 +424,57 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname.endsWith('/api/logo')) return serveLogo(req, res);
   if (req.method === 'GET' && /\/api\/history(\/|$)/.test(pathname)) return serveHistory(pathname, res);
   if (req.method === 'GET' && pathname.endsWith('/api/date-changes')) return serveAudit(res);
+  if (req.method === 'GET' && pathname.endsWith('/api/events')) return serveEvents(req, res);
+  if (req.method === 'GET' && pathname.endsWith('/api/versions')) return sendJSON(res, 200, currentVersions());
+  if (req.method === 'POST' && pathname.endsWith('/api/ids')) return serveIds(req, res);
   const ds = datasetFor(pathname);
   if (ds) {
     if (req.method === 'GET') {
-      const send = (err, data) => {
-        if (err && err.code !== 'ENOENT') console.error(`Couldn't read ${path.basename(ds.file)}: ${err.message}`);
-        res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store' });
-        res.end(err ? ds.header : decodeCSV(data));
-      };
-      fs.readFile(ds.file, (err, data) => {
-        if (err && ds.legacy) fs.readFile(ds.legacy, send);
-        else {
-          if (ds.audited && !err) checkOutsideEdits(itemsFrom(decodeCSV(data)));
-          send(err, data);
-        }
-      });
-      return;
+      let buf;
+      try { buf = readDataset(ds); } catch (err) { console.error(`Couldn't read ${path.basename(ds.file)}: ${err.message}`); }
+      const text = buf ? decodeCSV(buf) : ds.header;
+      if (ds.audited && buf) checkOutsideEdits(itemsFrom(text));
+      res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store', 'X-Version': versionOf(buf) });
+      return res.end(text);
     }
     if (req.method === 'POST' || req.method === 'PUT') {
       let body = '';
       req.setEncoding('utf8'); // keeps a character split across chunks intact
       req.on('data', (chunk) => { body += chunk; });
-      // Saves to one file run one at a time, so the date log compares each with the one before.
-      req.on('end', () => { ds.queue = (ds.queue || Promise.resolve()).then(() => new Promise((next) => backupDaily(ds.file, () => {
-        let old = ''; // null: the file couldn't be read, so it isn't checked for outside edits
-        if (ds.audited) try { old = decodeCSV(fs.readFileSync(ds.file)); } catch (e) { if (e.code !== 'ENOENT') old = null; }
-        const tmp = ds.file + '.tmp';
-        fs.writeFile(tmp, body, 'utf8', (err) => {
-          if (err) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: err.message }));
-            return next();
-          }
-          const done = (err2) => {
-            if (err2) console.error(`Couldn't save ${path.basename(ds.file)}: ${err2.message}`);
-            if (!err2 && ds.audited) {
-              try { auditSave(req, old, body); } catch (err3) { console.error(`Couldn't write the date log: ${err3.message}`); }
-            }
-            res.writeHead(err2 ? 500 : 200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: !err2, error: err2 ? err2.message : undefined }));
-            next();
-          };
-          fs.rename(tmp, ds.file, (err2) => {
-            if (!err2) return done();
-            // Windows won't replace a file another program has open; write it in place instead.
-            fs.writeFile(ds.file, body, 'utf8', (err3) => { fs.unlink(tmp, () => {}); done(err3); });
+      // Saves to one file run one at a time, so each is checked against the one before (and the
+      // date log compares each with the one it replaces).
+      req.on('end', () => { ds.queue = (ds.queue || Promise.resolve()).then(() => new Promise((next) => {
+        ds.busy = true;
+        const finish = (status, out) => { sendJSON(res, status, out); ds.busy = false; next(); };
+        let current;
+        try { current = readDataset(ds); } catch (err) { return finish(500, { ok: false, error: err.message }); }
+        const base = req.headers['x-base-version'];
+        if (base && base !== versionOf(current)) {
+          return finish(409, { ok: false, conflict: true, version: versionOf(current), text: current ? decodeCSV(current) : ds.header });
+        }
+        backupDaily(ds.file, () => {
+          // the file being replaced, for the date log ('' when it's new)
+          const old = !ds.audited ? '' : current && fs.existsSync(ds.file) ? decodeCSV(current) : '';
+          const tmp = ds.file + '.tmp';
+          fs.writeFile(tmp, body, 'utf8', (err) => {
+            if (err) return finish(500, { ok: false, error: err.message });
+            const done = (err2) => {
+              if (err2) console.error(`Couldn't save ${path.basename(ds.file)}: ${err2.message}`);
+              if (!err2 && ds.audited) {
+                try { auditSave(req, old, body); } catch (err3) { console.error(`Couldn't write the date log: ${err3.message}`); }
+              }
+              const version = versionOf(Buffer.from(body, 'utf8'));
+              if (!err2) noteVersion(ds, Buffer.from(body, 'utf8'));
+              finish(err2 ? 500 : 200, { ok: !err2, error: err2 ? err2.message : undefined, version });
+            };
+            fs.rename(tmp, ds.file, (err2) => {
+              if (!err2) return done();
+              // Windows won't replace a file another program has open; write it in place instead.
+              fs.writeFile(ds.file, body, 'utf8', (err3) => { fs.unlink(tmp, () => {}); done(err3); });
+            });
           });
         });
-      }))); });
+      })); });
       return;
     }
     res.writeHead(405);
@@ -382,7 +483,14 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res);
 });
 
+function sendJSON(res, status, out) {
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(out));
+}
+
 startAudit();
+checkFiles();
 server.listen(PORT, () => {
   console.log(`${readConfig().title || 'Tracker'} running at http://localhost:${PORT}`);
+  if (DATA_DIR !== __dirname) console.log(`Data in ${DATA_DIR}`);
 });

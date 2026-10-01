@@ -18,6 +18,35 @@ Always open the app through `node server.js`: it serves both the page and the CS
 
 **Backups:** the first time each CSV is saved on a given day, the server copies the day's starting version to `backups/` (e.g. `backups/reports.2026-09-29.csv`), keeping the newest 30 per file. To undo a bad day, copy one back over the CSV and reload.
 
+**Data folder:** the CSVs, the date log, `backups/` and `ids.json` live next to `server.js` unless `DATA_DIR` names another folder (e.g. `DATA_DIR=/home/data node server.js`). It's created if it doesn't exist; a file that isn't there yet starts empty.
+
+## Working together
+
+Any number of people can have the app open and make changes at the same time:
+
+- **Changes show up for everyone within moments.** The server tells every open page when a file changes (over `/api/events`), whether through the app or by editing a CSV on disk, and each page merges the change into what it's showing without a reload. If a proxy holds that connection back, each page also checks every 20 seconds and whenever its tab comes back into view.
+- **Nobody's save overwrites anybody else's.** Every file has a version. A save says which version it was made from, and if someone else has saved since, the server sends the file back instead of writing it. The page then merges the two record by record and field by field and saves again. Two people editing different items, or different fields of the same item, both keep their changes.
+- **When two people change the same field,** the first save is kept. The second person sees **Someone else changed the same things**, listing what clashed (theirs and yours), with **Use mine** to put their own change back. The same goes for something deleted by one person while another was changing it (**Put it back**) or the other way round (**Delete it**). Items that only moved because something they depend on moved aren't listed, since putting the change back moves them again.
+- **Forms save only what you changed in them.** If someone else changes an item while you have its edit dialog open, saving the dialog keeps their changes to the fields you didn't touch. The same applies to reports, the report panel, workspace settings, RAG options and weekly updates.
+- **Undo takes back only your change.** Anything changed since, by you or anyone else, is left as it is.
+- **New records get their ids from the server** (`/api/ids`), so two people adding at the same moment can't both take the same number. The last id given out per file is kept in `ids.json`.
+
+Run **one** copy of the server: two would each keep their own date log counter and only tell their own pages about saves.
+
+## Deploying to Azure
+
+The app runs on Azure App Service as it is: plain Node 18+, nothing to install.
+
+1. Create a **Linux** App Service with a Node 18 or later runtime. Set the startup command to `node server.js`. App Service sets `PORT` itself.
+2. Under **Configuration → Application settings**, set `DATA_DIR` to `/home/data`. `/home` is kept across restarts and redeployments; the app's own folder is replaced on each deploy (and is read-only when run from a package).
+3. Keep the instance count at **1** (scale up, not out). Turn on **Always On** so the server isn't stopped when it's idle.
+4. Deploy the repository (zip deploy, GitHub Actions or local Git). To start with existing data, copy the CSVs (and `date-changes.csv`) into `/home/data` once, e.g. through the Kudu console or the SSH session, then restart.
+5. `config.json` and the logo are read from the app's own folder, so they travel with the code.
+
+To put it behind a corporate sign-in, turn on App Service **Authentication**. The signed-in user's login ID then arrives on every request (the `X-MS-CLIENT-PRINCIPAL-NAME` header), and `changedBy()` in server.js can return it for the date log.
+
+On a Windows App Service, IIS holds back the event stream, so pages fall back to checking every 20 seconds. Linux is recommended.
+
 ## Title and logo
 
 `config.json`, next to `server.js`, sets the name shown at the top of the menu and in the browser tab, and an optional logo:
@@ -48,7 +77,7 @@ The address bar says where you are, so a view can be bookmarked or sent to someo
 
 ### Undo
 
-Deleting (items, reports, weekly updates, a whole workspace), importing, bulk edits, dragging on the chart, quick updates, one-click RAG changes and setting a baseline all happen straight away, and the message at the foot of the window offers **Undo**; so does ⌘/Ctrl+Z when you're not typing in a box. Undo puts back everything as it was before that change and saves it. Closing a form with unsaved changes still asks first, since those changes aren't saved anywhere yet.
+Deleting (items, reports, weekly updates, a whole workspace), importing, bulk edits, dragging on the chart, quick updates, one-click RAG changes and setting a baseline all happen straight away, and the message at the foot of the window offers **Undo**; so does ⌘/Ctrl+Z when you're not typing in a box. Undo puts back what that change altered and saves it; anything changed since, by you or someone else, is kept. Closing a form with unsaved changes still asks first, since those changes aren't saved anywhere yet.
 
 **All workspaces** shows a card per workspace: its RAG, code, program number, owner and area lead, trend, timeline, last report, a RAG breakdown of its items, its milestone overview and counts. Click a card to open it, **Edit** to change it, or **+ New workspace**. A workspace has:
 

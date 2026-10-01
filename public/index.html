@@ -644,6 +644,24 @@
     </form>
   </dialog>
 
+  <!-- ============ CONFLICTS ============ -->
+  <dialog id="conflict-dialog" class="edit-dialog conflict-dialog">
+    <form id="conflict-form" method="dialog">
+      <header class="dlg-head">
+        <span class="type-badge upd">Changed by someone else</span>
+        <h2>Someone else changed the same things</h2>
+        <button type="submit" class="dlg-close" title="Close">✕</button>
+      </header>
+      <p class="cf-intro">Their changes were saved first, so they’re what’s shown now. Choose <b>Use mine</b> to put yours back instead.</p>
+      <ul id="cf-list" class="cf-list"></ul>
+      <footer class="dlg-foot">
+        <button type="button" id="cf-all" class="btn">Use all mine</button>
+        <span class="spacer"></span>
+        <button type="submit" class="btn btn-primary">Keep theirs</button>
+      </footer>
+    </form>
+  </dialog>
+
   <!-- ============ FIND (⌘K) ============ -->
   <dialog id="palette" class="palette" aria-label="Find">
     <div class="pal-search">

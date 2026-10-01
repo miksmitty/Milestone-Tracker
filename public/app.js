@@ -297,8 +297,9 @@ function rowsToItems(rows) {
 }
 
 function nextId() {
-  state.lastId = Math.max(state.lastId, ...allItems().map(m => +m.id || 0)) + 1;
-  return String(state.lastId);
+  const id = takeId('milestones', () => String(Math.max(state.lastId, ...allItems().map(m => +m.id || 0)) + 1));
+  state.lastId = Math.max(state.lastId, +id);
+  return id;
 }
 
 // Match a stored status to the workspace's list (ignoring case). Blank gets the default
@@ -339,14 +340,17 @@ function normaliseShape(v) {
 
 async function loadData() {
   if (location.protocol === 'file:') throw new Error('the page was opened as a file — run node server.js and open the address it prints');
-  const [workspaces, statuses, items, reports, updates, lanes] = await Promise.all(['api/workspaces', 'api/statuses', 'api/milestones', 'api/reports', 'api/updates', 'api/swimlanes'].map(async (u) => {
-    const r = await fetch(u);
+  const texts = await Promise.all(FILE_NAMES.map(async (file) => {
+    const u = `api/${file}`;
+    const r = await fetch(u, { cache: 'no-store' });
     // e.g. a server started before workspaces existed: stop rather than save items under the wrong workspace
     if (!r.ok) throw new Error(`${u} returned ${r.status} ${r.statusText} — the app must be opened through its own server (node server.js), not a separate web server or file://`);
     const text = await r.text();
     if (/^\s*</.test(text)) throw new Error(`${u} returned a web page instead of CSV — something between the browser and node server.js (a proxy or another web server) is answering instead`);
+    synced[file] = { version: r.headers.get('X-Version'), text };
     return text;
   }));
+  const [workspaces, statuses, items, reports, updates, lanes] = texts;
   state.workspaces = rowsToWorkspaces(parseAny(workspaces));
   state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
@@ -357,7 +361,7 @@ async function loadData() {
   state.updates = rowsToUpdates(parseAny(updates));
   state.lanes = rowsToLanes(parseAny(lanes));
   dataLoaded = true;
-  if (created) await saveCSV('api/workspaces', workspacesToCSV(state.workspaces));
+  if (created) await saveWorkspaces();
   state.items = allItems;
   state.reports = allReports;
   state.otherItems = [];
@@ -410,7 +414,7 @@ function saveData(msg, via = 'Items table') {
   const headers = auditHeaders(msg, via);
   knockOn.clear();
   directEdits.clear();
-  return saveCSV('api/milestones', toCSV(allItems()), msg, headers);
+  return saveCSV('milestones', msg, headers);
 }
 function auditHeaders(note, via) {
   const enc = encodeURIComponent;
@@ -419,34 +423,180 @@ function auditHeaders(note, via) {
     'X-Knock-On': [...knockOn].filter(id => !directEdits.has(id)).join(','),
   };
 }
-function saveReports(msg) {
-  return saveCSV('api/reports', reportsToCSV(allReports()), msg);
+const saveReports = (msg) => saveCSV('reports', msg);
+const saveStatuses = (msg) => saveCSV('statuses', msg);
+const saveWorkspaces = (msg) => saveCSV('workspaces', msg);
+const saveUpdates = (msg) => saveCSV('updates', msg);
+const saveLanes = (msg) => saveCSV('swimlanes', msg);
+
+/* ---- working together ---- */
+// Several people can have the app open at once. Each file is held with the version it was read
+// at (synced[file]: { version, text }). A save says which version it was made from; if someone
+// else has saved since, the server sends back the file as it is now, their changes are merged in
+// (mergeFile) and the save is tried again. The server also says whenever a file changes
+// (listenForChanges), and the change is merged in the same way, so everyone sees it within moments.
+//
+// The merge is per record and per field: a field someone else changed is taken from them, unless
+// it was changed here too, to something different — then theirs, saved first, is kept and the
+// conflict is listed for this person, who can put theirs back (showConflicts).
+const synced = {};
+const fieldsOf = (cols) => cols.filter(k => k !== 'id');
+// Each file: how to read it, where its records are held, how to write it, and what a record is called.
+const FILES = {
+  workspaces: {
+    parse: (t) => rowsToWorkspaces(parseAny(t)), all: () => state.workspaces, set: (l) => { state.workspaces = l; },
+    csv: () => workspacesToCSV(state.workspaces), key: (p) => p.id, name: (p) => `Workspace ${p.name}`, quiet: ['updated'],
+  },
+  statuses: { // a workspace's RAG options are one list, merged as a whole
+    parse: (t) => rowsToStatuses(parseAny(t)), all: () => state.statuses, set: (l) => { state.statuses = l; },
+    csv: () => statusesToCSV(state.statuses), key: (g) => g.workspace_id, group: true,
+    name: (g) => `RAG options of ${workspaceById(g.workspace_id)?.name || 'a workspace'}`,
+  },
+  milestones: {
+    parse: (t) => keepCounters(() => rowsToItems(parseAny(t))), all: () => allItems(), set: (l) => setItems(l),
+    csv: () => toCSV(allItems()), key: (m) => m.id, name: (m) => fullLabel(m) || `${T.Item} #${m.id}`,
+  },
+  reports: {
+    parse: (t) => keepCounters(() => rowsToReports(parseAny(t), allItems())), all: () => allReports(), set: (l) => setReports(l),
+    csv: () => reportsToCSV(allReports()), key: (r) => r.id, quiet: ['updated'],
+    name: (r) => `Report on ${allItems().find(m => m.id === r.item_id)?.ref || 'an item'} for ${fmtShort(r.period_end)}`,
+  },
+  updates: {
+    parse: (t) => rowsToUpdates(parseAny(t)), all: () => state.updates, set: (l) => { state.updates = l; },
+    csv: () => updatesToCSV(state.updates), key: (u) => u.id, quiet: ['updated'],
+    name: (u) => `Weekly update for ${[workspaceById(u.workspace_id)?.name, u.swimlane].filter(Boolean).join(' · ')}, w/e ${fmtShort(u.week_ending)}`,
+  },
+  swimlanes: {
+    parse: (t) => rowsToLanes(parseAny(t)), all: () => state.lanes, set: (l) => { state.lanes = l; },
+    csv: () => lanesToCSV(state.lanes), key: (l) => `${l.workspace_id}\u0000${l.name}`, name: (l) => `Swimlane ${l.name}`,
+  },
+};
+const FILE_NAMES = Object.keys(FILES); // in the order they depend on each other
+
+// Reading another copy of a file mustn't move the id counters.
+function keepCounters(fn) {
+  const { lastId, lastReportId } = state;
+  const out = fn();
+  state.lastId = Math.max(lastId, state.lastId);
+  state.lastReportId = Math.max(lastReportId, state.lastReportId);
+  return out;
 }
-function saveStatuses(msg) {
-  return saveCSV('api/statuses', statusesToCSV(state.statuses), msg);
+function setItems(list) {
+  state.items = list.filter(m => m.workspace_id === state.workspaceId);
+  state.otherItems = list.filter(m => m.workspace_id !== state.workspaceId);
 }
-function saveWorkspaces(msg) {
-  return saveCSV('api/workspaces', workspacesToCSV(state.workspaces), msg);
-}
-function saveUpdates(msg) {
-  return saveCSV('api/updates', updatesToCSV(state.updates), msg);
-}
-function saveLanes(msg) {
-  return saveCSV('api/swimlanes', lanesToCSV(state.lanes), msg);
+function setReports(list) {
+  state.reports = list.filter(r => r.workspace_id === state.workspaceId);
+  state.otherReports = list.filter(r => r.workspace_id !== state.workspaceId);
 }
 
-function saveCSV(url, body, msg, headers = {}) { // body is snapshotted by the caller, even if the queue is busy
+// Equal values; a field that's missing counts as blank.
+function same(a, b) {
+  if (a === b) return true;
+  const obj = (x) => x && typeof x === 'object';
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((x, i) => same(x, b[i]));
+  if (obj(a) && obj(b) && !Array.isArray(a) && !Array.isArray(b)) return [...new Set([...Object.keys(a), ...Object.keys(b)])].every(k => same(a[k] ?? '', b[k] ?? ''));
+  return JSON.stringify(a ?? '') === JSON.stringify(b ?? '');
+}
+// A grouped file's records are its lists (one per workspace), and back.
+function grouped(f, list) {
+  if (!f.group) return list;
+  const groups = new Map();
+  for (const r of list) {
+    if (!groups.has(r.workspace_id)) groups.set(r.workspace_id, { workspace_id: r.workspace_id, rows: [] });
+    groups.get(r.workspace_id).rows.push(r);
+  }
+  return [...groups.values()];
+}
+const ungrouped = (f, recs) => (!f.group ? recs : recs.flatMap(g => g.rows));
+
+// Merge two sets of changes to the same starting point: `mine` (made here) and `theirs` (saved by
+// someone else). Records are matched by key. The result keeps theirs' order, with records added
+// here placed after the one they followed. Records made here are updated in place, so anything
+// holding one (an open form) still has it.
+function merge3(f, baseList, mineList, theirsList) {
+  const [base, mine, theirs] = [baseList, mineList, theirsList].map(l => new Map(grouped(f, l).map(r => [f.key(r), r])));
+  const conflicts = [];
+  const out = new Map();
+  const note = (kind, rec, extra = {}) => conflicts.push({ kind, key: f.key(rec), name: f.name(rec), ...extra });
+  for (const [k, t] of theirs) {
+    const b = base.get(k), m = mine.get(k);
+    if (!m) {
+      if (!b) out.set(k, t); // added by them
+      else if (!same(b, t)) { out.set(k, t); note('kept', t, { mine: b }); } // deleted here, changed by them: kept
+      continue; // deleted here
+    }
+    const fields = [...new Set([...Object.keys(b || {}), ...Object.keys(m), ...Object.keys(t)])];
+    const merged = {};
+    for (const x of fields) {
+      const bv = b ? b[x] : '', mv = m[x], tv = t[x];
+      if (same(mv, bv) || same(mv, tv)) merged[x] = tv;
+      else if (same(tv, bv)) merged[x] = mv;
+      else if (f.quiet?.includes(x)) merged[x] = String(mv) > String(tv) ? mv : tv;
+      else { merged[x] = tv; note('field', t, { field: x, mine: mv, theirs: tv }); }
+    }
+    out.set(k, Object.assign(m, structuredClone(merged)));
+  }
+  // Records only here: added here, or deleted by them.
+  let prev = null;
+  const after = new Map(); // key → records added here that follow it
+  for (const [k, m] of mine) {
+    if (!theirs.has(k)) {
+      const b = base.get(k);
+      if (!b) { if (!after.has(prev)) after.set(prev, []); after.get(prev).push([k, m]); }
+      else if (!same(b, m)) note('deleted', m, { mine: m }); // changed here, deleted by them: stays deleted
+    }
+    if (out.has(k)) prev = k;
+  }
+  const result = [...(after.get(null) || []).map(([, r]) => r)];
+  for (const [k, r] of out) result.push(r, ...(after.get(k) || []).map(([, x]) => x));
+  for (const [k, list] of after) if (k !== null && !out.has(k)) result.push(...list.map(([, x]) => x));
+  return { list: ungrouped(f, result), conflicts };
+}
+
+// A form saves only what was changed in it, so a field someone else changed while it was open keeps
+// their value: the form's values, less those still as they were when it opened (`was`).
+const changedFrom = (v, was) => (!was ? v : Object.fromEntries(Object.entries(v).filter(([k, x]) => !same(x, was[k] ?? ''))));
+
+// Bring someone else's version of a file into what's on screen, keeping the changes made here.
+// Items that only moved here because something they depend on moved (`knockOn`) aren't listed as
+// conflicts: putting back the change that moved them moves them again.
+function mergeFile(file, text, version, knockOn = new Set()) {
+  const f = FILES[file];
+  if (file === 'milestones') syncEditorToState();
+  const { list, conflicts } = merge3(f, f.parse(synced[file].text), f.all(), f.parse(text));
+  f.set(list);
+  synced[file] = { version, text };
+  return conflicts.filter(c => !(c.kind === 'field' && knockOn.has(c.key))).map(c => ({ ...c, file }));
+}
+
+// Every change is written back to its CSV. Saves are queued so they reach the server in order, and
+// each writes the file as it is when its turn comes, so a merge in between is never undone.
+function saveCSV(file, msg, headers = {}) {
   if (!dataLoaded) {
     flashStatus('Not saved — the data hasn’t loaded, so saving would overwrite it', false, true);
     return Promise.resolve(false);
   }
   saveQueue = saveQueue.then(async () => {
     flashStatus('Saving…', null);
+    const conflicts = [];
     try {
-      const res = await fetch(url, { method: 'POST', body, headers });
-      const out = await res.json();
-      if (!out.ok) throw new Error(out.error || 'server error');
-      flashStatus([msg, 'Saved ✓'].filter(Boolean).join(' · '), true);
+      for (let tries = 0; ; tries++) {
+        const body = FILES[file].csv();
+        if (body === synced[file].text) break; // nothing new (an earlier save already wrote it)
+        const res = await fetch(`api/${file}`, { method: 'POST', body, headers: { ...headers, 'X-Base-Version': synced[file].version } });
+        const out = await res.json();
+        if (res.status === 409 && out.conflict && tries < 5) {
+          conflicts.push(...mergeFile(file, out.text, out.version, new Set((headers['X-Knock-On'] || '').split(','))));
+          afterMerge();
+          continue;
+        }
+        if (!out.ok) throw new Error(out.conflict ? 'others kept changing it at the same time' : out.error || 'server error');
+        synced[file] = { version: out.version, text: body };
+        break;
+      }
+      flashStatus([msg, conflicts.length ? 'Saved, with others’ changes' : 'Saved ✓'].filter(Boolean).join(' · '), true);
+      if (conflicts.length) showConflicts(conflicts);
       return true;
     } catch (err) {
       flashStatus(`Save failed (${err.message}) — your changes are still on screen`, false, true);
@@ -454,6 +604,171 @@ function saveCSV(url, body, msg, headers = {}) { // body is snapshotted by the c
     }
   });
   return saveQueue;
+}
+
+// Fetch the files that have changed on the server and merge them in. Runs in the save queue, so it
+// never overlaps a save.
+function pullChanges(versions) {
+  saveQueue = saveQueue.then(async () => {
+    const conflicts = [];
+    let changed = false;
+    try {
+      for (const file of FILE_NAMES) {
+        if (!synced[file] || (versions && versions[file] === synced[file].version)) continue;
+        const res = await fetch(`api/${file}`, { cache: 'no-store' });
+        if (!res.ok) continue;
+        const version = res.headers.get('X-Version'), text = await res.text();
+        if (version === synced[file].version) continue;
+        conflicts.push(...mergeFile(file, text, version, new Set([...knockOn].filter(id => !directEdits.has(id)))));
+        changed = true;
+      }
+    } catch { return; } // offline for now: the next check tries again
+    if (!changed) return;
+    afterMerge();
+    flashStatus('Updated with changes from others', true);
+    if (conflicts.length) showConflicts(conflicts);
+  });
+  return saveQueue;
+}
+
+// Redraw after a merge, keeping the place: the workspace (unless it's gone), the chart's range,
+// the Items grid's order and the focus.
+function afterMerge() {
+  const range = [state.rangeStart, state.rangeEnd];
+  const id = workspaceById(state.workspaceId) ? state.workspaceId : state.workspaces[0]?.id;
+  if (!id) return;
+  if (id !== state.workspaceId) selectWorkspace(id);
+  else { T = makeTerms(currentWorkspace()); useStatuses(id); }
+  if (id === state.workspaceId) [state.rangeStart, state.rangeEnd] = range;
+  applyWorkspaceChrome();
+  rerenderCurrentView();
+  if (isShown('editor')) refreshEditor();
+  else document.getElementById('editor-body').innerHTML = ''; // a hidden grid's old values mustn't be synced back
+}
+
+// Hear about others' saves as they happen. If the event stream can't get through (a proxy that
+// holds it back), checking the versions every 20 seconds, and on coming back to the tab, still
+// catches them.
+function listenForChanges() {
+  const onVersions = (e) => { try { pullChanges(JSON.parse(e.data)); } catch { /* malformed: ignore */ } };
+  if (window.EventSource) {
+    const es = new EventSource('api/events');
+    es.addEventListener('versions', onVersions);
+    es.addEventListener('change', (e) => {
+      try { const { file, version } = JSON.parse(e.data); if (synced[file] && version !== synced[file].version) pullChanges({ ...versionsNow(), [file]: version }); } catch { /* ignore */ }
+    });
+  }
+  const check = async () => {
+    try { const res = await fetch('api/versions', { cache: 'no-store' }); if (res.ok) pullChanges(await res.json()); } catch { /* offline */ }
+  };
+  setInterval(() => { if (!document.hidden) check(); }, 20000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+}
+const versionsNow = () => Object.fromEntries(FILE_NAMES.map(f => [f, synced[f]?.version]));
+
+// What was changed both here and by someone else. Theirs is showing; "Use mine" puts this person's
+// change back (and saves it), which is then just another change for everyone else to receive.
+const FIELD_NAMES = {
+  status: 'RAG', start: 'Start', end: 'End', ref: 'Ref', deps: 'Depends on', parent: 'Rolls up to', subswimlane: 'Sub-swimlane',
+  baseline_start: 'Baseline start', baseline_end: 'Baseline end', gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
+  exec_summary: 'Executive summary', next_steps: 'Next steps', get_to_green: 'Get to green plan', period_end: 'Period ending',
+  week_ending: 'Week ending', lead: 'Area lead', author: 'Author', number: 'Program number', rows: 'RAG options',
+  item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task',
+};
+const fieldName = (k) => FIELD_NAMES[k] || k[0].toUpperCase() + k.slice(1).replace(/_/g, ' ');
+function shownValue(v, field) {
+  if (field === 'rows') return v.map(x => x.name).join(', ');
+  if (Array.isArray(v)) v = v.join(', ');
+  const t = String(v ?? '').trim();
+  return t ? (t.length > 240 ? t.slice(0, 240) + '…' : t) : '(blank)';
+}
+let conflictList = [];
+// One row per record, with each field that clashed; a milestone's start and end show as its date.
+function conflictGroups() {
+  const groups = new Map();
+  for (const c of conflictList) {
+    const k = `${c.file}\u0000${c.key}`;
+    if (!groups.has(k)) groups.set(k, { file: c.file, key: c.key, name: c.name, kind: c.kind, list: [] });
+    groups.get(k).list.push(c);
+  }
+  return [...groups.values()];
+}
+function showConflicts(list) {
+  const dlg = document.getElementById('conflict-dialog');
+  conflictList = dlg.open ? [...conflictList, ...list] : list;
+  const groups = conflictGroups();
+  const row = (g, i) => {
+    const done = g.list.every(c => c.done);
+    let vals;
+    if (g.kind === 'field') {
+      const fields = g.list.filter(c => !(c.field === 'start' && g.list.some(e => e.field === 'end' && same(e.mine, c.mine) && same(e.theirs, c.theirs))));
+      vals = fields.map(c => {
+        const label = c.field === 'end' && fields.length < g.list.length ? 'Date' : fieldName(c.field);
+        return `<span>${escAttr(label)}</span><span>Theirs: ${escAttr(shownValue(c.theirs, c.field))}<br>Yours: ${escAttr(shownValue(c.mine, c.field))}</span>`;
+      }).join('');
+    } else vals = `<span></span><span>${g.kind === 'deleted' ? 'They deleted it while you were changing it.' : 'They changed it while you were deleting it, so it’s been kept.'}</span>`;
+    const label = g.kind === 'deleted' ? 'Put it back' : g.kind === 'kept' ? 'Delete it' : 'Use mine';
+    return `<li class="${done ? 'done' : ''}"><div class="cf-what">${escAttr(g.name)}</div><div class="cf-vals">${vals}</div>
+      <button type="button" class="btn btn-sm" data-cf="${i}">${label}</button></li>`;
+  };
+  document.getElementById('cf-list').innerHTML = groups.map(row).join('');
+  document.getElementById('cf-all').hidden = groups.filter(g => !g.list.every(c => c.done)).length < 2;
+  if (!dlg.open && groups.length) dlg.showModal();
+}
+function useMine(groups) {
+  const files = new Set();
+  for (const g of groups) {
+    const todo = g.list.filter(c => !c.done);
+    if (!todo.length) continue;
+    const f = FILES[g.file];
+    const recs = grouped(f, f.all());
+    const rec = recs.find(r => f.key(r) === g.key);
+    if (g.kind === 'field' && rec) {
+      const changes = Object.fromEntries(todo.map(c => [c.field, structuredClone(c.mine)]));
+      if (g.file === 'milestones' && state.items.includes(rec)) updateItem(rec, changes); // moves what depends on it too
+      else Object.assign(rec, changes);
+    } else if (g.kind === 'deleted' && !rec) recs.push(structuredClone(todo[0].mine));
+    else if (g.kind === 'kept' && rec) recs.splice(recs.indexOf(rec), 1);
+    else continue;
+    f.set(ungrouped(f, recs));
+    if (g.kind === 'kept' && g.file === 'milestones') removeItem(g.key); // and its links
+    for (const c of todo) c.done = true;
+    files.add(g.file);
+  }
+  afterMerge();
+  for (const file of files) file === 'milestones' ? saveData('Your change put back', 'Conflict') : saveCSV(file, 'Your change put back');
+  showConflicts([]);
+  if (conflictList.every(c => c.done)) document.getElementById('conflict-dialog').close();
+}
+function wireConflicts() {
+  document.getElementById('cf-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-cf]');
+    if (b) useMine([conflictGroups()[+b.dataset.cf]]);
+  });
+  document.getElementById('cf-all').onclick = () => useMine(conflictGroups());
+}
+
+/* ---- ids ---- */
+// New records take their ids from the server, so ids stay unique however many people are adding at
+// once. One is fetched when it's needed (the caller waits, briefly); during a burst, such as an
+// import, a block is fetched so the rest come straight from hand. Ids still in hand when the page
+// closes are never used, so a burst can leave a gap in the numbers. If the server can't be reached,
+// the next number after the highest seen is used.
+const idPool = { workspaces: [], milestones: [], reports: [], updates: [] };
+const idLastTaken = {};
+function takeId(file, fallback) {
+  const burst = Date.now() - (idLastTaken[file] || 0) < 2000;
+  idLastTaken[file] = Date.now();
+  if (!idPool[file].length) {
+    try {
+      const x = new XMLHttpRequest();
+      x.open('POST', `api/ids?file=${file}&n=${burst ? 25 : 1}`, false); // waits: the caller needs the id now
+      x.send();
+      const o = JSON.parse(x.responseText);
+      if (o.ok) idPool[file].push(...o.ids);
+    } catch { /* server unreachable */ }
+  }
+  return idPool[file].shift() ?? fallback();
 }
 
 // Debounced save for table edits, so a burst of changes becomes one write.
@@ -487,6 +802,7 @@ function flashStatus(msg, ok, sticky) {
 
 const undoStack = []; // [{ label, snap }], newest last
 const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'lanes'];
+const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', lanes: 'swimlanes' };
 
 function snapshotData() {
   syncEditorToState();
@@ -499,7 +815,7 @@ function snapshotData() {
 
 // Call with a snapshot taken before the change, once the change is made.
 function offerUndo(snap, label) {
-  undoStack.push({ label, snap });
+  undoStack.push({ label, snap, after: snapshotData() });
   if (undoStack.length > 30) undoStack.shift();
   showToast(label, true);
   updateUndoButton();
@@ -521,16 +837,27 @@ async function undoLast() {
   document.querySelectorAll('dialog[open]').forEach(d => d.close());
   clearTimeout(saveTimer);
   saveTimer = null;
+  // Only this change is taken back: anything changed since (by others, or here in another way) is
+  // kept, by merging "from after the change back to before it" into how things are now.
   const now = snapshotData();
-  const changed = UNDO_KEYS.filter(k => now[k] !== u.snap[k]);
-  const s = u.snap;
-  state.workspaces = JSON.parse(s.workspaces);
-  state.statuses = JSON.parse(s.statuses);
-  state.updates = JSON.parse(s.updates);
-  state.lanes = JSON.parse(s.lanes);
+  const s = u.snap, back = {};
+  let kept = 0;
+  for (const k of UNDO_KEYS) {
+    if (now[k] === u.after[k]) back[k] = JSON.parse(s[k]);
+    else {
+      const r = merge3(FILES[UNDO_FILES[k]], JSON.parse(u.after[k]), JSON.parse(s[k]), JSON.parse(now[k]));
+      back[k] = r.list;
+      kept += r.conflicts.length;
+    }
+  }
+  const changed = UNDO_KEYS.filter(k => now[k] !== JSON.stringify(back[k]));
+  state.workspaces = back.workspaces;
+  state.statuses = back.statuses;
+  state.updates = back.updates;
+  state.lanes = back.lanes;
   state.items = []; state.reports = [];
-  state.otherItems = JSON.parse(s.items);
-  state.otherReports = JSON.parse(s.reports);
+  state.otherItems = back.items;
+  state.otherReports = back.reports;
   document.getElementById('editor-body').innerHTML = ''; // so a sync can't write the undone values back
   const range = [state.rangeStart, state.rangeEnd];
   selectWorkspace(state.workspaces.some(p => p.id === state.workspaceId) ? state.workspaceId : s.workspaceId);
@@ -538,7 +865,7 @@ async function undoLast() {
   applyWorkspaceChrome();
   rerenderCurrentView();
   if (isShown('editor')) renderEditor();
-  showToast(`Undone: ${u.label}`);
+  showToast(`Undone: ${u.label}${kept ? ' · anything changed again since was left as it is' : ''}`);
   knockOn.clear();
   directEdits.clear();
   const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, lanes: saveLanes };
@@ -1819,6 +2146,7 @@ function hideTip() {
 /* ================= edit dialog ================= */
 
 let editing = null; // item being edited; null when adding a new one
+let editOpened = null; // its values when the dialog opened
 let edDeps = [];
 
 const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent',
@@ -1837,6 +2165,7 @@ const itemLinks = (m) => Object.entries({ GitLab: m.gitlab_url, 'Use case': m.us
 function openEditDialog(m) {
   hideTip();
   editing = m;
+  editOpened = m && structuredClone(m);
   const f = document.getElementById('edit-form').elements;
   const last = state.items.at(-1);
   const today = fmtISO(new Date());
@@ -1936,13 +2265,14 @@ async function submitEditDialog(e) {
   const clash = changes.ref && state.items.find(x => x !== editing && x.ref === changes.ref);
   if (clash) return (err.textContent = `Ref ${changes.ref} is already used by “${clash.title}”.`);
 
+  if (editing && !state.items.includes(editing)) return (err.textContent = `Someone else has just deleted this ${T.item}.`);
   const snap = snapshotData();
   let m = editing;
   if (!m) {
     m = { id: nextId(), workspace_id: state.workspaceId, ...changes, parent: '', deps: [] };
     state.items.push(m);
   }
-  const res = updateItem(m, changes);
+  const res = updateItem(m, changedFrom(changes, editOpened));
   if (res.error) {
     if (!editing) removeItem(m.id);
     return (err.textContent = res.error);
@@ -2686,8 +3016,9 @@ function reportsToCSV(reports) {
 }
 
 function nextReportId() {
-  state.lastReportId = Math.max(state.lastReportId, ...allReports().map(r => +r.id || 0)) + 1;
-  return String(state.lastReportId);
+  const id = takeId('reports', () => String(Math.max(state.lastReportId, ...allReports().map(r => +r.id || 0)) + 1));
+  state.lastReportId = Math.max(state.lastReportId, +id);
+  return id;
 }
 
 const itemById = (id) => state.items.find(m => m.id === id);
@@ -3306,6 +3637,7 @@ function htmlToMd(root) {
 /* ---- report dialog ---- */
 
 let rpEditing = null;  // report being edited; null for a new one
+let rpOpened = null;   // its values when the dialog opened
 let rpItemId = '';
 let rpDateTouched = false; // stop re-defaulting the period once the user picks a date
 let rpPrevIdx = 0;         // which earlier report the side panel shows (0 = the one just before)
@@ -3314,6 +3646,7 @@ function openReportDialog({ report = null, itemId = '' } = {}) {
   hideTip();
   hideQuick();
   rpEditing = report;
+  rpOpened = report && { ...report };
   rpItemId = report ? report.item_id : itemId;
   rpDateTouched = !!report;
   rpPrevIdx = 0;
@@ -3501,7 +3834,8 @@ async function submitReport(e) {
 
   const now = new Date().toISOString();
   const isNew = !rpEditing;
-  if (rpEditing) Object.assign(rpEditing, v, { updated: now });
+  if (rpEditing && !state.reports.includes(rpEditing)) return (err.textContent = 'Someone else has just deleted this report.');
+  if (rpEditing) Object.assign(rpEditing, changedFrom(v, rpOpened), { updated: now });
   else {
     const r = { id: nextReportId(), workspace_id: state.workspaceId, item_id: rpItemId, ...v, created: now, updated: now };
     state.reports.push(r);
@@ -3931,9 +4265,11 @@ function paneProblem(r, v) {
   return reportProblem(v) || (clash ? `There’s already a report on this ${T.item} for the period ending ${fmtNice(v.period_end)}.` : '');
 }
 
+let paneOpened = null; // the report as it was when editing began
 function editPane(focusKey) {
   if (!selectedReport()) return;
   paneEditing = true;
+  paneOpened = { ...selectedReport() };
   renderPane(focusKey);
 }
 
@@ -3958,10 +4294,10 @@ function savePane() {
     return false;
   }
   const sync = !document.getElementById('pane-sync').hidden && paneForm().elements.sync_status.checked;
-  const changed = paneDirty(r, v);
+  const changed = paneDirty(paneOpened || r, v);
   paneEditing = false;
   if (changed) {
-    Object.assign(r, v, { period_start: periodStart(v.period_end, v.cadence), updated: new Date().toISOString() });
+    Object.assign(r, changedFrom({ ...v, period_start: periodStart(v.period_end, v.cadence) }, paneOpened), { updated: new Date().toISOString() });
     const m = itemById(r.item_id);
     if (sync) {
       m.status = v.status;
@@ -4757,9 +5093,10 @@ function workspacesToCSV(workspaces) {
 }
 
 function newWorkspace(values = {}) {
-  state.lastWorkspaceId = Math.max(state.lastWorkspaceId, ...state.workspaces.map(p => +p.id || 0)) + 1;
+  const id = takeId('workspaces', () => String(Math.max(state.lastWorkspaceId, ...state.workspaces.map(p => +p.id || 0)) + 1));
+  state.lastWorkspaceId = Math.max(state.lastWorkspaceId, +id);
   const now = new Date().toISOString();
-  const p = { id: String(state.lastWorkspaceId), created: now, updated: now, status: 'Not Started', ...DEFAULT_TERMS };
+  const p = { id, created: now, updated: now, status: 'Not Started', ...DEFAULT_TERMS };
   for (const k of WORKSPACE_FIELDS) p[k] ??= '';
   return Object.assign(p, values);
 }
@@ -4951,10 +5288,12 @@ function renderWorkspaces() {
 /* ---- workspace dialog ---- */
 
 let pgEditing = null; // workspace being edited; null for a new one
+let pgOpened = null;  // its values when the dialog opened
 
 function openWorkspaceDialog(p) {
   hideQuick();
   pgEditing = p;
+  pgOpened = p && { ...p };
   const f = document.getElementById('workspace-form').elements;
   const v = p || { ...newWorkspaceDefaults() };
   // Default terms show as placeholders, so a new word can be typed straight in.
@@ -4980,6 +5319,7 @@ function openWorkspaceDialog(p) {
 // A status that's in use can only be deleted by choosing another to move its items and reports to.
 
 let pgStatuses = [];
+let pgStatusesOpened = []; // the workspace's RAG options when the dialog opened
 
 function statusUsage(workspaceId) {
   const used = {};
@@ -4989,6 +5329,7 @@ function statusUsage(workspaceId) {
 
 function loadPgStatuses(p) {
   const used = p ? statusUsage(p.id) : {};
+  pgStatusesOpened = statusesFor(p?.id);
   pgStatuses = statusesFor(p?.id).map(st => ({
     orig: p ? st.name : null, name: st.name, color: st.color, description: st.description,
     get_to_green: st.get_to_green, is_default: st.is_default, used: used[st.name] || 0, deleted: false, replace: null,
@@ -5150,7 +5491,8 @@ function applyPgStatuses(workspaceId) {
     get_to_green: !!r.get_to_green, is_default: !!r.is_default,
   }));
   const key = (l) => JSON.stringify(l.map(s => [s.name, s.color, s.description, !!s.get_to_green, !!s.is_default]));
-  const listChanged = key(next) !== key(statusesFor(workspaceId));
+  // Changed in the dialog (not just different from now: someone else may have changed it since it opened)
+  const listChanged = key(next) !== key(pgStatusesOpened) && key(next) !== key(statusesFor(workspaceId));
   if (listChanged) {
     state.statuses = state.statuses.filter(s => s.workspace_id !== workspaceId);
     if (key(next) !== key(DEFAULT_STATUSES)) state.statuses.push(...next); // the standard list needs no rows
@@ -5190,7 +5532,7 @@ async function submitWorkspaceDialog(e) {
   const p = pgEditing || newWorkspace();
   if (!pgEditing) state.workspaces.push(p);
   const res = applyPgStatuses(p.id);
-  Object.assign(p, v, { updated: new Date().toISOString() });
+  Object.assign(p, changedFrom(v, pgOpened), { updated: new Date().toISOString() });
   const saves = [saveWorkspaces(pgEditing ? 'Workspace saved' : 'Workspace created')];
   if (res.listChanged) saves.push(saveStatuses());
   if (res.records) saves.push(saveData('', 'Workspace settings'), saveReports());
@@ -5296,7 +5638,7 @@ function rowsToUpdates(rows) {
 function updatesToCSV(updates) {
   return [UPDATE_COLUMNS.map(csvName).join(','), ...updates.map(u => UPDATE_COLUMNS.map(k => csvEscape(u[k])).join(','))].join('\n') + '\n';
 }
-const nextUpdateId = () => String(Math.max(0, ...state.updates.map(u => +u.id || 0)) + 1);
+const nextUpdateId = () => takeId('updates', () => String(Math.max(0, ...state.updates.map(u => +u.id || 0)) + 1));
 
 function rowsToLanes(rows) {
   if (!rows.length) return [];
@@ -5428,6 +5770,7 @@ function downloadOverviewCSV(forLane) {
 
 let upSubject = null;   // {p, lane, rec, label} being updated
 let upEditing = null;   // update being edited; null for a new one
+let upOpened = null, upRecOpened = null; // it, and the area lead and trend, as the dialog showed them
 let upTrendTouched = false;
 const RAG_RANK = { red: 0, amber: 1, green: 2, complete: 3 };
 
@@ -5444,6 +5787,7 @@ function openUpdateDialog(sub) {
     <label><input type="radio" name="trend" value="${t.name}" />${trendArrow(t)}</label>`).join('');
   f.week_ending.value = defaultPeriodEnd('Weekly');
   f.lead.value = sub.rec.lead;
+  upRecOpened = { lead: sub.rec.lead, trend: sub.rec.trend };
   upEditing = null;
   loadUpdateWeek(true);
   document.getElementById('up-error').textContent = '';
@@ -5469,6 +5813,7 @@ function loadUpdateWeek(opening) {
     edLoad(f.summary);
   }
   upEditing = found;
+  upOpened = found && { ...found };
   upTrendTouched = !!rec.trend && !!found;
   for (const r of f.trend) r.checked = r.value === rec.trend;
   if (!upTrendTouched) suggestTrend();
@@ -5504,11 +5849,12 @@ async function submitUpdate(e) {
   const { p, lane, rec } = upSubject;
   const now = new Date().toISOString();
   const v = { week_ending: week, status, summary: f.summary.value.trim(), author: f.author.value.trim(), updated: now };
-  if (upEditing) Object.assign(upEditing, v);
+  if (upEditing && !state.updates.includes(upEditing)) return (err.textContent = 'Someone else has just deleted this update.');
+  if (upEditing) Object.assign(upEditing, changedFrom(v, upOpened), { updated: now });
   else state.updates.push({ id: nextUpdateId(), workspace_id: p.id, swimlane: lane, created: now, ...v });
   const saves = [saveUpdates(upEditing ? 'Update saved' : 'Update submitted')];
-  const changes = { lead: f.lead.value.trim(), trend: f.trend.value };
-  if (changes.lead !== rec.lead || changes.trend !== rec.trend) {
+  const changes = changedFrom({ lead: f.lead.value.trim(), trend: f.trend.value }, upRecOpened);
+  if (Object.keys(changes).length) {
     Object.assign(rec, changes);
     if (lane) {
       if (!state.lanes.includes(rec)) state.lanes.push(rec);
@@ -6380,6 +6726,7 @@ function wireEvents() {
   wireBulk();
 
   wireReports();
+  wireConflicts();
   wireChanges();
   wireDates();
   wirePalette();
@@ -6402,9 +6749,10 @@ function wireEvents() {
     if (saveTimer === null || !dataLoaded) return;
     syncEditorToState();
     const body = toCSV(allItems());
-    // keepalive carries the date log's headers; a beacon can't, so it's only used for big files
-    if (body.length < 60000) fetch('api/milestones', { method: 'POST', body, headers: auditHeaders(pendingMsg, 'Items table'), keepalive: true });
-    else navigator.sendBeacon('api/milestones', body);
+    // keepalive carries the version it's based on, so it can't overwrite someone else's save (it's
+    // turned away instead), and the date log's headers. Too big for keepalive, it's not sent.
+    const headers = { ...auditHeaders(pendingMsg, 'Items table'), 'X-Base-Version': synced.milestones.version };
+    if (body.length < 60000) fetch('api/milestones', { method: 'POST', body, headers, keepalive: true });
   });
 
   // Auto-fit while the user hasn't chosen a zoom; re-render otherwise.
@@ -6466,4 +6814,5 @@ async function loadConfig() {
   routeReady = true;
   writeHash();
   window.addEventListener('hashchange', () => { if (location.hash !== lastHash) followHash(); });
+  listenForChanges();
 })();

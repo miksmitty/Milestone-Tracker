@@ -308,6 +308,21 @@ tr.shifted td { animation: shifted 2.5s ease-out; }
 .dlg-error { margin-top: 6px; font-size: 12.5px; font-weight: 600; color: var(--accent); min-height: 1em; }
 .dlg-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .spacer { flex: 1; }
+
+/* someone else changed the same things */
+#conflict-form { padding: 18px 20px; }
+.cf-intro { font-size: 13px; color: var(--text-2); margin-bottom: 12px; }
+.cf-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.cf-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
+.cf-list li:first-child { border-top: 0; }
+.cf-what { font-size: 13px; font-weight: 600; color: var(--text); }
+.cf-what small { font-weight: 400; color: var(--muted); }
+.cf-vals { grid-column: 1; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font-size: 12.5px; }
+.cf-vals span:nth-child(odd) { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding-top: 1px; }
+.cf-vals span:nth-child(even) { color: var(--text-2); overflow-wrap: anywhere; white-space: pre-line; }
+.cf-list .btn { grid-column: 2; grid-row: 1 / span 2; }
+.cf-list li.done { opacity: .6; }
+.cf-list li.done .btn { visibility: hidden; }
 .btn-danger { color: var(--accent); }
 .btn-danger:hover { background: var(--tint); border-color: var(--tint-border); }
 @media (max-width: 560px) {
