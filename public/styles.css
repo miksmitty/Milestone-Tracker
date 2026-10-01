@@ -990,6 +990,8 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 #gantt-container svg.link-focus .gantt-link.hl { opacity: .85; stroke-width: 1.8; }
 #gantt-container svg.link-focus .gantt-link.direct { opacity: 1; stroke-width: 2.4; }
 #gantt-container svg.link-focus .gantt-item.dim { opacity: .3; }
+#gantt-container svg.link-focus .gantt-item.lit > .gantt-shape { filter: url(#ms-glow); }
+#gantt-container svg.link-focus .gantt-item.focus > .gantt-shape { filter: url(#ms-glow-strong); }
 
 /* ---------- toast (with Undo) ---------- */
 .toast {

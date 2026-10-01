@@ -991,6 +991,7 @@ function drawShape(parent, shape, cx, cy, status, s) {
   el.setAttribute('stroke', c.dark);
   el.setAttribute('stroke-width', '1.4');
   el.setAttribute('filter', 'url(#ms-shadow)');
+  el.setAttribute('class', 'gantt-shape');
   parent.appendChild(el);
 }
 
@@ -1080,6 +1081,20 @@ function renderGantt() {
   const f = svgEl('filter', { id: 'ms-shadow', x: '-40%', y: '-40%', width: '180%', height: '180%' });
   f.appendChild(svgEl('feDropShadow', { dx: 0, dy: 1.2, stdDeviation: 1.2, 'flood-color': G.shadow, 'flood-opacity': G.shadowOpacity }));
   defs.appendChild(f);
+  // glows for an item and its chain while it's picked out (see focusLinks): a soft halo in the link colour
+  for (const [id, blur, opacity] of [['ms-glow', 3, 0.75], ['ms-glow-strong', 4.5, 1]]) {
+    const gf = svgEl('filter', { id, x: '-60%', y: '-60%', width: '220%', height: '220%' });
+    gf.appendChild(svgEl('feMorphology', { in: 'SourceAlpha', operator: 'dilate', radius: 1.5, result: 'grow' }));
+    gf.appendChild(svgEl('feGaussianBlur', { in: 'grow', stdDeviation: blur, result: 'blur' }));
+    gf.appendChild(svgEl('feFlood', { 'flood-color': G.links.dep, 'flood-opacity': opacity }));
+    gf.appendChild(svgEl('feComposite', { operator: 'in', in2: 'blur', result: 'glow' }));
+    const merge = svgEl('feMerge', {});
+    merge.appendChild(svgEl('feMergeNode', { in: 'glow' }));
+    merge.appendChild(svgEl('feMergeNode', { in: 'glow' }));
+    merge.appendChild(svgEl('feMergeNode', { in: 'SourceGraphic' }));
+    gf.appendChild(merge);
+    defs.appendChild(gf);
+  }
   for (const [id, color] of Object.entries(G.links)) {
     const mk = svgEl('marker', { id: `arrow-${id}`, viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: 'auto' });
     mk.appendChild(svgEl('path', { d: 'M 0 0 L 8 4 L 0 8 Z', fill: color }));
@@ -1259,7 +1274,7 @@ function renderGantt() {
       const bh = rm.barH;
       g.appendChild(svgEl('rect', {
         x: x1, y: cy - bh / 2, width: Math.max(2, x2 - x1), height: bh, rx: Math.min(5, bh / 3),
-        fill: `url(#${gradId(m.status)})`, stroke: c.dark, 'stroke-width': 1.2, filter: 'url(#ms-shadow)',
+        fill: `url(#${gradId(m.status)})`, stroke: c.dark, 'stroke-width': 1.2, filter: 'url(#ms-shadow)', class: 'gantt-shape',
       }));
       if (m._side === 'inside') {
         g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text, c.text));
@@ -1494,7 +1509,11 @@ function focusLinks(m) {
     l.classList.toggle('hl', on && ids.has(l.dataset.from) && ids.has(l.dataset.to));
     l.classList.toggle('direct', on && (l.dataset.from === m.id || l.dataset.to === m.id));
   }
-  for (const g of svg.querySelectorAll('.gantt-item')) g.classList.toggle('dim', on && !ids.has(g.dataset.id));
+  for (const g of svg.querySelectorAll('.gantt-item')) {
+    g.classList.toggle('dim', on && !ids.has(g.dataset.id));
+    g.classList.toggle('lit', on && ids.has(g.dataset.id));
+    g.classList.toggle('focus', on && g.dataset.id === m.id);
+  }
   svg.classList.toggle('link-focus', on);
 }
 
