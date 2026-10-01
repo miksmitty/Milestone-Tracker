@@ -225,6 +225,15 @@ select.status-sel { font-weight: 700; }
 .late-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 2px solid #e60000; box-shadow: inset 0 0 0 2px #fff; background: #e60000; }
 .table-wrap { overflow-x: auto; }
 #editor-table { table-layout: fixed; }
+/* The grid scrolls inside a window-high box, so its sideways scrollbar is always on screen. */
+#view-editor .table-wrap { overflow: auto; max-height: calc(100vh - 150px); }
+#editor-table thead { position: sticky; top: 0; z-index: 3; }
+/* A real scrollbar rather than macOS's overlay one, which only appears while scrolling. */
+#view-editor .table-wrap::-webkit-scrollbar { width: 10px; height: 10px; }
+#view-editor .table-wrap::-webkit-scrollbar-track { background: var(--panel-2); }
+#view-editor .table-wrap::-webkit-scrollbar-thumb { background: var(--faint-2); border-radius: 5px; border: 2px solid var(--panel-2); }
+#view-editor .table-wrap::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+#view-editor .table-wrap::-webkit-scrollbar-corner { background: var(--panel-2); }
 .col-id { white-space: nowrap; }
 .col-id .id { font-size: 12px; color: var(--muted); margin-left: 6px; }
 .type-badge {
@@ -264,7 +273,7 @@ tr.shifted td { animation: shifted 2.5s ease-out; }
 .tip-muted { color: var(--muted); }
 .tip-desc {
   margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--text-2);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  white-space: pre-line; overflow-wrap: anywhere;
 }
 .tip-links { margin-top: 5px; font-size: 12px; }
 .tip-links b { color: var(--muted); font-weight: 600; }

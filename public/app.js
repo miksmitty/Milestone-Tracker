@@ -893,8 +893,7 @@ function fitLabel(m, maxW, size) {
 }
 
 function metaText(m) {
-  const dates = isTask(m) ? `${fmtShort(m.start)} – ${fmtShort(m.end)}` : fmtShort(m.end);
-  return m.owner ? `${dates} · ${m.owner}` : dates;
+  return m.owner || '';
 }
 
 // Title with the ref in bold ahead of it, and the tag (milestone % complete) after.
@@ -2150,20 +2149,25 @@ function wireTable(t) {
     if (!handle) return;
     e.preventDefault();
     const cols = t.cols();
-    let c = cols.find(x => x.key === handle.dataset.resize);
-    let dir = 1;
-    // The fill column takes the spare width, so while there is some, dragging its edge moves
-    // the border instead: the next column gives or takes the difference.
-    const wrap = tableEl(t).parentElement;
-    if (c.key === t.fill && wrap.clientWidth > parseFloat(tableEl(t).style.minWidth)) {
-      const next = cols[cols.indexOf(c) + 1];
-      if (next) { c = next; dir = -1; }
-    }
+    const c = cols.find(x => x.key === handle.dataset.resize);
     const startX = e.clientX, startW = colWidth(t, c);
+    const key = (x) => x.wkey || x.key;
+    // The fill column takes the spare width, so while there is some, dragging its edge moves
+    // the border: the fill column shrinks or grows by what the next column takes or gives,
+    // and both stop at the minimum width so the border never runs away from the pointer.
+    const wrap = tableEl(t).parentElement;
+    const next = cols[cols.indexOf(c) + 1];
+    const border = c.key === t.fill && next && wrap.clientWidth > parseFloat(tableEl(t).style.minWidth);
+    const fillW = handle.parentElement.getBoundingClientRect().width, nextW = next && colWidth(t, next);
     handle.setPointerCapture(e.pointerId);
     document.body.classList.add('col-resizing');
     const move = (ev) => {
-      t.widths[c.wkey || c.key] = Math.max(48, Math.round(startW + dir * (ev.clientX - startX)));
+      const dx = Math.round(ev.clientX - startX);
+      if (border) {
+        const d = Math.min(Math.max(dx, 48 - fillW), nextW - 48);
+        t.widths[key(c)] = Math.round(Math.min(startW, fillW + d));
+        t.widths[key(next)] = Math.round(nextW - d);
+      } else t.widths[key(c)] = Math.max(48, startW + dx);
       applyTableWidths(t);
     };
     const up = () => {
