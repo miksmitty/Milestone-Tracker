@@ -396,9 +396,24 @@ let saveTimer = null;
 let dataLoaded = false;
 let pendingMsg = '';
 
-function saveData(msg) {
+// The server logs every change to an item's dates (date-changes.csv), with who made it. Each save
+// of the items says how (`via`, e.g. "Quick update panel") and what the change was (the message), and
+// which items only moved because something they depend on moved.
+const knockOn = new Set();     // since the last save: items moved by a dependency…
+const directEdits = new Set(); // …and items changed directly, which aren't knock-on even if both
+function saveData(msg, via = 'Items table') {
   syncEditorToState();
-  return saveCSV('api/milestones', toCSV(allItems()), msg);
+  const headers = auditHeaders(msg, via);
+  knockOn.clear();
+  directEdits.clear();
+  return saveCSV('api/milestones', toCSV(allItems()), msg, headers);
+}
+function auditHeaders(note, via) {
+  const enc = encodeURIComponent;
+  return {
+    'X-Change-Via': enc(via), 'X-Change-Note': enc(note || ''),
+    'X-Knock-On': [...knockOn].filter(id => !directEdits.has(id)).join(','),
+  };
 }
 function saveReports(msg) {
   return saveCSV('api/reports', reportsToCSV(allReports()), msg);
@@ -416,7 +431,7 @@ function saveLanes(msg) {
   return saveCSV('api/swimlanes', lanesToCSV(state.lanes), msg);
 }
 
-function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if the queue is busy
+function saveCSV(url, body, msg, headers = {}) { // body is snapshotted by the caller, even if the queue is busy
   if (!dataLoaded) {
     flashStatus('Not saved — the data hasn’t loaded, so saving would overwrite it', false, true);
     return Promise.resolve(false);
@@ -424,7 +439,7 @@ function saveCSV(url, body, msg) { // body is snapshotted by the caller, even if
   saveQueue = saveQueue.then(async () => {
     flashStatus('Saving…', null);
     try {
-      const res = await fetch(url, { method: 'POST', body });
+      const res = await fetch(url, { method: 'POST', body, headers });
       const out = await res.json();
       if (!out.ok) throw new Error(out.error || 'server error');
       flashStatus([msg, 'Saved ✓'].filter(Boolean).join(' · '), true);
@@ -449,7 +464,7 @@ function flushSave() {
   saveTimer = null;
   const msg = pendingMsg;
   pendingMsg = '';
-  return saveData(msg);
+  return saveData(msg, 'Items table');
 }
 
 function flashStatus(msg, ok, sticky) {
@@ -510,7 +525,9 @@ async function undoLast() {
   rerenderCurrentView();
   if (isShown('editor')) renderEditor();
   showToast(`Undone: ${u.label}`);
-  const save = { items: saveData, reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, lanes: saveLanes };
+  knockOn.clear();
+  directEdits.clear();
+  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, lanes: saveLanes };
   await Promise.all(changed.map(k => save[k]('Undone')));
 }
 
@@ -631,7 +648,7 @@ async function setBaseline(on) {
   renderGantt();
   const msg = on ? `Baseline set from today’s dates for ${count(state.items.length, T.item, T.items)}` : 'Baseline cleared';
   offerUndo(snap, msg);
-  await saveData(msg);
+  await saveData(msg, 'Baseline');
 }
 
 /* ================= scheduling ================= */
@@ -747,7 +764,10 @@ function updateItem(m, changes) {
   const snapshot = new Map(state.items.map(x => [x.id, x.start + x.end]));
   cascadeShift([m.id], before.end && m.end ? daysBetween(before.end, m.end) : 0);
   enforceConstraints();
-  return { moved: state.items.filter(x => snapshot.get(x.id) !== x.start + x.end).map(x => x.id) };
+  const moved = state.items.filter(x => snapshot.get(x.id) !== x.start + x.end).map(x => x.id);
+  directEdits.add(m.id);
+  for (const id of moved) if (id !== m.id) knockOn.add(id);
+  return { moved };
 }
 
 function movedMessage(m, moved) {
@@ -1381,7 +1401,7 @@ async function onDragEnd() {
   if (res.error) return showToast(res.error);
   const msg = [`${itemLabel(m)}: ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
   offerUndo(snap, msg);
-  await saveData(msg);
+  await saveData(msg, 'Dragged on the Gantt chart');
 }
 
 /* ---- keyboard on the chart ---- */
@@ -1786,6 +1806,7 @@ function openEditDialog(m) {
   hist.hidden = !m;
   hist.disabled = !n;
   hist.textContent = `View reports (${n})`;
+  document.getElementById('ed-dates').hidden = !m;
   document.getElementById('ed-error').textContent = '';
   refreshDatalists();
   renderEdDeps();
@@ -1857,8 +1878,9 @@ async function submitEditDialog(e) {
   }
   document.getElementById('edit-dialog').close();
   rerenderCurrentView();
-  offerUndo(snap, [editing ? `${itemLabel(m)} saved` : `Added ${fullLabel(m)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
-  await saveData(movedMessage(m, res.moved));
+  const note = [editing ? `${itemLabel(m)} saved` : `Added ${fullLabel(m)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
+  offerUndo(snap, note);
+  await saveData(movedMessage(m, res.moved), editing ? 'Edit dialog' : 'New item dialog');
 }
 
 async function deleteFromDialog() {
@@ -1869,7 +1891,7 @@ async function deleteFromDialog() {
   document.getElementById('edit-dialog').close();
   rerenderCurrentView();
   offerUndo(snap, label);
-  await saveData('Deleted');
+  await saveData(label, 'Edit dialog');
 }
 
 /* ================= zoom / range controls ================= */
@@ -2412,6 +2434,8 @@ function applyBulk() {
     cascadeShift(items.map(m => m.id), n);
     enforceConstraints();
     const moved = others();
+    for (const m of items) directEdits.add(m.id);
+    for (const id of moved) knockOn.add(id);
     renderEditor([...items.map(m => m.id), ...moved]);
     offerUndo(snap, `Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}`);
     return scheduleSave(`Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}${also(moved)}`);
@@ -2654,6 +2678,7 @@ function renderQuick() {
     <div class="q-foot">
       <button type="button" class="btn" data-act="report">Provide report…</button>
       <button type="button" class="btn" data-act="history" ${n ? '' : 'disabled'}>Reports (${n})</button>
+      <button type="button" class="btn" data-act="dates">Date history</button>
       <button type="button" class="btn" data-act="edit">Edit details…</button>
     </div>
     </form>`;
@@ -2710,6 +2735,7 @@ function onQuickClick(e) {
   if (act === 'report') openReportDialog({ itemId: m.id });
   else if (act === 'edit') openEditDialog(m);
   else if (act === 'history') showReportsFor(m.id);
+  else if (act === 'dates') showDatesFor(m.id);
 }
 
 function onQuickDateInput(e) {
@@ -2754,7 +2780,7 @@ async function onQuickDateSubmit(e) {
   renderGantt();
   const msg = [`${itemLabel(m)}: ${msgs.join(', ')}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
   offerUndo(snap, msg);
-  await saveData(msg);
+  await saveData(msg, 'Quick update panel');
 }
 
 /* ---- markdown ---- */
@@ -4357,7 +4383,7 @@ async function applyImport() {
   const parts = [added && `${added} added`, updated && `${updated} updated`, plan.deletes.length && `${plan.deletes.length} deleted`,
     dropped && `${count(dropped, 'link', 'links')} left out to avoid a circular dependency`].filter(Boolean);
   if (added || updated || plan.deletes.length) offerUndo(snap, `Imported: ${parts.slice(0, 3).join(', ')}`);
-  await saveData(`Imported: ${parts.join(', ') || 'nothing changed'}`);
+  await saveData(`Imported: ${parts.join(', ') || 'nothing changed'}`, 'Import');
 }
 
 /* ---- dialog ---- */
@@ -4599,7 +4625,7 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { overview: () => 'Program overview', lanes: () => 'Swimlane overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed' };
+const VIEW_TITLES = { overview: () => 'Program overview', lanes: () => 'Swimlane overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date history' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
@@ -4978,7 +5004,7 @@ async function submitWorkspaceDialog(e) {
   Object.assign(p, v, { updated: new Date().toISOString() });
   const saves = [saveWorkspaces(pgEditing ? 'Workspace saved' : 'Workspace created')];
   if (res.listChanged) saves.push(saveStatuses());
-  if (res.records) saves.push(saveData(), saveReports());
+  if (res.records) saves.push(saveData('', 'Workspace settings'), saveReports());
   if (!pgEditing) {
     await Promise.all(saves);
     return switchWorkspace(p.id, 'editor'); // an empty workspace starts on its items
@@ -5015,7 +5041,7 @@ async function deleteWorkspace() {
   applyWorkspaceChrome();
   rerenderCurrentView();
   offerUndo(snap, `Deleted the workspace ${p.name}${lost.length ? ` and its ${lost.join(' and ')}` : ''}`);
-  await Promise.all([saveData(), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadLanes && saveLanes()]);
+  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadLanes && saveLanes()]);
 }
 
 function wireWorkspaces() {
@@ -5514,6 +5540,151 @@ function showItemOnGantt(id) {
   setKbItem(id);
 }
 
+/* ================= date history ================= */
+// The audit log of every change to an item's dates, kept by the server in date-changes.csv: who,
+// when, from what to what, and how. Each save logs one row per date field; here the rows of one
+// save of one item are shown together, newest first.
+
+const DL_FIELDS = { start: 'Start', end: 'End', baseline_start: 'Baseline start', baseline_end: 'Baseline end' };
+const DL_PAGE = 300;
+let dlRows = [];     // every row of the log, oldest first
+let dlItem = '';     // show just this item's history
+let dlShown = DL_PAGE;
+
+async function loadDateLog() {
+  await saveQueue; // so the latest save is in it
+  const res = await fetch('api/date-changes', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`the server returned ${res.status}`);
+  const [header = [], ...rows] = parseAny(await res.text());
+  dlRows = rows.map(r => Object.fromEntries(header.map((h, i) => [h.trim(), (r[i] ?? '').trim()])));
+}
+
+// The rows to show (this workspace, filters applied), grouped by save and item, newest first.
+function dateLogEntries() {
+  const q = document.getElementById('dl-q').value.trim().toLowerCase();
+  const who = document.getElementById('dl-who').value;
+  const baseline = document.getElementById('dl-baseline').checked;
+  const started = document.getElementById('dl-started').checked;
+  const groups = new Map();
+  for (const r of dlRows) {
+    if (r.workspace_id !== state.workspaceId || (dlItem && r.item_id !== dlItem)) continue;
+    if (!baseline && r.field.startsWith('baseline')) continue;
+    if (!started && r.action === 'Logging started') continue;
+    if (who && (r.by || '') !== who) continue;
+    const key = `${r.at}|${r.item_id}|${r.action}`;
+    if (!groups.has(key)) groups.set(key, { ...r, fields: {} });
+    groups.get(key).fields[r.field] = r;
+  }
+  const words = q.split(/\s+/).filter(Boolean);
+  return [...groups.values()]
+    .filter(g => words.every(w => [g.ref, g.title, g.by, g.via, g.note, g.action].join(' ').toLowerCase().includes(w)))
+    .sort((a, b) => b.at.localeCompare(a.at) || +b.id - +a.id);
+}
+
+const dlDate = (iso) => (parseDate(iso) ? fmtNice(iso) : escAttr(iso || '—'));
+function dlShift(days) {
+  const n = +days;
+  if (days === '' || !n) return '';
+  return ` <b class="${n > 0 ? 'ch-slip' : 'ch-gain'}">${n > 0 ? '+' : '−'}${daysText(Math.abs(n))}</b>`;
+}
+
+// What changed, in words: a milestone's start and end moving together read as one date.
+function dlChange(g) {
+  const f = g.fields, lines = [];
+  const pair = (st, en, label) => {
+    if (st && en && st.from === en.from && st.to === en.to) return lines.push(dlLine(label || 'Date', st));
+    if (st) lines.push(dlLine(label ? `${label} start` : 'Start', st));
+    if (en) lines.push(dlLine(label ? `${label} end` : 'End', en));
+  };
+  pair(f.start, f.end, '');
+  pair(f.baseline_start, f.baseline_end, 'Baseline');
+  return lines.join('<br>');
+}
+function dlLine(label, r) {
+  const name = `<span class="dl-field">${escAttr(label)}</span>`;
+  if (!r.from) return `${name} ${dlDate(r.to)}`;
+  if (!r.to) return `${name} ${dlDate(r.from)} <span class="muted">(removed)</span>`;
+  return `${name} ${dlDate(r.from)} <span class="ch-arrow">→</span> ${dlDate(r.to)}${dlShift(r.days)}`;
+}
+
+const DL_ACTION_CLASS = { 'Knock-on': 'knock', Deleted: 'del', 'Edited outside the app': 'outside' };
+
+async function renderDates() {
+  const body = document.getElementById('dl-body');
+  if (!dlRows.length) body.innerHTML = '<tr><td colspan="5" class="due-empty">Loading…</td></tr>';
+  try { await loadDateLog(); } catch (err) {
+    body.innerHTML = `<tr><td colspan="5" class="due-empty">Couldn’t load the date history (${escAttr(err.message)}). Restart <code>node server.js</code> if the app was updated.</td></tr>`;
+    return;
+  }
+  if (!isShown('dates')) return;
+  const sel = document.getElementById('dl-who');
+  const people = [...new Set(dlRows.filter(r => r.workspace_id === state.workspaceId).map(r => r.by || ''))].sort((a, b) => a.localeCompare(b));
+  const cur = people.includes(sel.value) ? sel.value : '';
+  sel.innerHTML = `<option value="">Everyone</option>${people.map(p => `<option value="${escAttr(p)}" ${p === cur ? 'selected' : ''}>${escAttr(p || 'Unknown')}</option>`).join('')}`;
+  sel.value = cur;
+  sel.hidden = !people.some(Boolean); // until logins are recorded there's no one to pick
+  renderDateRows();
+}
+
+function renderDateRows() {
+  const entries = dateLogEntries();
+  const chip = document.getElementById('dl-item');
+  const m = dlItem && itemById(dlItem);
+  const latest = dlItem && [...dlRows].reverse().find(r => r.item_id === dlItem);
+  chip.hidden = !dlItem;
+  chip.innerHTML = dlItem ? `Only ${escAttr(m ? fullLabel(m) : `${latest?.ref || ''} ${latest?.title || `#${dlItem}`}`)}<button type="button" data-dl-all title="Show every ${escAttr(T.item)}">✕</button>` : '';
+  document.getElementById('dl-count').textContent = count(entries.length, 'change', 'changes');
+  const body = document.getElementById('dl-body');
+  if (!entries.length) {
+    body.innerHTML = `<tr><td colspan="5" class="due-empty">No date changes ${dlRows.length ? 'match' : 'logged yet'}.</td></tr>`;
+    return;
+  }
+  body.innerHTML = entries.slice(0, dlShown).map(g => {
+    const live = itemById(g.item_id);
+    const lbl = `<span class="ch-item">${g.ref ? `<b class="ref">${escAttr(g.ref)}</b> ` : ''}${escAttr(g.title)}</span>`;
+    const act = g.action === 'Changed' ? '' : `<span class="dl-act ${DL_ACTION_CLASS[g.action] || ''}">${escAttr(g.action)}</span>`;
+    return `<tr>
+      <td class="dl-when">${fmtStamp(g.at)}</td>
+      <td class="dl-who">${g.by ? escAttr(g.by) : '<span class="muted">—</span>'}</td>
+      <td>${live ? `<button type="button" class="link-btn ch-open" data-ch-item="${g.item_id}" title="Show it on the Gantt chart">${lbl}</button>` : `<span class="dl-gone" title="No longer in this workspace">${lbl}</span>`}</td>
+      <td class="dl-change">${dlChange(g)}</td>
+      <td class="dl-how">${act}${escAttr(g.via)}${g.note ? `<br>${escAttr(g.note)}` : ''}</td>
+    </tr>`;
+  }).join('') + (entries.length > dlShown ? `<tr><td colspan="5" class="dl-more"><button type="button" class="btn" data-dl-more>Show ${Math.min(DL_PAGE, entries.length - dlShown)} more</button></td></tr>` : '');
+}
+
+function showDatesFor(itemId) {
+  dlItem = itemId;
+  dlShown = DL_PAGE;
+  document.querySelectorAll('dialog[open]').forEach(d => d.close());
+  switchView('dates');
+}
+
+function downloadDatesCSV() {
+  const cols = ['at', 'by', 'ref', 'title', 'field', 'from', 'to', 'days', 'action', 'via', 'note'];
+  const lines = dateLogEntries().flatMap(g => Object.values(g.fields).map(r => cols.map(k => csvEscape(r[k])).join(',')));
+  const p = currentWorkspace();
+  const blob = new Blob(['﻿' + [cols.join(','), ...lines].join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.download = `${pngSlug(p.code || p.name) || 'workspace'}-date-history-${fmtISO(new Date())}.csv`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+
+function wireDates() {
+  const again = () => { dlShown = DL_PAGE; renderDateRows(); };
+  document.getElementById('dl-q').oninput = again;
+  for (const id of ['dl-who', 'dl-baseline', 'dl-started']) document.getElementById(id).onchange = again;
+  document.getElementById('dl-csv').onclick = downloadDatesCSV;
+  document.getElementById('view-dates').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ch-item]');
+    if (b) return showItemOnGantt(b.dataset.chItem);
+    if (e.target.closest('[data-dl-all]')) { dlItem = ''; again(); }
+    if (e.target.closest('[data-dl-more]')) { dlShown += DL_PAGE; renderDateRows(); }
+  });
+}
+
 /* ================= PNG export ================= */
 
 function downloadPNG() {
@@ -5558,7 +5729,7 @@ function palPages() {
   return [
     ['overview', 'Program overview'], ['workspaces', 'All workspaces'], ['gantt', `Gantt chart · ${ws.name}`],
     ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`],
-    ['changes', `What changed · ${ws.name}`], ['lanes', `Swimlane overview · ${ws.name}`],
+    ['changes', `What changed · ${ws.name}`], ['dates', `Date history · ${ws.name}`], ['lanes', `Swimlane overview · ${ws.name}`],
   ].map(([view, label]) => ({ kind: 'page', view, label, hay: label.toLowerCase() }));
 }
 
@@ -5815,7 +5986,7 @@ function svgToPNG(svg, w, h) {
 
 /* ================= wiring ================= */
 
-const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'changes', 'lanes'];
+const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'changes', 'dates', 'lanes'];
 const APP_VIEWS = ['overview', 'workspaces']; // views across every workspace
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 const currentView = () => VIEWS.find(isShown) || 'gantt';
@@ -5834,6 +6005,7 @@ function switchView(view) {
   else if (view === 'overview') renderOverview();
   else if (view === 'lanes') renderLaneOverview();
   else if (view === 'changes') renderChanges();
+  else if (view === 'dates') renderDates();
   else renderWorkspaces();
   for (const v of VIEWS) {
     document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
@@ -5975,6 +6147,7 @@ function wireEvents() {
   document.getElementById('ed-delete').onclick = deleteFromDialog;
   document.getElementById('ed-report').onclick = () => { const m = editing; dlg.close(); openReportDialog({ itemId: m.id }); };
   document.getElementById('ed-history').onclick = () => { const m = editing; dlg.close(); showReportsFor(m.id); };
+  document.getElementById('ed-dates').onclick = () => showDatesFor(editing.id);
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   document.getElementById('ed-deps').addEventListener('click', (e) => {
     const rm = e.target.closest('[data-edrm]');
@@ -6026,6 +6199,7 @@ function wireEvents() {
 
   wireReports();
   wireChanges();
+  wireDates();
   wirePalette();
 
   // undo: the toast's button, or ⌘/Ctrl+Z when not typing (typing keeps the browser's own undo)
@@ -6044,7 +6218,10 @@ function wireEvents() {
   window.addEventListener('pagehide', () => {
     if (saveTimer === null || !dataLoaded) return;
     syncEditorToState();
-    navigator.sendBeacon('api/milestones', toCSV(allItems()));
+    const body = toCSV(allItems());
+    // keepalive carries the date log's headers; a beacon can't, so it's only used for big files
+    if (body.length < 60000) fetch('api/milestones', { method: 'POST', body, headers: auditHeaders(pendingMsg, 'Items table'), keepalive: true });
+    else navigator.sendBeacon('api/milestones', body);
   });
 
   // Auto-fit while the user hasn't chosen a zoom; re-render otherwise.

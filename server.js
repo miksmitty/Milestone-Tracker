@@ -1,6 +1,6 @@
 // Tracker — zero-dependency Node server.
 // Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv,
-// updates.csv and swimlanes.csv.
+// updates.csv and swimlanes.csv, and appends every change to an item's dates to date-changes.csv.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -37,6 +37,7 @@ const DATASETS = {
   '/api/milestones': {
     file: path.join(__dirname, 'milestones.csv'),
     header: 'id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on,baseline_start,baseline_end\n',
+    audited: true, // date changes are logged to date-changes.csv
   },
   '/api/reports': {
     file: path.join(__dirname, 'reports.csv'),
@@ -98,6 +99,143 @@ function serveHistory(pathname, res) {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(decodeCSV(data));
+  });
+}
+
+// Every change to an item's dates is appended to date-changes.csv, the audit log. The server
+// compares each save of milestones.csv with the file it replaces, so no way of changing a date in
+// the app can skip it, and it compares the file with what it last saw, so edits made to the CSV
+// outside the app are logged too. The log is only ever appended to: nothing in the app rewrites it.
+const AUDIT_FILE = path.join(__dirname, 'date-changes.csv');
+const AUDIT_COLUMNS = ['id', 'at', 'by', 'workspace_id', 'item_id', 'ref', 'title', 'field', 'from', 'to', 'days', 'action', 'via', 'note'];
+const DATE_FIELDS = ['start', 'end', 'baseline_start', 'baseline_end'];
+const ACTIONS = { added: 'Added', changed: 'Changed', knockOn: 'Knock-on', deleted: 'Deleted', outside: 'Edited outside the app', started: 'Logging started' };
+
+// A CSV parser that copes with quotes, line breaks in cells, and the semicolons or tabs Excel uses.
+function parseCSV(text) {
+  const first = text.slice(0, text.indexOf('\n') + 1 || undefined);
+  const delim = [',', ';', '\t'].reduce((a, d) => (first.split(d).length > first.split(a).length ? d : a), ',');
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') quoted = false; else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === delim) { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim()));
+}
+const csvCell = (v) => (/[",\n\r]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+
+// Items by id, with the fields the log records. Older files (a single `date` column, or no
+// workspace_id) still read.
+function itemsFrom(text) {
+  const [header = [], ...rows] = parseCSV(text);
+  const col = Object.fromEntries(header.map((h, i) => [h.trim().toLowerCase(), i]));
+  const get = (r, k) => (col[k] === undefined ? '' : (r[col[k]] ?? '').trim());
+  const out = new Map();
+  for (const r of rows) {
+    const id = get(r, 'id');
+    if (!id) continue;
+    const date = get(r, 'date');
+    out.set(id, {
+      workspace_id: get(r, 'workspace_id') || get(r, 'program_id'), ref: get(r, 'ref'), title: get(r, 'title') || get(r, 'name'),
+      start: get(r, 'start') || date, end: get(r, 'end') || date, baseline_start: get(r, 'baseline_start'), baseline_end: get(r, 'baseline_end'),
+    });
+  }
+  return out;
+}
+
+const dayNumber = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s) ? Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 864e5 : NaN);
+const daysMoved = (from, to) => { const n = dayNumber(to) - dayNumber(from); return Number.isFinite(n) ? n : ''; };
+
+// One log row per date field that differs between two sets of items.
+function dateChanges(before, after, how) {
+  const rows = [];
+  const add = (m, id, field, from, to, action) => rows.push({ workspace_id: m.workspace_id, item_id: id, ref: m.ref, title: m.title, field, from, to, days: from && to ? daysMoved(from, to) : '', action, ...how.meta });
+  for (const [id, m] of after) {
+    const o = before.get(id);
+    const action = !o ? how.added : how.knockOn?.has(id) ? ACTIONS.knockOn : how.changed;
+    for (const f of DATE_FIELDS) if ((o?.[f] ?? '') !== m[f] && (o || m[f])) add(m, id, f, o?.[f] ?? '', m[f], action);
+  }
+  for (const [id, o] of before) if (!after.has(id)) for (const f of DATE_FIELDS) if (o[f]) add(o, id, f, o[f], '', ACTIONS.deleted);
+  return rows;
+}
+
+let auditNextId = 1;
+let auditKnown = null; // the items as the log last saw them: replayed from the log at start-up
+
+function appendAudit(rows) {
+  if (!rows.length) return;
+  const at = new Date().toISOString();
+  const lines = rows.map(r => AUDIT_COLUMNS.map(k => csvCell(k === 'id' ? auditNextId++ : k === 'at' ? at : r[k] ?? '')).join(',')).join('\n') + '\n';
+  const fresh = !fs.existsSync(AUDIT_FILE);
+  fs.appendFileSync(AUDIT_FILE, (fresh ? AUDIT_COLUMNS.join(',') + '\n' : '') + lines, 'utf8');
+}
+
+// Rebuild the items' dates from the log, then log anything in milestones.csv that differs from it.
+// When there's no log yet, every item's dates are recorded as where logging started.
+function startAudit() {
+  let log = '';
+  try { log = decodeCSV(fs.readFileSync(AUDIT_FILE)); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  let disk = '';
+  try { disk = decodeCSV(fs.readFileSync(DATASETS['/api/milestones'].file)); } catch { /* no items yet */ }
+  const now = itemsFrom(disk);
+  if (!log) {
+    auditKnown = new Map();
+    appendAudit(dateChanges(auditKnown, now, { added: ACTIONS.started, changed: ACTIONS.started, meta: { via: 'Start of the log', note: 'The dates each item had when date logging began' } }));
+    auditKnown = now;
+    return;
+  }
+  const [header, ...rows] = parseCSV(log);
+  const col = Object.fromEntries(header.map((h, i) => [h, i]));
+  auditKnown = new Map();
+  for (const r of rows) {
+    const id = r[col.item_id];
+    auditNextId = Math.max(auditNextId, +r[col.id] + 1 || 0);
+    if (r[col.action] === ACTIONS.deleted) { auditKnown.delete(id); continue; }
+    if (!auditKnown.has(id)) auditKnown.set(id, { start: '', end: '', baseline_start: '', baseline_end: '' });
+    Object.assign(auditKnown.get(id), { workspace_id: r[col.workspace_id], ref: r[col.ref], title: r[col.title], [r[col.field]]: r[col.to] });
+  }
+  checkOutsideEdits(now);
+}
+
+function checkOutsideEdits(now) {
+  appendAudit(dateChanges(auditKnown, now, { added: ACTIONS.outside, changed: ACTIONS.outside, meta: { via: 'milestones.csv edited directly' } }));
+  auditKnown = now;
+}
+
+// Who is making a change, for the date log. There's no sign-in yet, so it's blank; when the app is
+// put behind a login, return the user's login ID here (e.g. from the session or the header the
+// sign-in proxy adds). It's taken on the server so the browser can't claim to be someone else.
+function changedBy(req) {
+  return '';
+}
+
+// Log the dates a save of milestones.csv changes. The browser says what the change was (X-Change-Note, X-Change-Via) and which items only moved because something
+// they depend on moved (X-Knock-On, comma-separated ids).
+function auditSave(req, oldText, newText) {
+  const header = (k) => { try { return decodeURIComponent(req.headers[k] || ''); } catch { return ''; } };
+  if (oldText !== null) checkOutsideEdits(itemsFrom(oldText));
+  const after = itemsFrom(newText);
+  const knockOn = new Set(header('x-knock-on').split(',').filter(Boolean));
+  appendAudit(dateChanges(auditKnown, after, {
+    added: ACTIONS.added, changed: ACTIONS.changed, knockOn,
+    meta: { by: changedBy(req), via: header('x-change-via'), note: header('x-change-note') },
+  }));
+  auditKnown = after;
+}
+
+function serveAudit(res) {
+  fs.readFile(AUDIT_FILE, (err, data) => {
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(err ? AUDIT_COLUMNS.join(',') + '\n' : decodeCSV(data));
   });
 }
 
@@ -187,6 +325,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname.endsWith('/api/config')) return serveConfig(req, res);
   if (req.method === 'GET' && pathname.endsWith('/api/logo')) return serveLogo(req, res);
   if (req.method === 'GET' && /\/api\/history(\/|$)/.test(pathname)) return serveHistory(pathname, res);
+  if (req.method === 'GET' && pathname.endsWith('/api/date-changes')) return serveAudit(res);
   const ds = datasetFor(pathname);
   if (ds) {
     if (req.method === 'GET') {
@@ -197,7 +336,10 @@ const server = http.createServer((req, res) => {
       };
       fs.readFile(ds.file, (err, data) => {
         if (err && ds.legacy) fs.readFile(ds.legacy, send);
-        else send(err, data);
+        else {
+          if (ds.audited && !err) checkOutsideEdits(itemsFrom(decodeCSV(data)));
+          send(err, data);
+        }
       });
       return;
     }
@@ -205,17 +347,25 @@ const server = http.createServer((req, res) => {
       let body = '';
       req.setEncoding('utf8'); // keeps a character split across chunks intact
       req.on('data', (chunk) => { body += chunk; });
-      req.on('end', () => backupDaily(ds.file, () => {
+      // Saves to one file run one at a time, so the date log compares each with the one before.
+      req.on('end', () => { ds.queue = (ds.queue || Promise.resolve()).then(() => new Promise((next) => backupDaily(ds.file, () => {
+        let old = ''; // null: the file couldn't be read, so it isn't checked for outside edits
+        if (ds.audited) try { old = decodeCSV(fs.readFileSync(ds.file)); } catch (e) { if (e.code !== 'ENOENT') old = null; }
         const tmp = ds.file + '.tmp';
         fs.writeFile(tmp, body, 'utf8', (err) => {
           if (err) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ ok: false, error: err.message }));
+            res.end(JSON.stringify({ ok: false, error: err.message }));
+            return next();
           }
           const done = (err2) => {
             if (err2) console.error(`Couldn't save ${path.basename(ds.file)}: ${err2.message}`);
+            if (!err2 && ds.audited) {
+              try { auditSave(req, old, body); } catch (err3) { console.error(`Couldn't write the date log: ${err3.message}`); }
+            }
             res.writeHead(err2 ? 500 : 200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: !err2, error: err2 ? err2.message : undefined }));
+            next();
           };
           fs.rename(tmp, ds.file, (err2) => {
             if (!err2) return done();
@@ -223,7 +373,7 @@ const server = http.createServer((req, res) => {
             fs.writeFile(ds.file, body, 'utf8', (err3) => { fs.unlink(tmp, () => {}); done(err3); });
           });
         });
-      }));
+      }))); });
       return;
     }
     res.writeHead(405);
@@ -232,6 +382,7 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res);
 });
 
+startAudit();
 server.listen(PORT, () => {
   console.log(`${readConfig().title || 'Tracker'} running at http://localhost:${PORT}`);
 });

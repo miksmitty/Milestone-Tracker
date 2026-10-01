@@ -14,6 +14,8 @@ No `npm install` needed — plain Node (18+) and vanilla JS.
 
 Always open the app through `node server.js`: it serves both the page and the CSV data, so opening `index.html` as a file or from another web server won't load anything. It works behind a proxy that serves it under a path (e.g. `https://host/proxy/3100/`), and reads CSVs re-saved by Excel (semicolon separated, Windows encoding or with a byte order mark); they are written back as UTF-8 CSV. If data doesn't load, the app shows why and can't be edited until it does (so a half-loaded page never saves over your files); the server's console says more. After updating the app, restart `node server.js` so it knows about any new data files.
 
+**Date log:** every change to an item's dates is added to `date-changes.csv` (see **Date history** below).
+
 **Backups:** the first time each CSV is saved on a given day, the server copies the day's starting version to `backups/` (e.g. `backups/reports.2026-09-29.csv`), keeping the newest 30 per file. To undo a bad day, copy one back over the CSV and reload.
 
 ## Title and logo
@@ -34,7 +36,7 @@ Changes show when the page is reloaded; there's no need to restart the server. I
 
 ## Workspaces
 
-Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Program overview**, **All workspaces**, a workspace switcher (with a ⚙ for **Workspace settings**), and the current workspace's **Gantt chart**, **Items**, **Reports** (with a count of reports due), **What changed** and **Swimlane overview**. At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, and **Collapse** shrinks the menu to icons; the app remembers the open workspace, view, theme and menu state per browser.
+Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Program overview**, **All workspaces**, a workspace switcher (with a ⚙ for **Workspace settings**), and the current workspace's **Gantt chart**, **Items**, **Reports** (with a count of reports due), **What changed**, **Date history** and **Swimlane overview**. At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, and **Collapse** shrinks the menu to icons; the app remembers the open workspace, view, theme and menu state per browser.
 
 ### Find (⌘K)
 
@@ -89,6 +91,23 @@ workspace_id,name,lead,trend
 **What changed** compares the workspace with how it stood at the start of an earlier day: RAG changes (worst first), dates that moved (by how many days, slips first), items added and removed, and reports written or updated since. Click an item to see it on the Gantt chart. It defaults to about a week ago. The comparison comes from the daily backups (see **Backups** above), so the days you can pick are the days the items file changed, up to 30 back; on a new install there's nothing to compare with until the next day.
 
 The page ends with a **summary** of the changes. **Copy summary** copies it as text (Markdown) for an email or chat, and **Use in weekly update** starts the program's weekly update with it.
+
+### Date history
+
+Every change to an item's dates is logged: its start and end, and its baseline. **Date history** lists them for the workspace, newest first:
+
+- **When** and **Who**: the time of the save, and who made it. There's no sign-in yet, so **Who** is blank; once the app is behind a login, `changedBy()` in server.js returns the user's login ID and it's recorded with every change (on the server, so a browser can't claim to be someone else)
+- **Item**: its ref and title at the time (click to see it on the Gantt chart)
+- **Change**: from and to, with how many days it moved (a milestone's single date shows as one change)
+- **How**: where the change was made (*Quick update panel*, *Dragged on the Gantt chart*, *Items table*, *Edit dialog*, *Import*, *Undo*, *Baseline*, …) and the message shown at the time. A label marks changes that weren't made to the item directly: **Knock-on** (it moved because something it depends on moved), **Added**, **Deleted**, **Edited outside the app** and **Logging started** (the dates each item had when the log began)
+
+Search by item, person or note, pick a person (once logins are recorded), and tick **Baseline** or **Starting dates** to include those. **Date history** in an item's quick update panel or edit dialog shows just that item. **Download CSV** saves the changes shown.
+
+The log is kept by the server, not the browser: each time milestones.csv is saved it's compared with the file it replaces, so no way of changing a date can skip the log. Edits made to milestones.csv outside the app (in a spreadsheet, say) are noticed and logged, without a name, the next time the app reads or saves the file, or when the server starts. The log lives in [date-changes.csv](date-changes.csv), one row per date field changed, and is only ever added to — nothing in the app edits or deletes it:
+
+```
+id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
+```
 
 ### RAG options
 

@@ -69,6 +69,10 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10a6.5 6.5 0 1 0 2-4.7"/><path d="M3 2.8v3.4h3.4"/><path d="M10 6.5V10l2.5 1.8"/></svg>
         <span class="nav-text">What changed</span>
       </button>
+      <button id="nav-dates" class="nav-item" title="Date history">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="13" rx="1.5"/><path d="M3 8h14M7 2.5v3M13 2.5v3M6.5 11.5h3M6.5 14h6"/></svg>
+        <span class="nav-text">Date history</span>
+      </button>
       <button id="nav-lanes" class="nav-item" title="Swimlane overview">
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M7 3.5v13"/><path d="M10 9.75h4.5M10 14.25h3"/></svg>
         <span class="nav-text">Swimlane overview</span>
@@ -199,6 +203,30 @@
     </div>
     <div id="ch-body" class="ch-body"></div>
     <p class="hint">Compares this workspace with how it stood at the start of an earlier day: RAG changes, dates that moved, <span data-term="items">items</span> added or removed, and reports written since. The server keeps a copy of each file at the start of every day it changes (in <code>backups/</code>, the last 30 of each), so those are the days you can compare with. <b>Use in weekly update</b> starts the program’s weekly update with the summary.</p>
+  </main>
+
+  <!-- ============ DATE HISTORY ============ -->
+  <main id="view-dates" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group rp-filters">
+        <input id="dl-q" type="search" placeholder="Search item, person or note…" aria-label="Search the date history" />
+        <select id="dl-who" class="tb-select" aria-label="Changed by"></select>
+        <label class="check" title="Include changes to the baseline dates"><input type="checkbox" id="dl-baseline" /> Baseline</label>
+        <label class="check" title="Include the dates items had when logging began"><input type="checkbox" id="dl-started" /> Starting dates</label>
+        <span id="dl-item" class="dl-item" hidden></span>
+        <span id="dl-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-group toolbar-right">
+        <button id="dl-csv" class="btn" title="Download the changes shown (filters applied) as a CSV">Download CSV</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="ov-table dl-table">
+        <thead><tr><th>When</th><th>Who</th><th data-term="Item">Item</th><th>Change</th><th>How</th></tr></thead>
+        <tbody id="dl-body"></tbody>
+      </table>
+    </div>
+    <p class="hint">Every change to a start, end or baseline date is logged here, newest first: who made it, when, from what to what, and how. <b>Knock-on</b> means the dates moved because something they depend on moved. Changes made to <code>milestones.csv</code> outside the app are logged when the app next reads or saves it. The log is kept in <code>date-changes.csv</code>, which the app only ever adds to.</p>
   </main>
 
   <!-- ============ WORKSPACES VIEW ============ -->
@@ -478,6 +506,7 @@
         <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
         <button type="button" id="ed-report" class="btn">Provide report</button>
         <button type="button" id="ed-history" class="btn">View reports</button>
+        <button type="button" id="ed-dates" class="btn">Date history</button>
         <span class="spacer"></span>
         <button type="button" id="ed-cancel" class="btn">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>

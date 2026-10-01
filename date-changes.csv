@@ -1,0 +1,75 @@
+id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
+1,2026-10-01T08:15:25.403Z,,1,1,1.1,Project Kickoff,start,,2026-01-12,,Logging started,Start of the log,The dates each item had when date logging began
+2,2026-10-01T08:15:25.403Z,,1,1,1.1,Project Kickoff,end,,2026-01-12,,Logging started,Start of the log,The dates each item had when date logging began
+3,2026-10-01T08:15:25.403Z,,1,2,1.2,Requirements Gathering,start,,2026-01-13,,Logging started,Start of the log,The dates each item had when date logging began
+4,2026-10-01T08:15:25.403Z,,1,2,1.2,Requirements Gathering,end,,2026-02-05,,Logging started,Start of the log,The dates each item had when date logging began
+5,2026-10-01T08:15:25.403Z,,1,3,1.3,Requirements Signed Off,start,,2026-02-06,,Logging started,Start of the log,The dates each item had when date logging began
+6,2026-10-01T08:15:25.403Z,,1,3,1.3,Requirements Signed Off,end,,2026-02-06,,Logging started,Start of the log,The dates each item had when date logging began
+7,2026-10-01T08:15:25.403Z,,1,4,2.1,Solution Architecture,start,,2026-02-09,,Logging started,Start of the log,The dates each item had when date logging began
+8,2026-10-01T08:15:25.403Z,,1,4,2.1,Solution Architecture,end,,2026-02-27,,Logging started,Start of the log,The dates each item had when date logging began
+9,2026-10-01T08:15:25.403Z,,1,5,2.2,Architecture Approved,start,,2026-03-07,,Logging started,Start of the log,The dates each item had when date logging began
+10,2026-10-01T08:15:25.403Z,,1,5,2.2,Architecture Approved,end,,2026-03-07,,Logging started,Start of the log,The dates each item had when date logging began
+11,2026-10-01T08:15:25.403Z,,1,6,2.3,UX Prototyping,start,,2026-03-19,,Logging started,Start of the log,The dates each item had when date logging began
+12,2026-10-01T08:15:25.403Z,,1,6,2.3,UX Prototyping,end,,2026-03-19,,Logging started,Start of the log,The dates each item had when date logging began
+13,2026-10-01T08:15:25.403Z,,1,7,2.4,UX Prototype Complete,start,,2026-03-20,,Logging started,Start of the log,The dates each item had when date logging began
+14,2026-10-01T08:15:25.403Z,,1,7,2.4,UX Prototype Complete,end,,2026-03-20,,Logging started,Start of the log,The dates each item had when date logging began
+15,2026-10-01T08:15:25.403Z,,1,8,3.1,Vendor Negotiation,start,,2026-03-31,,Logging started,Start of the log,The dates each item had when date logging began
+16,2026-10-01T08:15:25.403Z,,1,8,3.1,Vendor Negotiation,end,,2026-03-31,,Logging started,Start of the log,The dates each item had when date logging began
+17,2026-10-01T08:15:25.403Z,,1,9,3.2,Vendor Contract Signed,start,,2026-04-01,,Logging started,Start of the log,The dates each item had when date logging began
+18,2026-10-01T08:15:25.403Z,,1,9,3.2,Vendor Contract Signed,end,,2026-04-01,,Logging started,Start of the log,The dates each item had when date logging began
+19,2026-10-01T08:15:25.403Z,,1,10,4.1,Build Phase 1,start,,2026-04-07,,Logging started,Start of the log,The dates each item had when date logging began
+20,2026-10-01T08:15:25.403Z,,1,10,4.1,Build Phase 1,end,,2026-05-19,,Logging started,Start of the log,The dates each item had when date logging began
+21,2026-10-01T08:15:25.403Z,,1,11,4.2,Build Phase 1 Complete,start,,2026-05-19,,Logging started,Start of the log,The dates each item had when date logging began
+22,2026-10-01T08:15:25.403Z,,1,11,4.2,Build Phase 1 Complete,end,,2026-05-19,,Logging started,Start of the log,The dates each item had when date logging began
+23,2026-10-01T08:15:25.403Z,,1,12,4.3,Build Phase 2,start,,2026-05-19,,Logging started,Start of the log,The dates each item had when date logging began
+24,2026-10-01T08:15:25.403Z,,1,12,4.3,Build Phase 2,end,,2026-07-25,,Logging started,Start of the log,The dates each item had when date logging began
+25,2026-10-01T08:15:25.403Z,,1,13,4.4,Build Phase 2 Complete,start,,2026-07-27,,Logging started,Start of the log,The dates each item had when date logging began
+26,2026-10-01T08:15:25.403Z,,1,13,4.4,Build Phase 2 Complete,end,,2026-07-27,,Logging started,Start of the log,The dates each item had when date logging began
+27,2026-10-01T08:15:25.403Z,,1,14,4.5,Integration Testing,start,,2026-06-01,,Logging started,Start of the log,The dates each item had when date logging began
+28,2026-10-01T08:15:25.403Z,,1,14,4.5,Integration Testing,end,,2026-07-31,,Logging started,Start of the log,The dates each item had when date logging began
+29,2026-10-01T08:15:25.403Z,,1,15,4.6,Security Pen Test,start,,2026-07-06,,Logging started,Start of the log,The dates each item had when date logging began
+30,2026-10-01T08:15:25.403Z,,1,15,4.6,Security Pen Test,end,,2026-07-17,,Logging started,Start of the log,The dates each item had when date logging began
+31,2026-10-01T08:15:25.403Z,,1,16,4.7,Test Exit,start,,2026-08-03,,Logging started,Start of the log,The dates each item had when date logging began
+32,2026-10-01T08:15:25.403Z,,1,16,4.7,Test Exit,end,,2026-08-03,,Logging started,Start of the log,The dates each item had when date logging began
+33,2026-10-01T08:15:25.403Z,,1,17,5.1,User Acceptance Testing,start,,2026-08-04,,Logging started,Start of the log,The dates each item had when date logging began
+34,2026-10-01T08:15:25.403Z,,1,17,5.1,User Acceptance Testing,end,,2026-08-20,,Logging started,Start of the log,The dates each item had when date logging began
+35,2026-10-01T08:15:25.403Z,,1,18,5.2,UAT Sign-off,start,,2026-08-21,,Logging started,Start of the log,The dates each item had when date logging began
+36,2026-10-01T08:15:25.403Z,,1,18,5.2,UAT Sign-off,end,,2026-08-21,,Logging started,Start of the log,The dates each item had when date logging began
+37,2026-10-01T08:15:25.403Z,,1,19,4.8,Migration Tooling,start,,2026-06-15,,Logging started,Start of the log,The dates each item had when date logging began
+38,2026-10-01T08:15:25.403Z,,1,19,4.8,Migration Tooling,end,,2026-08-28,,Logging started,Start of the log,The dates each item had when date logging began
+39,2026-10-01T08:15:25.403Z,,1,20,4.9,Data Migration Rehearsal,start,,2026-09-01,,Logging started,Start of the log,The dates each item had when date logging began
+40,2026-10-01T08:15:25.403Z,,1,20,4.9,Data Migration Rehearsal,end,,2026-10-02,,Logging started,Start of the log,The dates each item had when date logging began
+41,2026-10-01T08:15:25.403Z,,1,21,4.10,Migration Ready,start,,2026-10-05,,Logging started,Start of the log,The dates each item had when date logging began
+42,2026-10-01T08:15:25.403Z,,1,21,4.10,Migration Ready,end,,2026-10-05,,Logging started,Start of the log,The dates each item had when date logging began
+43,2026-10-01T08:15:25.403Z,,1,22,5.3,Training Delivery,start,,2026-09-14,,Logging started,Start of the log,The dates each item had when date logging began
+44,2026-10-01T08:15:25.403Z,,1,22,5.3,Training Delivery,end,,2026-10-09,,Logging started,Start of the log,The dates each item had when date logging began
+45,2026-10-01T08:15:25.403Z,,1,23,4.11,Cutover Preparation,start,,2026-10-06,,Logging started,Start of the log,The dates each item had when date logging began
+46,2026-10-01T08:15:25.403Z,,1,23,4.11,Cutover Preparation,end,,2026-10-16,,Logging started,Start of the log,The dates each item had when date logging began
+47,2026-10-01T08:15:25.403Z,,1,24,1.4,Go-Live,start,,2026-10-19,,Logging started,Start of the log,The dates each item had when date logging began
+48,2026-10-01T08:15:25.403Z,,1,24,1.4,Go-Live,end,,2026-10-19,,Logging started,Start of the log,The dates each item had when date logging began
+49,2026-10-01T08:15:25.403Z,,1,25,4.12,Hypercare,start,,2026-10-20,,Logging started,Start of the log,The dates each item had when date logging began
+50,2026-10-01T08:15:25.403Z,,1,25,4.12,Hypercare,end,,2026-11-12,,Logging started,Start of the log,The dates each item had when date logging began
+51,2026-10-01T08:15:25.403Z,,1,26,1.5,Hypercare Exit,start,,2026-11-13,,Logging started,Start of the log,The dates each item had when date logging began
+52,2026-10-01T08:15:25.403Z,,1,26,1.5,Hypercare Exit,end,,2026-11-13,,Logging started,Start of the log,The dates each item had when date logging began
+53,2026-10-01T08:15:25.403Z,,2,27,1.1,Lease Signed,start,,2026-06-30,,Logging started,Start of the log,The dates each item had when date logging began
+54,2026-10-01T08:15:25.403Z,,2,27,1.1,Lease Signed,end,,2026-06-30,,Logging started,Start of the log,The dates each item had when date logging began
+55,2026-10-01T08:15:25.403Z,,2,28,1.2,Space Planning,start,,2026-07-01,,Logging started,Start of the log,The dates each item had when date logging began
+56,2026-10-01T08:15:25.403Z,,2,28,1.2,Space Planning,end,,2026-08-14,,Logging started,Start of the log,The dates each item had when date logging began
+57,2026-10-01T08:15:25.403Z,,2,29,1.3,Floor Plan Approved,start,,2026-08-17,,Logging started,Start of the log,The dates each item had when date logging began
+58,2026-10-01T08:15:25.403Z,,2,29,1.3,Floor Plan Approved,end,,2026-08-17,,Logging started,Start of the log,The dates each item had when date logging began
+59,2026-10-01T08:15:25.403Z,,2,30,2.1,Fit-out Works,start,,2026-08-24,,Logging started,Start of the log,The dates each item had when date logging began
+60,2026-10-01T08:15:25.403Z,,2,30,2.1,Fit-out Works,end,,2026-11-27,,Logging started,Start of the log,The dates each item had when date logging began
+61,2026-10-01T08:15:25.403Z,,2,31,2.2,Furniture Procurement,start,,2026-09-01,,Logging started,Start of the log,The dates each item had when date logging began
+62,2026-10-01T08:15:25.403Z,,2,31,2.2,Furniture Procurement,end,,2026-10-30,,Logging started,Start of the log,The dates each item had when date logging began
+63,2026-10-01T08:15:25.403Z,,2,32,2.3,Building Ready,start,,2026-11-30,,Logging started,Start of the log,The dates each item had when date logging began
+64,2026-10-01T08:15:25.403Z,,2,32,2.3,Building Ready,end,,2026-11-30,,Logging started,Start of the log,The dates each item had when date logging began
+65,2026-10-01T08:15:25.403Z,,2,33,3.1,Network and Cabling,start,,2026-10-05,,Logging started,Start of the log,The dates each item had when date logging began
+66,2026-10-01T08:15:25.403Z,,2,33,3.1,Network and Cabling,end,,2026-11-20,,Logging started,Start of the log,The dates each item had when date logging began
+67,2026-10-01T08:15:25.403Z,,2,34,3.2,IT Services Live,start,,2026-12-04,,Logging started,Start of the log,The dates each item had when date logging began
+68,2026-10-01T08:15:25.403Z,,2,34,3.2,IT Services Live,end,,2026-12-04,,Logging started,Start of the log,The dates each item had when date logging began
+69,2026-10-01T08:15:25.403Z,,2,35,4.1,Staff Communications,start,,2026-09-07,,Logging started,Start of the log,The dates each item had when date logging began
+70,2026-10-01T08:15:25.403Z,,2,35,4.1,Staff Communications,end,,2026-12-11,,Logging started,Start of the log,The dates each item had when date logging began
+71,2026-10-01T08:15:25.403Z,,2,36,4.2,Move Weekend,start,,2026-12-12,,Logging started,Start of the log,The dates each item had when date logging began
+72,2026-10-01T08:15:25.403Z,,2,36,4.2,Move Weekend,end,,2026-12-13,,Logging started,Start of the log,The dates each item had when date logging began
+73,2026-10-01T08:15:25.403Z,,2,37,4.3,Office Open,start,,2026-12-14,,Logging started,Start of the log,The dates each item had when date logging began
+74,2026-10-01T08:15:25.403Z,,2,37,4.3,Office Open,end,,2026-12-14,,Logging started,Start of the log,The dates each item had when date logging began
