@@ -36,7 +36,7 @@ const DATASETS = {
   },
   '/api/milestones': {
     file: path.join(__dirname, 'milestones.csv'),
-    header: 'id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on\n',
+    header: 'id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on,baseline_start,baseline_end\n',
   },
   '/api/reports': {
     file: path.join(__dirname, 'reports.csv'),
@@ -71,6 +71,33 @@ function backupDaily(file, done) {
       });
       done();
     });
+  });
+}
+
+// The daily backups double as history, for "what changed since": /api/history lists the days kept
+// for each file, and /api/history/<file>/<YYYY-MM-DD> returns that day's starting copy.
+const HISTORY_FILES = ['milestones', 'reports', 'updates'];
+function serveHistory(pathname, res) {
+  const m = pathname.match(/\/api\/history(?:\/(\w+)\/(\d{4}-\d{2}-\d{2}))?\/?$/);
+  if (!m) { res.writeHead(404); return res.end('Not found'); }
+  const [, file, day] = m;
+  if (!file) {
+    return fs.readdir(BACKUP_DIR, (err, names) => {
+      const out = Object.fromEntries(HISTORY_FILES.map(f => [f, []]));
+      for (const n of err ? [] : names) {
+        const hit = n.match(/^(\w+)\.(\d{4}-\d{2}-\d{2})\.csv$/);
+        if (hit && out[hit[1]]) out[hit[1]].push(hit[2]);
+      }
+      for (const f in out) out[f].sort();
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(out));
+    });
+  }
+  if (!HISTORY_FILES.includes(file)) { res.writeHead(404); return res.end('Not found'); }
+  fs.readFile(path.join(BACKUP_DIR, `${file}.${day}.csv`), (err, data) => {
+    if (err) { res.writeHead(404); return res.end('Not found'); }
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(decodeCSV(data));
   });
 }
 
@@ -159,6 +186,7 @@ const server = http.createServer((req, res) => {
   const pathname = new URL(req.url, 'http://x').pathname;
   if (req.method === 'GET' && pathname.endsWith('/api/config')) return serveConfig(req, res);
   if (req.method === 'GET' && pathname.endsWith('/api/logo')) return serveLogo(req, res);
+  if (req.method === 'GET' && /\/api\/history(\/|$)/.test(pathname)) return serveHistory(pathname, res);
   const ds = datasetFor(pathname);
   if (ds) {
     if (req.method === 'GET') {

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+<script>/* theme before first paint, so a dark page doesn't flash light */ try { const t = JSON.parse(localStorage.getItem("milestone-tracker.app") || "{}").theme; if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; if (t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.dark = ""; } catch {}</script>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -28,6 +29,10 @@
     </div>
 
     <nav class="nav">
+      <button id="nav-search" class="nav-item nav-search" title="Find anything (⌘K)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
+        <span class="nav-text">Find…</span><kbd class="nav-text nav-kbd" id="nav-kbd">⌘K</kbd>
+      </button>
       <button id="nav-overview" class="nav-item" title="Program overview">
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M8 7.5v9"/></svg>
         <span class="nav-text">Program overview</span>
@@ -39,9 +44,12 @@
 
       <div class="nav-section">
         <label class="nav-label nav-text" for="workspace-select">Workspace</label>
-        <div class="workspace-pick" title="Switch workspace">
+        <div class="workspace-pick">
           <i id="workspace-dot" class="workspace-dot"></i>
-          <select id="workspace-select" class="nav-text" aria-label="Current workspace"></select>
+          <select id="workspace-select" class="nav-text" aria-label="Current workspace" title="Switch workspace"></select>
+          <button type="button" id="nav-settings" class="ws-gear" title="Workspace settings" aria-label="Workspace settings">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
+          </button>
         </div>
       </div>
 
@@ -55,22 +63,28 @@
       </button>
       <button id="nav-reports" class="nav-item" title="Reports">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5.5M7.5 13h5.5"/></svg>
-        <span class="nav-text">Reports</span>
+        <span class="nav-text">Reports</span><span id="nav-due" class="nav-badge" hidden></span>
+      </button>
+      <button id="nav-changes" class="nav-item" title="What changed">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10a6.5 6.5 0 1 0 2-4.7"/><path d="M3 2.8v3.4h3.4"/><path d="M10 6.5V10l2.5 1.8"/></svg>
+        <span class="nav-text">What changed</span>
       </button>
       <button id="nav-lanes" class="nav-item" title="Swimlane overview">
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M7 3.5v13"/><path d="M10 9.75h4.5M10 14.25h3"/></svg>
         <span class="nav-text">Swimlane overview</span>
       </button>
-      <button id="nav-settings" class="nav-item" title="Workspace settings">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
-        <span class="nav-text">Workspace settings</span>
-      </button>
     </nav>
 
-    <button id="nav-collapse" class="nav-collapse" title="Collapse menu" aria-expanded="true">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5 7.5 10l5 5"/></svg>
-      <span class="nav-text">Collapse</span>
-    </button>
+    <div class="nav-foot">
+      <button id="nav-theme" class="nav-collapse" title="Theme: follows the system">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5v13a6.5 6.5 0 0 0 0-13z" fill="currentColor" stroke="none"/></svg>
+        <span class="nav-text" id="nav-theme-label">Theme: Auto</span>
+      </button>
+      <button id="nav-collapse" class="nav-collapse" title="Collapse menu" aria-expanded="true">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5 7.5 10l5 5"/></svg>
+        <span class="nav-text">Collapse</span>
+      </button>
+    </div>
   </aside>
 
   <div id="app-main" class="app-main">
@@ -87,6 +101,7 @@
     <div class="toolbar">
       <div class="toolbar-group">
         <button id="btn-overview-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
+        <button class="btn" data-print title="Print this page, or save it as a PDF from the print dialog">Print / PDF</button>
         <span id="overview-count" class="grid-count"></span>
       </div>
       <div class="toolbar-group toolbar-right">
@@ -129,6 +144,7 @@
     <div class="toolbar">
       <div class="toolbar-group">
         <button id="btn-lanes-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
+        <button class="btn" data-print title="Print this page, or save it as a PDF from the print dialog">Print / PDF</button>
         <span id="lanes-count" class="grid-count"></span>
       </div>
       <div class="toolbar-group toolbar-right">
@@ -167,6 +183,24 @@
   </main>
 
 
+  <!-- ============ WHAT CHANGED ============ -->
+  <main id="view-changes" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <label class="toolbar-label" for="ch-since">Since</label>
+        <select id="ch-since" class="tb-select"></select>
+        <span id="ch-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-group toolbar-right">
+        <button class="btn" data-print title="Print this page, or save it as a PDF from the print dialog">Print / PDF</button>
+        <button id="ch-copy" class="btn" title="Copy the summary as text (Markdown) to paste into an email or chat">Copy summary</button>
+        <button id="ch-update" class="btn btn-primary" title="Start this week’s program update with the summary">Use in weekly update</button>
+      </div>
+    </div>
+    <div id="ch-body" class="ch-body"></div>
+    <p class="hint">Compares this workspace with how it stood at the start of an earlier day: RAG changes, dates that moved, <span data-term="items">items</span> added or removed, and reports written since. The server keeps a copy of each file at the start of every day it changes (in <code>backups/</code>, the last 30 of each), so those are the days you can compare with. <b>Use in weekly update</b> starts the program’s weekly update with the summary.</p>
+  </main>
+
   <!-- ============ WORKSPACES VIEW ============ -->
   <main id="view-workspaces" class="view hidden">
     <div class="toolbar">
@@ -202,6 +236,7 @@
             <label class="pop-field"><span>Owner</span><select id="gf-owner"></select></label>
             <div class="pop-field"><span>Type</span><div id="gf-type" class="pop-seg" role="group" aria-label="Type"></div></div>
             <div class="pop-field"><span>RAG</span><div id="gf-rag" class="rag-pick sm" role="group" aria-label="RAG"></div></div>
+            <div class="pop-field"><span>Show</span><div class="pop-seg"><button type="button" id="gf-late" aria-pressed="false" title="Only items past their end date and not complete, or tasks that should have started">Only overdue or late starting</button></div></div>
           </div>
         </div>
 
@@ -248,7 +283,24 @@
               <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Top timescale</label>
               <label class="check"><input type="checkbox" id="toggle-months" checked /> Bottom timescale</label>
               <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
-              <label class="check"><input type="checkbox" id="toggle-links" checked /> Dependencies</label>
+              <label class="check" title="Show where each item was planned when the baseline was set"><input type="checkbox" id="toggle-baseline" checked /> Baseline</label>
+            </div>
+            <label class="pop-field"><span>Dependency lines</span>
+              <select id="link-mode">
+                <option value="all">Always show</option>
+                <option value="hover">Only for the item under the pointer</option>
+                <option value="none">Hide</option>
+              </select>
+            </label>
+            <div class="pop-field"><span>Swimlanes</span>
+              <div class="pop-seg"><button type="button" id="fold-all" title="Fold every swimlane into one row">Fold all</button><button type="button" id="unfold-all">Unfold all</button></div>
+            </div>
+            <div class="pop-field"><span>Baseline</span>
+              <div class="pop-btns">
+                <button type="button" id="baseline-set" class="btn btn-sm" title="Record every item's current dates as the plan to measure slippage against">Set from current dates</button>
+                <button type="button" id="baseline-clear" class="btn btn-sm btn-ghost">Clear</button>
+              </div>
+              <small id="baseline-note" class="pop-note"></small>
             </div>
             <label class="pop-field"><span>Row height</span>
               <input type="range" id="row-slider" min="24" max="60" step="2" value="40" title="Below 40 the dates/owner line is hidden" />
@@ -286,6 +338,9 @@
         </div>
 
         <span class="tb-sep"></span>
+        <button id="btn-link" class="btn btn-icon" title="Copy a link to this chart with its filters" aria-label="Copy link">
+          <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 11.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M11.5 8.5a3.5 3.5 0 0 0-5 0L4 11a3.5 3.5 0 0 0 5 5l1-1"/></svg>
+        </button>
         <button id="btn-gantt-add" class="btn">+ Add <span data-term="item">item</span></button>
         <button id="btn-png" class="btn btn-primary" title="Download the chart as a PNG image">
           <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG
@@ -297,13 +352,15 @@
       <div id="gantt-container"></div>
     </div>
     <div class="legend">
-      <span class="legend-title">RAG</span>
-      <span id="legend-rag" class="legend-group"></span>
-      <span class="legend-title legend-gap">Key</span>
-      <span class="legend-item"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1 L13 7 L7 13 L1 7 Z" fill="#7a7870"/></svg> <span data-term="Milestone">Milestone</span></span>
-      <span class="legend-item"><i class="bar"></i> <span data-term="Task">Task</span></span>
-      <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#0f8b8d" stroke-width="1.5"/><path d="M18 1 L25 5 L18 9 Z" fill="#0f8b8d"/></svg> Depends on</span>
-      <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#7c3aed"/></svg> Rolls up to</span>
+      <span class="legend-set"><span class="legend-title">RAG</span><span id="legend-rag" class="legend-group"></span></span>
+      <span class="legend-set"><span class="legend-title">Key</span>
+        <span class="legend-item"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1 L13 7 L7 13 L1 7 Z" fill="#8e8d83"/></svg> <span data-term="Milestone">Milestone</span></span>
+        <span class="legend-item"><i class="bar"></i> <span data-term="Task">Task</span></span>
+        <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#0f8b8d" stroke-width="1.5"/><path d="M18 1 L25 5 L18 9 Z" fill="#0f8b8d"/></svg> Depends on</span>
+        <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#7c3aed"/></svg> Rolls up to</span>
+        <span class="legend-item" id="legend-baseline" hidden><i class="bar bar-base"></i> Baseline</span>
+        <span class="legend-item"><i class="late-dot"></i> Overdue</span>
+      </span>
     </div>
   </main>
 
@@ -354,6 +411,10 @@
   <main id="view-reports" class="view view-fill hidden">
     <div class="toolbar">
       <div class="toolbar-group">
+        <div class="mode-seg" role="radiogroup" aria-label="Show">
+          <label title="Every report in this workspace"><input type="radio" name="rp-mode" value="all" /><span>All reports</span></label>
+          <label title="What still needs a report this period, by owner"><input type="radio" name="rp-mode" value="due" /><span>Due <b id="rp-due-count" class="seg-count"></b></span></label>
+        </div>
         <button id="btn-new-report" class="btn btn-primary">+ New report</button>
         <button id="btn-reports-csv" class="btn" title="Download the reports shown (filters applied) as a CSV">Download CSV</button>
         <span id="rp-count" class="grid-count"></span>
@@ -376,7 +437,9 @@
       <div id="rp-divider" class="rp-divider" title="Drag to resize · double-click to reset"></div>
       <section id="rp-pane" class="rp-pane" aria-label="Selected report"></section>
     </div>
-    <p class="hint">Select a report to read it in the preview, and use <b>↑</b> <b>↓</b> to move through the list. Click into the preview to edit the report. Sort, filter and resize columns as on the Items tab. To report on something, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
+    <div id="rp-due" class="rp-due" hidden></div>
+    <p id="rp-due-hint" class="hint" hidden><b>Due</b> lists what still needs a report this period, by owner: anything that has started or already has reports, until it reaches a done status. Each follows the cadence of its latest report (weekly if it has none), and a report whose period reaches into the current one covers it. <b>Periods missed</b> counts the periods since its last report.</p>
+    <p id="rp-hint" class="hint">Select a report to read it in the preview, and use <b>↑</b> <b>↓</b> to move through the list. Click into the preview to edit the report. Sort, filter and resize columns as on the Items tab. To report on something, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
       Reports are stored in <code>reports.csv</code>, one row per report, linked to what it covers by its ID.</p>
   </main>
   </div>
@@ -384,6 +447,7 @@
 
   <!-- ============ HOVER CARD + QUICK UPDATE + EDIT DIALOG ============ -->
   <div id="tip" class="tip" role="tooltip"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <div id="quick" class="quick" role="dialog" aria-label="Quick update" hidden></div>
 
   <dialog id="edit-dialog" class="edit-dialog">
@@ -543,6 +607,17 @@
         <button type="submit" id="up-submit" class="btn btn-primary">Submit update</button>
       </footer>
     </form>
+  </dialog>
+
+  <!-- ============ FIND (⌘K) ============ -->
+  <dialog id="palette" class="palette" aria-label="Find">
+    <div class="pal-search">
+      <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
+      <input id="pal-q" type="search" placeholder="Find an item, workspace or page…" autocomplete="off" aria-controls="pal-list" />
+      <kbd>Esc</kbd>
+    </div>
+    <ul id="pal-list" class="pal-list" role="listbox"></ul>
+    <p class="pal-foot"><kbd>↑</kbd> <kbd>↓</kbd> to choose · <kbd>Enter</kbd> to open · searches every workspace by ref, title, owner and swimlane</p>
   </dialog>
 
   <!-- ============ IMPORT DIALOG ============ -->

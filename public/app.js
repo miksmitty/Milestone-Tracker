@@ -79,8 +79,25 @@ const gradId = (st) => `grad-${STATUSES.includes(st) ? STATUSES.indexOf(st) : 'x
 const statusOptions = (selected, names = STATUSES) =>
   optionList(selected && !names.includes(selected) ? [...names, selected] : names, selected);
 const SHAPES = ['diamond', 'circle', 'square', 'triangle'];
-const LANE_ACCENTS = ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'];
-const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on'];
+// The chart's own colours, light and dark; G is the set in use (see applyTheme).
+const GANTT_THEMES = {
+  light: {
+    bg: '#ffffff', alt: '#f9f8f5', line: '#e0ded6', strong: '#cccabc', tick: '#a8a69c', tierTop: '#ecebe4', tierBottom: '#f4f3ee',
+    text: '#262626', textTop: '#1c1c1c', sub: '#5a5d5c', muted: '#7a7870', accent: '#e60000', today: '#1c1c1c',
+    weekend: '#1c1c1c', weekendOpacity: 0.035, shadow: '#1c1c1c', shadowOpacity: 0.3, baseline: '#a8a69c',
+    links: { dep: '#0f8b8d', roll: '#7c3aed' }, // connector colours stay clear of the RAG palette
+    laneAccents: ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'],
+  },
+  dark: {
+    bg: '#1f1f1d', alt: '#252523', line: '#34342f', strong: '#45443e', tick: '#5d5c55', tierTop: '#2c2c29', tierBottom: '#262624',
+    text: '#ecebe4', textTop: '#f4f3ee', sub: '#b3b1a6', muted: '#9a988d', accent: '#ff5a5a', today: '#f4f3ee',
+    weekend: '#ffffff', weekendOpacity: 0.03, shadow: '#000000', shadowOpacity: 0.5, baseline: '#8e8d83',
+    links: { dep: '#2bb5b0', roll: '#a78bfa' },
+    laneAccents: ['#ff5a5a', '#cccabc', '#8e8d83', '#d0705c', '#5b9bd5', '#cfbd9b', '#7a7870'],
+  },
+};
+let G = GANTT_THEMES.light;
+const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on', 'baseline_start', 'baseline_end'];
 const MS_DAY = 86400000;
 
 const state = {
@@ -104,7 +121,8 @@ const state = {
   showQuarters: true,
   timescale: 'quarters', // key of TIMESCALES
   showToday: true,
-  showLinks: true,
+  linkMode: 'all',      // dependency lines: 'all', 'hover' (only the item under the pointer) or 'none'
+  showBaseline: true,
   userZoomed: false, // once the user touches zoom, stop auto-fitting on resize
 };
 
@@ -189,7 +207,7 @@ function toCSV(items) {
   const lines = [COLUMNS.join(',')];
   for (const m of items) {
     lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
-      m.status, m.shape, m.parent, m.deps.join(';')].map(csvEscape).join(','));
+      m.status, m.shape, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -211,6 +229,8 @@ const HEADER_ALIASES = {
   shape: ['shape'],
   parent: ['parent', 'rollsupto', 'rollup'],
   deps: ['dependson', 'dependencies', 'deps'],
+  baseline_start: ['baselinestart'],
+  baseline_end: ['baselineend'],
 };
 
 function rowsToItems(rows) {
@@ -244,6 +264,8 @@ function rowsToItems(rows) {
       shape: normaliseShape(get(r, 'shape')),
       parent: get(r, 'parent'),
       deps: get(r, 'deps').split(/[;|\s]+/).filter(Boolean),
+      baseline_start: get(r, 'baseline_start'),
+      baseline_end: get(r, 'baseline_end'),
     };
   });
 
@@ -438,6 +460,72 @@ function flashStatus(msg, ok, sticky) {
   if (ok !== null && !sticky) el._t = setTimeout(() => { el.textContent = ''; }, 5000);
 }
 
+/* ---- undo ---- */
+// Changes made in one go (deletes, imports, bulk edits, dragging on the chart, quick updates)
+// snapshot every record set first. The toast that reports the change offers Undo — so does
+// ⌘/Ctrl+Z when you're not typing — which puts the snapshot back and saves what it changes.
+
+const undoStack = []; // [{ label, snap }], newest last
+const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'lanes'];
+
+function snapshotData() {
+  syncEditorToState();
+  return {
+    items: JSON.stringify(allItems()), reports: JSON.stringify(allReports()), updates: JSON.stringify(state.updates),
+    workspaces: JSON.stringify(state.workspaces), statuses: JSON.stringify(state.statuses), lanes: JSON.stringify(state.lanes),
+    workspaceId: state.workspaceId,
+  };
+}
+
+// Call with a snapshot taken before the change, once the change is made.
+function offerUndo(snap, label) {
+  undoStack.push({ label, snap });
+  if (undoStack.length > 30) undoStack.shift();
+  showToast(label, true);
+}
+
+async function undoLast() {
+  const u = undoStack.pop();
+  if (!u) return showToast('Nothing to undo');
+  if (!leavePaneEdit()) { undoStack.push(u); return; }
+  hideQuick();
+  document.querySelectorAll('dialog[open]').forEach(d => d.close());
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  const now = snapshotData();
+  const changed = UNDO_KEYS.filter(k => now[k] !== u.snap[k]);
+  const s = u.snap;
+  state.workspaces = JSON.parse(s.workspaces);
+  state.statuses = JSON.parse(s.statuses);
+  state.updates = JSON.parse(s.updates);
+  state.lanes = JSON.parse(s.lanes);
+  state.items = []; state.reports = [];
+  state.otherItems = JSON.parse(s.items);
+  state.otherReports = JSON.parse(s.reports);
+  document.getElementById('editor-body').innerHTML = ''; // so a sync can't write the undone values back
+  const range = [state.rangeStart, state.rangeEnd];
+  selectWorkspace(state.workspaces.some(p => p.id === state.workspaceId) ? state.workspaceId : s.workspaceId);
+  [state.rangeStart, state.rangeEnd] = range;
+  applyWorkspaceChrome();
+  rerenderCurrentView();
+  if (isShown('editor')) renderEditor();
+  showToast(`Undone: ${u.label}`);
+  const save = { items: saveData, reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, lanes: saveLanes };
+  await Promise.all(changed.map(k => save[k]('Undone')));
+}
+
+// A short message at the foot of the window, with Undo when the change can be taken back.
+function showToast(msg, undo = false) {
+  const el = document.getElementById('toast');
+  el.innerHTML = `<span class="toast-msg">${escAttr(msg)}</span>${undo ? '<button type="button" class="toast-undo" data-undo>Undo</button>' : ''}<button type="button" class="toast-close" title="Dismiss" aria-label="Dismiss">✕</button>`;
+  el.hidden = false;
+  el.classList.remove('show');
+  void el.offsetWidth; // restart the entrance animation
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.hidden = true; }, undo ? 9000 : 4000);
+}
+
 /* ================= date helpers ================= */
 
 function parseDate(s) {
@@ -471,6 +559,15 @@ function isDoneStatus(name, workspaceId = state.workspaceId) {
   const st = statusesFor(workspaceId).find(s => s.name === name);
   return [name, st?.description].some(v => /^\s*(complete|completed|done)\s*$/i.test(v || ''));
 }
+
+// Overdue: its end date has passed and it isn't at a done status. A late start is a task whose
+// start has passed while it's still at the workspace's default (not started) status.
+const todayISO = () => fmtISO(new Date());
+const isLate = (m) => !!m.end && m.end < todayISO() && !isDoneStatus(m.status, m.workspace_id);
+const isLateStart = (m) => isTask(m) && !isLate(m) && !!m.start && m.start < todayISO() && m.status === ragOf(m.workspace_id).def;
+const daysText = (n) => `${n} day${n === 1 ? '' : 's'}`;
+const lateText = (m) => `Overdue by ${daysText(daysBetween(m.end, todayISO()))}`;
+const lateStartText = (m) => `Should have started ${daysText(daysBetween(m.start, todayISO()))} ago`;
 
 // A milestone's progress: the share of its tasks' total duration that is complete. Counts the
 // tasks that roll up to it, directly or through other milestones. null when it has no tasks.
@@ -509,6 +606,32 @@ function autoRange() {
   }
   document.getElementById('range-start').value = fmtISO(state.rangeStart);
   document.getElementById('range-end').value = fmtISO(state.rangeEnd);
+}
+
+/* ---- baseline ---- */
+// A snapshot of the planned dates (View → Set baseline), kept in baseline_start / baseline_end.
+// The chart shows where an item was planned when it has moved, and the hover card how far.
+const hasBaseline = (m) => !!(m.baseline_end && (m.baseline_start || !isTask(m)));
+const baselineMoved = (m) => hasBaseline(m) && (m.baseline_end !== m.end || (isTask(m) && m.baseline_start !== m.start));
+function baselineRow(m) {
+  if (!hasBaseline(m)) return '';
+  const when = isTask(m) && m.baseline_start !== m.baseline_end ? `${fmtShort(m.baseline_start)} – ${fmtShort(m.baseline_end)}` : fmtShort(m.baseline_end);
+  const d = daysBetween(m.baseline_end, m.end);
+  const drift = !d ? (baselineMoved(m) ? 'same end date' : 'on baseline') : d > 0 ? `slipped ${daysText(d)}` : `${daysText(-d)} early`;
+  return `<div class="tip-row tip-muted"><span>Baseline ${when} · <b class="${d > 0 ? 'tip-slip' : ''}">${drift}</b></span></div>`;
+}
+
+// Record (or clear) every item's dates as the baseline, for the whole workspace.
+async function setBaseline(on) {
+  const snap = snapshotData();
+  for (const m of state.items) {
+    m.baseline_start = on ? m.start : '';
+    m.baseline_end = on ? m.end : '';
+  }
+  renderGantt();
+  const msg = on ? `Baseline set from today’s dates for ${count(state.items.length, T.item, T.items)}` : 'Baseline cleared';
+  offerUndo(snap, msg);
+  await saveData(msg);
 }
 
 /* ================= scheduling ================= */
@@ -751,8 +874,8 @@ function titleText(attrs, m, refFill, tagFill) {
   return t;
 }
 
-// Outside labels get a white outline so they stay readable over gridlines and arrows.
-const HALO = { 'paint-order': 'stroke', stroke: '#ffffff', 'stroke-width': 3, 'stroke-linejoin': 'round' };
+// Outside labels get an outline in the background colour so they stay readable over gridlines and arrows.
+const halo = () => ({ 'paint-order': 'stroke', stroke: G.bg, 'stroke-width': 3, 'stroke-linejoin': 'round' });
 
 function layoutLanes(items, xOf, rm, minX, maxX) {
   // Group by swimlane → sub-swimlane (first-appearance order), then pack each sub-lane into rows.
@@ -774,7 +897,18 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
   }
   sortLanes(lanes);
   const oneEach = ganttSort.rows !== 'packed';
+  const folded = collapsedLanes();
   for (const lane of lanes) {
+    if (folded.has(lane.name)) {
+      // folded: one summary row for the whole swimlane
+      const all = lane.subs.flatMap(sub => sub.items);
+      for (const m of all) m._row = 0;
+      lane.collapsed = true;
+      lane.count = all.length;
+      lane.subs = [{ name: '', items: all, rows: 1, collapsed: true, h: Math.max(44, rm.h + rm.pad * 2) }];
+      lane.h = lane.subs[0].h;
+      continue;
+    }
     for (const sub of lane.subs) {
       sub.items.sort(oneEach ? ganttItemOrder : (a, b) => a._s - b._s || a._e - b._e);
       const rowEnds = [];
@@ -836,23 +970,36 @@ function drawShape(parent, shape, cx, cy, status, s) {
   parent.appendChild(el);
 }
 
-// Connector colours stay clear of the RAG palette (green, amber, red, blue, grey).
-const LINK_COLOR = { dep: '#0f8b8d', roll: '#7c3aed' };
 
-// Elbow connector from the end of `a` to the start of `b`.
+// A path through right-angled points, with the corners rounded.
+function roundedPath(pts, r = 5) {
+  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1], [x, y] = pts[i], [nx, ny] = pts[i + 1];
+    const k = Math.min(r, Math.hypot(x - px, y - py) / 2, Math.hypot(nx - x, ny - y) / 2);
+    const ax = x - Math.sign(x - px) * k, ay = y - Math.sign(y - py) * k;
+    const bx = x + Math.sign(nx - x) * k, by = y + Math.sign(ny - y) * k;
+    d += ` L ${ax} ${ay} Q ${x} ${y} ${bx} ${by}`;
+  }
+  const [lx, ly] = pts.at(-1);
+  return d + ` L ${lx} ${ly}`;
+}
+
+// Elbow connector from the end of `a` to the start of `b`. The vertical run sits just before `b`,
+// so lines drop into what they lead to rather than hanging off early items across the chart.
 function drawLink(svg, a, b, rollup, rm) {
   const fx = a.x2 + (a.task ? 0 : rm.shapeS + 2), fy = a.cy;
   const tx = b.x1 - (b.task ? 0 : rm.shapeS + 3), ty = b.cy;
   let d;
   if (fy === ty && tx > fx) d = `M ${fx} ${fy} H ${tx}`;
-  else if (tx - fx >= 14) d = `M ${fx} ${fy} H ${fx + 7} V ${ty} H ${tx}`;
+  else if (tx - fx >= 14) d = roundedPath([[fx, fy], [tx - 8, fy], [tx - 8, ty], [tx, ty]]);
   else {
     const midY = fy === ty ? fy + rm.h / 2 : (fy + ty) / 2;
-    d = `M ${fx} ${fy} H ${fx + 7} V ${midY} H ${tx - 9} V ${ty} H ${tx}`;
+    d = roundedPath([[fx, fy], [fx + 7, fy], [fx + 7, midY], [tx - 9, midY], [tx - 9, ty], [tx, ty]]);
   }
   svg.appendChild(svgEl('path', {
     d, fill: 'none', class: 'gantt-link', 'data-from': a.id, 'data-to': b.id,
-    stroke: LINK_COLOR[rollup ? 'roll' : 'dep'], 'stroke-width': 1.4, 'stroke-opacity': 0.9,
+    stroke: G.links[rollup ? 'roll' : 'dep'], 'stroke-width': 1.4, 'stroke-opacity': 0.75,
     'stroke-dasharray': rollup ? '4 3' : 'none',
     'marker-end': `url(#arrow-${rollup ? 'roll' : 'dep'})`,
   }));
@@ -862,6 +1009,7 @@ function renderGantt() {
   const container = document.getElementById('gantt-container');
   container.innerHTML = '';
   hideTip();
+  chainLinks = null;
   if (!state.rangeStart) return; // data not loaded yet
 
   const LABEL_W = labelWidth();
@@ -891,7 +1039,7 @@ function renderGantt() {
   const height = headerH + bodyH + 8;
 
   const svg = svgEl('svg', {
-    width, height, viewBox: `0 0 ${width} ${height}`,
+    width, height, viewBox: `0 0 ${width} ${height}`, class: state.linkMode === 'hover' ? 'links-hover' : '',
     xmlns: 'http://www.w3.org/2000/svg',
     style: 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;',
   });
@@ -906,9 +1054,9 @@ function renderGantt() {
     defs.appendChild(g);
   }
   const f = svgEl('filter', { id: 'ms-shadow', x: '-40%', y: '-40%', width: '180%', height: '180%' });
-  f.appendChild(svgEl('feDropShadow', { dx: 0, dy: 1.2, stdDeviation: 1.2, 'flood-color': '#1c1c1c', 'flood-opacity': '0.30' }));
+  f.appendChild(svgEl('feDropShadow', { dx: 0, dy: 1.2, stdDeviation: 1.2, 'flood-color': G.shadow, 'flood-opacity': G.shadowOpacity }));
   defs.appendChild(f);
-  for (const [id, color] of Object.entries(LINK_COLOR)) {
+  for (const [id, color] of Object.entries(G.links)) {
     const mk = svgEl('marker', { id: `arrow-${id}`, viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: 'auto' });
     mk.appendChild(svgEl('path', { d: 'M 0 0 L 8 4 L 0 8 Z', fill: color }));
     defs.appendChild(mk);
@@ -916,56 +1064,65 @@ function renderGantt() {
   svg.appendChild(defs);
 
   // background
-  svg.appendChild(svgEl('rect', { x: 0, y: 0, width, height, fill: '#ffffff' }));
+  svg.appendChild(svgEl('rect', { x: 0, y: 0, width, height, fill: G.bg }));
 
   // Label column and timescale header are separate layers, pinned while the chart scrolls
   // (see syncGanttSticky) so swimlane names and dates stay in view, as in MS Project.
   const col = svgEl('g', { class: 'gantt-col' });
   const head = svgEl('g', { class: 'gantt-head' });
   const corner = svgEl('g', { class: 'gantt-corner' });
-  head.appendChild(svgEl('rect', { x: 0, y: 0, width, height: headerH, fill: '#ffffff' }));
-  corner.appendChild(svgEl('rect', { x: 0, y: 0, width: LABEL_W, height: headerH, fill: '#ffffff' }));
-  corner.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: headerH, stroke: '#cccabc', 'stroke-width': 1 }));
-  if (headerH) corner.appendChild(svgEl('line', { x1: 0, y1: headerH, x2: LABEL_W, y2: headerH, stroke: '#cccabc', 'stroke-width': 1 }));
+  head.appendChild(svgEl('rect', { x: 0, y: 0, width, height: headerH, fill: G.bg }));
+  corner.appendChild(svgEl('rect', { x: 0, y: 0, width: LABEL_W, height: headerH, fill: G.bg }));
+  corner.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: headerH, stroke: G.strong, 'stroke-width': 1 }));
+  if (headerH) corner.appendChild(svgEl('line', { x1: 0, y1: headerH, x2: LABEL_W, y2: headerH, stroke: G.strong, 'stroke-width': 1 }));
 
   // lane backgrounds (alternating) + lane / sub-lane labels
   let y = headerH;
   lanes.forEach((lane, i) => {
-    if (i % 2 === 1) svg.appendChild(svgEl('rect', { x: 0, y, width, height: lane.h, fill: '#f9f8f5' }));
-    col.appendChild(svgEl('rect', { x: 0, y, width: LABEL_W, height: lane.h, fill: i % 2 ? '#f9f8f5' : '#ffffff' }));
-    const accent = LANE_ACCENTS[i % LANE_ACCENTS.length];
+    if (i % 2 === 1) svg.appendChild(svgEl('rect', { x: 0, y, width, height: lane.h, fill: G.alt }));
+    col.appendChild(svgEl('rect', { x: 0, y, width: LABEL_W, height: lane.h, fill: i % 2 ? G.alt : G.bg }));
+    const accent = G.laneAccents[i % G.laneAccents.length];
     col.appendChild(svgEl('rect', { x: 0, y: y + 4, width: 4, height: lane.h - 8, rx: 2, fill: accent }));
     const laneColW = subCol ? LANE_COL_W : LABEL_W;
-    col.appendChild(svgEl('text', {
-      x: 16, y: y + lane.h / 2 + 5, 'font-size': 14, 'font-weight': 700, fill: '#262626',
-    }, truncate(lane.name, laneColW - 24, 14, 700)));
+    // click the swimlane's name to fold it into one summary row (and back)
+    const toggle = svgEl('g', { class: 'lane-toggle', 'data-lane': lane.name, role: 'button', tabindex: 0,
+      'aria-expanded': String(!lane.collapsed), 'aria-label': `${lane.collapsed ? 'Expand' : 'Collapse'} ${lane.name}` });
+    toggle.appendChild(svgEl('rect', { x: 4, y, width: laneColW - 4, height: lane.h, fill: 'transparent' }));
+    toggle.appendChild(svgEl('path', {
+      d: lane.collapsed ? `M 14 ${y + lane.h / 2 - 4} l 4.5 4 l -4.5 4` : `M 12 ${y + lane.h / 2 - 2} l 4 4.5 l 4 -4.5`,
+      fill: 'none', stroke: G.muted, 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    }));
+    const nameY = lane.collapsed ? y + lane.h / 2 + 1 : y + lane.h / 2 + 5;
+    toggle.appendChild(svgEl('text', { x: 26, y: nameY, 'font-size': 14, 'font-weight': 700, fill: G.text }, truncate(lane.name, laneColW - 34, 14, 700)));
+    if (lane.collapsed) toggle.appendChild(svgEl('text', { x: 26, y: nameY + 13, 'font-size': 10.5, fill: G.muted }, `${lane.count} ${lane.count === 1 ? T.item : T.items} folded`));
+    col.appendChild(toggle);
 
     let sy = y;
     lane.subs.forEach((sub, j) => {
       sub._y = sy;
       if (subCol) {
         if (j > 0) {
-          svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: width, y2: sy, stroke: '#e0ded6', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
-          col.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: LABEL_W, y2: sy, stroke: '#e0ded6', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+          svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: width, y2: sy, stroke: G.line, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+          col.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: LABEL_W, y2: sy, stroke: G.line, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
         }
         if (sub.name) {
           col.appendChild(svgEl('text', {
-            x: LANE_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: '#5a5d5c',
+            x: LANE_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: G.sub,
           }, truncate(sub.name, SUB_COL_W - 20, 12, 600)));
         }
       }
       sy += sub.h;
     });
     if (subCol) {
-      col.appendChild(svgEl('line', { x1: LANE_COL_W, y1: y, x2: LANE_COL_W, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
+      col.appendChild(svgEl('line', { x1: LANE_COL_W, y1: y, x2: LANE_COL_W, y2: y + lane.h, stroke: G.line, 'stroke-width': 1 }));
     }
-    svg.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: width, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
-    col.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: LABEL_W, y2: y + lane.h, stroke: '#e0ded6', 'stroke-width': 1 }));
+    svg.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: width, y2: y + lane.h, stroke: G.line, 'stroke-width': 1 }));
+    col.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: LABEL_W, y2: y + lane.h, stroke: G.line, 'stroke-width': 1 }));
     y += lane.h;
   });
 
   // vertical separator between labels and chart
-  col.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: height, stroke: '#cccabc', 'stroke-width': 1 }));
+  col.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: height, stroke: G.strong, 'stroke-width': 1 }));
 
   // ---- timescale: two tiers of headers + grid, like MS Project ----
   const gridBottom = headerH + bodyH;
@@ -979,14 +1136,14 @@ function renderGantt() {
     for (; d < state.rangeEnd; d.setDate(d.getDate() + 1)) {
       if (d.getDay() !== 6) continue; // Saturday: shade Sat + Sun together
       const x1 = xOf(d), x2 = xOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 2));
-      if (x2 > x1) svg.appendChild(svgEl('rect', { x: x1, y: headerH, width: x2 - x1, height: bodyH, fill: '#1c1c1c', 'fill-opacity': 0.035 }));
+      if (x2 > x1) svg.appendChild(svgEl('rect', { x: x1, y: headerH, width: x2 - x1, height: bodyH, fill: G.weekend, 'fill-opacity': G.weekendOpacity }));
     }
   }
 
   // One tier: header band with a label per unit, and a gridline at each unit's start.
   const drawTier = (unit, bandY, bandH, top) => {
     const u = TIME_UNITS[unit];
-    head.appendChild(svgEl('rect', { x: LABEL_W, y: bandY, width: chartW, height: bandH, fill: top ? '#ecebe4' : '#f4f3ee' }));
+    head.appendChild(svgEl('rect', { x: LABEL_W, y: bandY, width: chartW, height: bandH, fill: top ? G.tierTop : G.tierBottom }));
     const size = top ? 12.5 : 11.5, weight = top ? 700 : 600;
     const cells = [];
     for (let d = u.start(state.rangeStart); d < state.rangeEnd; d = u.next(d)) {
@@ -994,7 +1151,7 @@ function renderGantt() {
       const x2 = Math.min(width - PAD_RIGHT + 10, rawX(u.next(d)));
       if (x2 - x1 < 4) continue;
       if (rawX(d) >= LABEL_W) {
-        const line = top ? { stroke: '#a8a69c', 'stroke-width': 1.2 } : { stroke: '#e0ded6', 'stroke-width': 1 };
+        const line = top ? { stroke: G.tick, 'stroke-width': 1.2 } : { stroke: G.line, 'stroke-width': 1 };
         head.appendChild(svgEl('line', { x1: rawX(d), y1: bandY, x2: rawX(d), y2: headerH, ...line }));
         svg.appendChild(svgEl('line', { x1: rawX(d), y1: headerH, x2: rawX(d), y2: gridBottom, ...line }));
       }
@@ -1012,11 +1169,11 @@ function renderGantt() {
       if (i < n) {
         head.appendChild(svgEl('text', {
           x: (c.x1 + c.x2) / 2, y: bandY + bandH / 2 + 4.5, 'text-anchor': 'middle',
-          'font-size': size, 'font-weight': weight, fill: top ? '#1c1c1c' : '#5a5d5c',
+          'font-size': size, 'font-weight': weight, fill: top ? G.textTop : G.sub,
         }, c.labels[i]));
       }
     }
-    head.appendChild(svgEl('line', { x1: LABEL_W, y1: bandY + bandH, x2: width, y2: bandY + bandH, stroke: '#cccabc', 'stroke-width': 1 }));
+    head.appendChild(svgEl('line', { x1: LABEL_W, y1: bandY + bandH, x2: width, y2: bandY + bandH, stroke: G.strong, 'stroke-width': 1 }));
   };
   if (state.showMonths) drawTier(scale.bottom, topH, MONTH_H, false);
   if (state.showQuarters) drawTier(scale.top, 0, QUARTER_H, true);
@@ -1027,19 +1184,22 @@ function renderGantt() {
   for (const lane of lanes) {
     for (const sub of lane.subs) {
       for (const m of sub.items) {
-        m._cy = sub._y + rm.pad + m._row * rm.h + rm.h / 2 - rm.offset;
+        m._cy = sub.collapsed ? sub._y + sub.h / 2 : sub._y + rm.pad + m._row * rm.h + rm.h / 2 - rm.offset;
         m._sub = sub;
+        m._collapsed = !!sub.collapsed;
         pos.set(m.id, { id: m.id, x1: xOf(m._s), x2: xOf(m._e), cy: m._cy, task: m._task });
       }
     }
   }
 
   // ---- dependency + roll-up connectors (under the items) ----
-  if (state.showLinks) {
+  if (state.linkMode !== 'none') {
+    const shown = (id) => pos.has(id) && !items.find(x => x.id === id)._collapsed; // folded swimlanes draw no links
     for (const m of items) {
+      if (m._collapsed) continue;
       const b = pos.get(m.id);
-      for (const d of m.deps) if (pos.has(d)) drawLink(svg, pos.get(d), b, false, rm);
-      if (m.parent && pos.has(m.parent)) drawLink(svg, b, pos.get(m.parent), true, rm);
+      for (const d of m.deps) if (shown(d)) drawLink(svg, pos.get(d), b, false, rm);
+      if (m.parent && shown(m.parent)) drawLink(svg, b, pos.get(m.parent), true, rm);
     }
   }
 
@@ -1049,6 +1209,28 @@ function renderGantt() {
     const c = pal(m.status);
     const g = svgEl('g', { 'data-id': m.id, class: 'gantt-item' });
 
+    if (m._collapsed) {
+      // a folded swimlane: every item on one row, small and unlabelled (the hover card still works)
+      if (m._task) {
+        g.appendChild(svgEl('rect', { x: x1, y: cy - 3.5, width: Math.max(2, x2 - x1), height: 7, rx: 3.5, fill: `url(#${gradId(m.status)})`, stroke: c.dark, 'stroke-width': 0.8, 'fill-opacity': 0.9 }));
+      } else drawShape(g, m.shape, x1, cy, m.status, 4.5);
+      svg.appendChild(g);
+      continue;
+    }
+
+    // where it was planned, when the baseline is shown and it has moved: a thin bar just under a
+    // task's bar, or a dashed outline of a milestone's shape
+    if (state.showBaseline && baselineMoved(m)) {
+      const bs = parseDate(isTask(m) ? m.baseline_start : m.baseline_end), be = parseDate(isTask(m) ? addDays(m.baseline_end, 1) : m.baseline_end);
+      const bx1 = xOf(bs), bx2 = xOf(be);
+      const ghost = { fill: 'none', stroke: G.baseline, 'stroke-width': 1.2, 'stroke-dasharray': '3 2', 'pointer-events': 'none', class: 'gantt-baseline' };
+      if (m._task) g.appendChild(svgEl('rect', { x: bx1, y: cy + rm.barH / 2 + 1.5, width: Math.max(2, bx2 - bx1), height: 3, rx: 1.5, fill: G.baseline, 'pointer-events': 'none', class: 'gantt-baseline' }));
+      else {
+        const sz = rm.shapeS + 2;
+        g.appendChild(svgEl('path', { d: `M ${bx1} ${cy - sz} L ${bx1 + sz} ${cy} L ${bx1} ${cy + sz} L ${bx1 - sz} ${cy} Z`, ...ghost }));
+      }
+    }
+
     if (m._task) {
       const bh = rm.barH;
       g.appendChild(svgEl('rect', {
@@ -1057,60 +1239,239 @@ function renderGantt() {
       }));
       if (m._side === 'inside') {
         g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text, c.text));
-        if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: '#7a7870', ...HALO }, m._meta));
+        if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: G.muted, ...halo() }, m._meta));
       }
     } else {
       // stem down to sub-lane bottom for readability
-      svg.appendChild(svgEl('line', {
-        x1, y1: cy + rm.shapeS + 3, x2: x1, y2: m._sub._y + m._sub.h - 4,
-        stroke: '#cccabc', 'stroke-width': 1, 'stroke-dasharray': '2 3',
+      g.appendChild(svgEl('line', {
+        x1, y1: cy + rm.shapeS + 3, x2: x1, y2: m._sub._y + m._sub.h - 4, 'pointer-events': 'none',
+        stroke: G.strong, 'stroke-width': 1, 'stroke-dasharray': '2 3',
       }));
       drawShape(g, m.shape, x1, cy, m.status, rm.shapeS);
     }
     if (m._side !== 'inside') {
       const anchor = m._side === 'left' ? 'end' : 'start';
       const ty = rm.detail ? cy + 1 : cy + 4.5;
-      g.appendChild(titleText({ x: m._lx, y: ty, 'text-anchor': anchor, 'font-size': 12.5, 'font-weight': 600, fill: '#262626', ...HALO }, m, '#e60000', '#7a7870'));
-      if (m._meta) g.appendChild(svgEl('text', { x: m._lx, y: cy + 15, 'text-anchor': anchor, 'font-size': 10.5, fill: '#7a7870', ...HALO }, m._meta));
+      g.appendChild(titleText({ x: m._lx, y: ty, 'text-anchor': anchor, 'font-size': 12.5, 'font-weight': 600, fill: G.text, ...halo() }, m, G.accent, G.muted));
+      if (m._meta) g.appendChild(svgEl('text', { x: m._lx, y: cy + 15, 'text-anchor': anchor, 'font-size': 10.5, fill: G.muted, ...halo() }, m._meta));
+    }
+    // overdue: a red "!" on its top-right corner; a late start gets an amber one
+    const late = isLate(m), lateStart = !late && isLateStart(m);
+    if (late || lateStart) {
+      const bx = m._task ? x2 - 1 : x1 + rm.shapeS + 1, by = m._task ? cy - rm.barH / 2 : cy - rm.shapeS - 1;
+      const badge = svgEl('g', { class: 'gantt-late', 'pointer-events': 'none' });
+      badge.appendChild(svgEl('circle', { cx: bx, cy: by, r: 6, fill: late ? G.accent : '#f59e0b', stroke: G.bg, 'stroke-width': 1.5 }));
+      badge.appendChild(svgEl('text', { x: bx, y: by + 3.4, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': 800, fill: late ? '#fff' : '#422006' }, '!'));
+      g.appendChild(badge);
     }
     svg.appendChild(g);
   }
 
   // ---- today line (on top of the items, but see-through so labels stay readable) ----
+  // Its label sits in the timescale header, so it never covers an item and stays in view when scrolling.
   const today = new Date(); today.setHours(0, 0, 0, 0);
   if (state.showToday && today >= state.rangeStart && today <= state.rangeEnd) {
     const tx = rawX(today);
-    const pill = svgEl('g', { 'pointer-events': 'none' });
-    pill.appendChild(svgEl('line', {
-      x1: tx, y1: gridTop, x2: tx, y2: gridBottom,
-      stroke: '#1c1c1c', 'stroke-width': 1.5, 'stroke-dasharray': '5 4', 'stroke-opacity': 0.4,
+    svg.appendChild(svgEl('line', {
+      x1: tx, y1: gridTop, x2: tx, y2: gridBottom, 'pointer-events': 'none',
+      stroke: G.today, 'stroke-width': 1.5, 'stroke-dasharray': '5 4', 'stroke-opacity': 0.45,
     }));
-    pill.appendChild(svgEl('rect', { x: tx - 24, y: gridTop + 4, width: 48, height: 17, rx: 8.5, fill: '#1c1c1c', 'fill-opacity': 0.7 }));
-    pill.appendChild(svgEl('text', { x: tx, y: gridTop + 16, 'text-anchor': 'middle', 'font-size': 10.5, 'font-weight': 700, fill: '#fff' }, 'TODAY'));
-    svg.appendChild(pill);
+    const pill = svgEl('g', { 'pointer-events': 'none', class: 'gantt-today' });
+    const py = headerH ? headerH - 18 : gridTop + 4;
+    pill.appendChild(svgEl('rect', { x: tx - 21, y: py, width: 42, height: 15, rx: 7.5, fill: G.accent }));
+    pill.appendChild(svgEl('text', { x: tx, y: py + 11, 'text-anchor': 'middle', 'font-size': 9.5, 'font-weight': 700, 'letter-spacing': '.04em', fill: '#fff' }, 'TODAY'));
+    (headerH ? head : svg).appendChild(pill);
   }
 
   if (!items.length && ganttFiltered()) {
-    svg.appendChild(svgEl('text', { x: LABEL_W + 20, y: headerH + 64, 'font-size': 13, fill: '#7a7870' },
+    svg.appendChild(svgEl('text', { x: LABEL_W + 20, y: headerH + 64, 'font-size': 13, fill: G.muted },
       `No ${T.items} match the filters in this date range.`));
   }
   svg.append(head, col, corner);
   container.appendChild(svg);
   syncGanttSticky();
+  if (kbId) svg.querySelector(`.gantt-item[data-id="${kbId}"]`)?.classList.add('kb');
+  focusLinks(null); // keep a pinned item's chain picked out
 }
 
-// Pick out the hovered item's connectors and fade the rest.
+/* ---- dragging on the chart ---- */
+// Drag an item to move it, or the left or right end of a task's bar to change its start or end.
+// Days snap as you go; the card beside the pointer says where it lands and how many items
+// downstream move with it. Nothing changes until you let go (Esc cancels), and Undo takes it back.
+
+let drag = null;          // { m, g, mode: 'move' | 'start' | 'end', x0, days, active }
+let dragSuppressClick = false;
+
+function dragChanges(m, mode, days) {
+  if (mode === 'move') return isTask(m) ? { start: addDays(m.start, days), end: addDays(m.end, days) } : { end: addDays(m.end, days) };
+  if (mode === 'end') return { end: addDays(m.end, Math.max(days, daysBetween(m.end, m.start))) };
+  return { start: addDays(m.start, Math.min(days, daysBetween(m.start, m.end))) };
+}
+
+// What a change would do, without keeping it: the item's new dates and what else would move.
+function previewUpdate(m, changes) {
+  const saved = state.items.map(x => [x, x.start, x.end, x.type]);
+  const res = updateItem(m, changes);
+  const out = { error: res.error, start: m.start, end: m.end, moved: (res.moved || []).filter(id => id !== m.id).length };
+  for (const [x, a, b, t] of saved) Object.assign(x, { start: a, end: b, type: t });
+  return out;
+}
+
+// Which part of an item the pointer is on: a task's ends are for resizing.
+function dragModeAt(g, m, clientX) {
+  if (!isTask(m)) return 'move';
+  const bar = g.querySelector('rect:not(.gantt-baseline)');
+  if (!bar) return 'move';
+  const r = bar.getBoundingClientRect();
+  if (r.width >= 18 && Math.abs(clientX - r.right) <= 6) return 'end';
+  if (r.width >= 18 && Math.abs(clientX - r.left) <= 6) return 'start';
+  return 'move';
+}
+
+function onDragMove(e) {
+  if (!drag) return;
+  const dx = e.clientX - drag.x0;
+  if (!drag.active) {
+    if (Math.abs(dx) < 5) return;
+    drag.active = true;
+    hideQuick();
+    document.getElementById('gantt-container').classList.add('dragging');
+  }
+  const days = Math.round(dx / state.pxPerDay);
+  if (days === drag.days) return moveTip(e);
+  drag.days = days;
+  const { m, g, mode } = drag;
+  const px = days * state.pxPerDay;
+  if (mode === 'move') g.setAttribute('transform', `translate(${px} 0)`);
+  else {
+    const bar = g.querySelector('rect:not(.gantt-baseline)');
+    bar._x ??= +bar.getAttribute('x');
+    bar._w ??= +bar.getAttribute('width');
+    const w = mode === 'end' ? Math.max(2, bar._w + px) : Math.max(2, bar._w - px);
+    bar.setAttribute('x', mode === 'end' ? bar._x : bar._x + bar._w - w);
+    bar.setAttribute('width', w);
+  }
+  const p = previewUpdate(m, dragChanges(m, mode, days));
+  const what = mode === 'move' ? (days ? `${days > 0 ? '+' : '−'}${daysText(Math.abs(days))}` : 'No change')
+    : `${mode === 'end' ? 'End' : 'Start'} ${days > 0 ? '+' : days < 0 ? '−' : ''}${days ? daysText(Math.abs(days)) : 'unchanged'}`;
+  const tip = document.getElementById('tip');
+  tip.innerHTML = `
+    <div class="tip-head">${m.ref ? `<span class="tip-ref">${escAttr(m.ref)}</span>` : ''}<span>${what}</span></div>
+    <div class="tip-row">${p.error ? escAttr(p.error) : isTask(m) ? `${fmtShort(p.start)} – ${fmtNice(p.end)} <span class="tip-muted">(${daysText(daysBetween(p.start, p.end) + 1)})</span>` : fmtNice(p.end)}</div>
+    ${p.moved ? `<div class="tip-row tip-late amber">Moves ${count(p.moved, `${T.item} downstream`, `${T.items} downstream`)}</div>` : ''}
+    <div class="tip-hint">Let go to save · Esc to cancel</div>`;
+  tipAvoid = [];
+  tip.classList.add('show');
+  moveTip(e);
+}
+
+async function onDragEnd() {
+  if (!drag) return;
+  const { m, mode, days, active } = drag;
+  drag = null;
+  document.getElementById('gantt-container').classList.remove('dragging');
+  if (!active) return;
+  dragSuppressClick = true; // the click that ends a drag doesn't open the quick update panel
+  setTimeout(() => { dragSuppressClick = false; }, 0);
+  hideTip();
+  if (!days) return renderGantt();
+  const snap = snapshotData();
+  const res = updateItem(m, dragChanges(m, mode, days));
+  renderGantt();
+  if (res.error) return showToast(res.error);
+  const msg = [`${itemLabel(m)}: ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
+  offerUndo(snap, msg);
+  await saveData(msg);
+}
+
+/* ---- keyboard on the chart ---- */
+// Tab into the chart, then the arrow keys move between items (← → along a swimlane, ↑ ↓ to the
+// row above or below), Enter opens the quick update panel and Esc lets go.
+
+function ganttKeyNav(e) {
+  if (e.target.closest('.lane-toggle') && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault();
+    return toggleLane(e.target.closest('.lane-toggle').dataset.lane);
+  }
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape', ' '].includes(e.key)) return;
+  const gs = [...document.querySelectorAll('#gantt-container .gantt-item')];
+  if (!gs.length) return;
+  const at = (g) => { const r = g.getBoundingClientRect(); return { g, x: r.left, y: r.top + r.height / 2, lane: itemById(g.dataset.id)?.swimlane }; };
+  const all = gs.map(at);
+  const cur = all.find(a => a.g.dataset.id === kbId);
+  if (e.key === 'Escape') { if (kbId) { setKbItem(null); e.preventDefault(); } return; }
+  if (e.key === 'Enter' || e.key === ' ') {
+    if (!cur) return;
+    e.preventDefault();
+    const r = cur.g.getBoundingClientRect();
+    return showQuick(itemById(kbId), { preventDefault() {}, clientX: r.left + r.width / 2, clientY: r.bottom });
+  }
+  e.preventDefault();
+  if (!cur) return setKbItem(all.sort((a, b) => a.y - b.y || a.x - b.x)[0].g.dataset.id);
+  let next;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
+    const lane = all.filter(a => a.lane === cur.lane && a !== cur && Math.sign(a.x - cur.x || a.y - cur.y) === dir);
+    next = lane.sort((a, b) => dir * (a.x - b.x) || Math.abs(a.y - cur.y) - Math.abs(b.y - cur.y))[0];
+  } else {
+    const dir = e.key === 'ArrowDown' ? 1 : -1;
+    const rows = all.filter(a => (a.y - cur.y) * dir > 4);
+    next = rows.sort((a, b) => Math.abs(a.y - cur.y) - Math.abs(b.y - cur.y) || Math.abs(a.x - cur.x) - Math.abs(b.x - cur.x))[0];
+  }
+  if (next) setKbItem(next.g.dataset.id);
+}
+
+function setKbItem(id) {
+  if (quickId && quickId !== id) hideQuick();
+  kbId = id;
+  document.querySelectorAll('#gantt-container .gantt-item.kb').forEach(g => g.classList.remove('kb'));
+  const g = id && document.querySelector(`#gantt-container .gantt-item[data-id="${id}"]`);
+  if (!g) { hideTip(); return focusLinks(null); }
+  g.classList.add('kb');
+  g.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  focusLinks(itemById(id));
+  setTimeout(() => { // once scrolling has settled (scrolling hides the card)
+    if (kbId !== id) return;
+    const r = g.getBoundingClientRect();
+    showTip(itemById(id), { clientX: r.right, clientY: r.top + r.height / 2 });
+  }, 60);
+}
+
+// Everything linked to an item, however distantly: upstream is what it waits on and what rolls up
+// into it; downstream is what waits on it and what it rolls up to. Worked out once per render.
+let chainLinks = null; // { succ, pred }
+function chainParts(id) {
+  if (!chainLinks) {
+    const succ = successorMap();
+    const pred = new Map(state.items.map(m => [m.id, []]));
+    for (const [a, list] of succ) for (const b of list) pred.get(b)?.push(a);
+    chainLinks = { succ, pred };
+  }
+  const walk = (next) => {
+    const seen = new Set(), queue = [id];
+    while (queue.length) for (const y of next.get(queue.shift()) || []) if (y !== id && !seen.has(y)) { seen.add(y); queue.push(y); }
+    return seen;
+  };
+  return { up: walk(chainLinks.pred), down: walk(chainLinks.succ) };
+}
+const chainOf = (id) => { const { up, down } = chainParts(id); return new Set([id, ...up, ...down]); };
+
+// Pick out an item's whole chain — its own links strongest, the rest of the chain lit, everything
+// else faded. Follows the pointer; while an item's quick update panel is open (or it has the
+// keyboard focus) its chain stays picked out.
+const pinnedItem = () => itemById(quickId) || itemById(kbId);
 function focusLinks(m) {
   const svg = document.querySelector('#gantt-container svg');
   if (!svg) return;
-  const links = svg.querySelectorAll('.gantt-link');
-  let any = false;
-  for (const l of links) {
-    const on = !!m && (l.dataset.from === m.id || l.dataset.to === m.id);
-    l.classList.toggle('hl', on);
-    any ||= on;
+  m ||= pinnedItem();
+  const ids = m ? chainOf(m.id) : new Set();
+  const on = ids.size > 1;
+  for (const l of svg.querySelectorAll('.gantt-link')) {
+    l.classList.toggle('hl', on && ids.has(l.dataset.from) && ids.has(l.dataset.to));
+    l.classList.toggle('direct', on && (l.dataset.from === m.id || l.dataset.to === m.id));
   }
-  svg.classList.toggle('link-focus', any);
+  for (const g of svg.querySelectorAll('.gantt-item')) g.classList.toggle('dim', on && !ids.has(g.dataset.id));
+  svg.classList.toggle('link-focus', on);
 }
 
 // Keep the label column and timescale header in view while the chart panel scrolls.
@@ -1130,11 +1491,11 @@ function syncGanttSticky() {
 // "packed" fits several items to a row by date, the other orders give each item its own row.
 // The sort is a per-browser preference.
 
-const ganttFilter = { q: '', lane: '', owner: '', type: '', rag: [] };
+const ganttFilter = { q: '', lane: '', owner: '', type: '', rag: [], late: false };
 const GANTT_SORT_DEFAULT = { lanes: 'name', rows: 'packed', dir: 1 }; // swimlanes A–Z, items packed by date
 const ganttSort = { ...GANTT_SORT_DEFAULT };
 
-const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.lane || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length);
+const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.lane || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late);
 
 function ganttMatches(m) {
   const f = ganttFilter, q = f.q.trim().toLowerCase();
@@ -1142,11 +1503,29 @@ function ganttMatches(m) {
     && (!f.owner || m.owner === f.owner)
     && (!f.type || (f.type === 'task') === isTask(m))
     && (!f.rag.length || f.rag.includes(m.status))
+    && (!f.late || isLate(m) || isLateStart(m))
     && (!q || [m.ref, m.title, m.description, m.owner, m.swimlane, m.subswimlane].join(' ').toLowerCase().includes(q));
 }
 
 function clearGanttFilters() {
-  Object.assign(ganttFilter, { q: '', lane: '', owner: '', type: '', rag: [] });
+  Object.assign(ganttFilter, { q: '', lane: '', owner: '', type: '', rag: [], late: false });
+}
+
+// Folded swimlanes, per workspace (a per-browser preference).
+function collapsedLanes() {
+  return new Set(loadAppPrefs().folded?.[state.workspaceId] || []);
+}
+function toggleLane(name, fold) {
+  const all = loadAppPrefs().folded || {};
+  const set = new Set(all[state.workspaceId] || []);
+  if (fold ?? !set.has(name)) set.add(name); else set.delete(name);
+  saveAppPrefs({ folded: { ...all, [state.workspaceId]: [...set] } });
+  renderGantt();
+}
+function foldAllLanes(fold) {
+  const all = loadAppPrefs().folded || {};
+  saveAppPrefs({ folded: { ...all, [state.workspaceId]: fold ? [...new Set(state.items.map(m => m.swimlane))] : [] } });
+  renderGantt();
 }
 
 // Swimlanes and their sub-swimlanes share one order.
@@ -1203,6 +1582,7 @@ function renderGanttFilters() {
   document.getElementById('gf-rag').innerHTML = STATUSES.map(st => `
     <button type="button" data-rag="${escAttr(st)}" aria-pressed="${f.rag.includes(st)}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
 
+  document.getElementById('gf-late').setAttribute('aria-pressed', f.late);
   const q = document.getElementById('gf-q');
   if (document.activeElement !== q) q.value = f.q; // don't disturb the caret while typing
 
@@ -1211,6 +1591,7 @@ function renderGanttFilters() {
     f.owner && ['owner', 'Owner', f.owner],
     f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : T.Milestones],
     f.rag.length && ['rag', 'RAG', f.rag.join(', ')],
+    f.late && ['late', 'Show', 'Overdue or late starting'],
   ].filter(Boolean);
   const badge = document.getElementById('gf-badge');
   badge.hidden = !chips.length;
@@ -1234,6 +1615,17 @@ function renderGanttFilters() {
   });
   document.getElementById('gs-badge').hidden = ganttSort.lanes === GANTT_SORT_DEFAULT.lanes && packed;
 
+  const based = state.items.filter(hasBaseline);
+  const moved = based.filter(baselineMoved).length;
+  document.getElementById('baseline-note').textContent = based.length
+    ? `${count(moved, T.item, T.items)} of ${based.length} moved since the baseline`
+    : 'No baseline yet: set one to see what slips.';
+  document.getElementById('baseline-clear').disabled = !based.length;
+  document.getElementById('legend-baseline').hidden = !(state.showBaseline && moved);
+  document.getElementById('link-mode').value = state.linkMode;
+  document.getElementById('toggle-baseline').checked = state.showBaseline;
+
+  writeHash();
   const fmtR = (d) => d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }).replace(' ', ' ’');
   if (state.rangeStart) document.getElementById('range-label').textContent = `${fmtR(state.rangeStart)} – ${fmtR(state.rangeEnd)}`;
 }
@@ -1280,11 +1672,12 @@ function wireGanttFilters() {
     ganttFilter.rag = ganttFilter.rag.includes(st) ? ganttFilter.rag.filter(x => x !== st) : [...ganttFilter.rag, st];
     renderGantt();
   });
+  document.getElementById('gf-late').addEventListener('click', () => { ganttFilter.late = !ganttFilter.late; renderGantt(); });
   document.getElementById('gf-chips').addEventListener('click', (e) => {
     const k = e.target.closest('[data-unfilter]')?.dataset.unfilter;
     if (!k) return;
     if (k === 'all') clearGanttFilters();
-    else ganttFilter[k] = k === 'rag' ? [] : '';
+    else ganttFilter[k] = k === 'rag' ? [] : k === 'late' ? false : '';
     renderGantt();
   });
   document.getElementById('gs-lanes').addEventListener('change', (e) => { ganttSort.lanes = e.target.value; saveSort(); });
@@ -1313,11 +1706,15 @@ function showTip(m, e) {
     <div class="tip-head">${m.ref ? `<span class="tip-ref">${escAttr(m.ref)}</span>` : ''}<span>${escAttr(m.title)}</span></div>
     <div class="tip-row"><span class="pill" style="background:${c.base};color:${c.text}">${m.status}</span><span>${escAttr(typeName(m))} · ${when}</span></div>
     ${progress}
+    ${isLate(m) ? `<div class="tip-row tip-late">${lateText(m)}</div>` : isLateStart(m) ? `<div class="tip-row tip-late amber">${lateStartText(m)}</div>` : ''}
+    ${baselineRow(m)}
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
     ${tipLinks(m)}
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
     ${lastReportLine(m)}
     <div class="tip-hint">Click to update RAG or dates, or to report</div>`;
+  const ids = chainOf(m.id);
+  tipAvoid = [...document.querySelectorAll('#gantt-container .gantt-item')].filter(g => ids.has(g.dataset.id)).map(g => g.getBoundingClientRect());
   tip.classList.add('show');
   moveTip(e);
 }
@@ -1326,20 +1723,28 @@ function tipLinks(m) {
   const parent = m.parent && state.items.find(p => p.id === m.parent);
   const kids = state.items.filter(k => k.parent === m.id).sort(cmpRef);
   const ref = (x) => `<span class="tip-ref">${escAttr(itemLabel(x))}</span>`;
+  const { up, down } = chainParts(m.id);
   return [
     parent && `<div class="tip-links"><b>Rolls up to</b> ${ref(parent)} ${escAttr(parent.title)}</div>`,
     kids.length && `<div class="tip-links"><b>Rolled up from</b> ${kids.map(ref).join(', ')}</div>`,
+    (up.size || down.size) && `<div class="tip-links tip-chain"><b>Chain</b> ${[up.size && `waits on ${up.size}`, down.size && `holds up ${down.size}`].filter(Boolean).join(' · ')}</div>`,
   ].filter(Boolean).join('');
 }
+// The card goes beside the pointer, on whichever side covers least of the items linked to the
+// one under it (they're picked out on the chart, so the card shouldn't hide them).
+let tipAvoid = [];
 function moveTip(e) {
   const tip = document.getElementById('tip');
   const pad = 14;
   tip.style.left = tip.style.top = '0px'; // measure at full width, not squeezed against the edge
-  let x = e.clientX + pad, y = e.clientY + pad;
-  if (x + tip.offsetWidth > window.innerWidth - 8) x = e.clientX - tip.offsetWidth - pad;
-  if (y + tip.offsetHeight > window.innerHeight - 8) y = e.clientY - tip.offsetHeight - pad;
-  tip.style.left = x + 'px';
-  tip.style.top = y + 'px';
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  const fit = (x, y) => [Math.max(8, Math.min(x, window.innerWidth - w - 8)), Math.max(8, Math.min(y, window.innerHeight - h - 8))];
+  const spots = [[e.clientX + pad, e.clientY + pad], [e.clientX + pad, e.clientY - h - pad], [e.clientX - w - pad, e.clientY + pad], [e.clientX - w - pad, e.clientY - h - pad]].map(([x, y]) => fit(x, y));
+  const covers = ([x, y]) => tipAvoid.reduce((a, r) => a + Math.max(0, Math.min(x + w, r.right) - Math.max(x, r.left)) * Math.max(0, Math.min(y + h, r.bottom) - Math.max(y, r.top)), 0)
+    + (e.clientX >= x && e.clientX <= x + w && e.clientY >= y && e.clientY <= y + h ? 1e9 : 0); // never under the pointer
+  const best = spots.reduce((b, p) => (covers(p) < covers(b) ? p : b));
+  tip.style.left = best[0] + 'px';
+  tip.style.top = best[1] + 'px';
 }
 function hideTip() {
   document.getElementById('tip')?.classList.remove('show');
@@ -1439,6 +1844,7 @@ async function submitEditDialog(e) {
   const clash = changes.ref && state.items.find(x => x !== editing && x.ref === changes.ref);
   if (clash) return (err.textContent = `Ref ${changes.ref} is already used by “${clash.title}”.`);
 
+  const snap = snapshotData();
   let m = editing;
   if (!m) {
     m = { id: nextId(), workspace_id: state.workspaceId, ...changes, parent: '', deps: [] };
@@ -1450,15 +1856,19 @@ async function submitEditDialog(e) {
     return (err.textContent = res.error);
   }
   document.getElementById('edit-dialog').close();
-  renderGantt();
+  rerenderCurrentView();
+  offerUndo(snap, [editing ? `${itemLabel(m)} saved` : `Added ${fullLabel(m)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
   await saveData(movedMessage(m, res.moved));
 }
 
 async function deleteFromDialog() {
-  if (!editing || !confirm(deleteMessage(editing))) return;
+  if (!editing) return;
+  const snap = snapshotData();
+  const label = `Deleted ${fullLabel(editing)}`;
   removeItem(editing.id);
   document.getElementById('edit-dialog').close();
-  renderGantt();
+  rerenderCurrentView();
+  offerUndo(snap, label);
   await saveData('Deleted');
 }
 
@@ -1699,7 +2109,7 @@ const GRID_COLS = [
 ];
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
 const QUICK_COLS = {
-  sel: {}, id: {}, ref: {}, title: { w: 220 }, type: {}, owner: {}, status: { w: 410, wkey: 'status.quick' }, start: {}, end: {},
+  sel: {}, id: { w: 56 }, ref: { w: 70 }, title: { w: 180 }, type: { w: 120 }, owner: { w: 130 }, status: { w: 205, wkey: 'status.compact' }, start: { w: 130 }, end: { w: 130 },
   actions: { w: 90, wkey: 'actions.quick' },
 };
 
@@ -1707,6 +2117,7 @@ const grid = makeTable({
   table: 'editor-table',
   store: 'milestone-tracker.grid',
   mode: 'quick',
+  fill: 'title', // the title takes any spare width
   cols: () => (grid.mode === 'quick'
     ? Object.entries(QUICK_COLS).map(([k, o]) => ({ ...GRID_COLS.find(c => c.key === k), ...o }))
     : GRID_COLS),
@@ -1772,6 +2183,7 @@ function renderEditor(highlight = []) {
     const chips = m.deps.map(d => `
       <span class="chip" title="${escAttr(byId.get(d)?.title)}">${escAttr(itemLabel(byId.get(d)))}<button data-rmdep="${i}" data-dep="${d}" title="Remove dependency">×</button></span>`).join('');
     const dup = refCount.get(m.ref) > 1;
+    const late = isLate(m);
 
     const quick = grid.mode === 'quick';
     // A milestone's two date cells are one date: editing either moves the milestone.
@@ -1786,9 +2198,9 @@ function renderEditor(highlight = []) {
       swimlane: `<input data-i="${i}" data-k="swimlane" value="${escAttr(m.swimlane)}" list="lane-list" placeholder="Swimlane" />`,
       subswimlane: `<input data-i="${i}" data-k="subswimlane" value="${escAttr(m.subswimlane)}" list="sublane-list" placeholder="Sub-swimlane" />`,
       owner: `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
-      start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}"${dateTitle} ${task ? '' : 'class="ms-date"'} />`,
-      end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}"${dateTitle} ${task ? '' : 'class="ms-date"'} />`,
-      status: quick ? `<div class="rag-pick sm">${ragButtons(m.status, `data-i="${i}"`)}</div>`
+      start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}"${dateTitle} />`,
+      end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}"${late ? ` class="late" title="${escAttr(lateText(m))}"` : dateTitle} />`,
+      status: quick ? `<div class="rag-pick sm compact">${ragButtons(m.status, `data-i="${i}"`)}</div>`
         : `<select data-i="${i}" data-k="status" class="status-sel" style="color:${pal(m.status).dark}">${statusOptions(m.status)}</select>`,
       shape: `<select data-i="${i}" data-k="shape" ${task ? `disabled title="${escAttr(T.Tasks)} are drawn as bars"` : ''}>${optionList(SHAPES, m.shape)}</select>`,
       parent: `<select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select>`,
@@ -1907,9 +2319,10 @@ function onEditorClick(e) {
   if (del) {
     syncEditorToState();
     const m = state.items[+del.dataset.del];
-    if (!confirm(deleteMessage(m))) return;
+    const snap = snapshotData();
     removeItem(m.id);
     renderEditor();
+    offerUndo(snap, `Deleted ${fullLabel(m)}`);
     scheduleSave('Deleted');
   }
 }
@@ -1987,6 +2400,7 @@ function applyBulk() {
   const items = selectedItems();
   if (!items.length) return;
   const v = document.getElementById('bulk-input').value.trim();
+  const snap = snapshotData();
   const snapshot = new Map(state.items.map(x => [x.id, x.start + x.end]));
   const others = () => state.items.filter(x => !gridSel.has(x.id) && snapshot.get(x.id) !== x.start + x.end).map(x => x.id);
   const also = (ids) => (ids.length ? ` · ${ids.length} downstream ${ids.length > 1 ? T.items : T.item} rescheduled` : '');
@@ -1999,6 +2413,7 @@ function applyBulk() {
     enforceConstraints();
     const moved = others();
     renderEditor([...items.map(m => m.id), ...moved]);
+    offerUndo(snap, `Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}`);
     return scheduleSave(`Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}${also(moved)}`);
   }
   if (bulkField === 'swimlane' && !v) return flashStatus('Enter a swimlane', false);
@@ -2011,6 +2426,7 @@ function applyBulk() {
   const moved = others();
   const label = BULK_FIELDS().find(([k]) => k === bulkField)[1];
   renderEditor(moved);
+  if (done) offerUndo(snap, `${label} updated on ${count(done, T.item, T.items)}`);
   scheduleSave(`${label} updated on ${count(done, T.item, T.items)}` +
     (skipped ? ` · ${skipped} skipped (would roll up to itself or create a loop)` : '') + also(moved));
 }
@@ -2019,13 +2435,12 @@ function bulkDelete() {
   syncEditorToState();
   const items = selectedItems();
   if (!items.length) return;
-  const reports = items.reduce((n, m) => n + reportsFor(m.id).length, 0);
   const what = count(items.length, T.item, T.items);
-  if (!confirm(`Delete ${what}? Any links to ${items.length > 1 ? 'them' : 'it'} will be removed.` +
-    (reports ? `\n\nTheir ${reports} report${reports > 1 ? 's are' : ' is'} kept in reports.csv.` : ''))) return;
+  const snap = snapshotData();
   for (const m of items) removeItem(m.id);
   gridSel.clear();
   renderEditor();
+  offerUndo(snap, `Deleted ${what}`);
   scheduleSave(`Deleted ${what}`);
 }
 
@@ -2134,12 +2549,6 @@ function lastReportLine(m) {
     : '<div class="tip-row tip-muted">No reports yet</div>';
 }
 
-function deleteMessage(m) {
-  const n = reportsFor(m.id).length;
-  return `Delete “${fullLabel(m)}”? Any links to it will be removed.` +
-    (n ? `\n\nIts ${n} report${n > 1 ? 's are' : ' is'} kept in reports.csv.` : '');
-}
-
 /* ---- quick update panel (click or right-click an item on the chart) ---- */
 // RAG, type and dates change far more often than an item's details, so they sit here; everything
 // else lives behind "Edit details". Changes are a draft until Save, and the draft keeps both
@@ -2148,6 +2557,7 @@ function deleteMessage(m) {
 let quickId = null;    // item the panel is showing
 let quickDraft = null; // {status, type, start, end} as edited, not yet saved
 let quickMsg = '';     // why the last Save didn't go through
+let kbId = null;       // item with the keyboard focus on the chart
 
 function showQuick(m, e) {
   e.preventDefault();
@@ -2159,16 +2569,30 @@ function showQuick(m, e) {
   renderQuick();
   const el = document.getElementById('quick');
   el.hidden = false;
-  el.style.left = Math.max(8, Math.min(e.clientX + 10, window.innerWidth - el.offsetWidth - 8)) + 'px';
-  el.style.top = Math.max(8, Math.min(e.clientY + 10, window.innerHeight - el.offsetHeight - 8)) + 'px';
+  // Beside the item rather than on top of it: right of it, else left, else below or above.
+  const g = document.querySelector(`#gantt-container .gantt-item[data-id="${m.id}"]`);
+  const r = g ? g.getBoundingClientRect() : { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY };
+  const w = el.offsetWidth, h = el.offsetHeight, W = window.innerWidth, H = window.innerHeight, gap = 12;
+  const clampY = (y) => Math.max(8, Math.min(y, H - h - 8));
+  const clampX = (x) => Math.max(8, Math.min(x, W - w - 8));
+  let x, y;
+  if (r.right + gap + w <= W - 8) [x, y] = [r.right + gap, clampY(r.top - 12)];
+  else if (r.left - gap - w >= 8) [x, y] = [r.left - gap - w, clampY(r.top - 12)];
+  else if (r.bottom + gap + h <= H - 8) [x, y] = [clampX(e.clientX - w / 2), r.bottom + gap];
+  else [x, y] = [clampX(e.clientX - w / 2), Math.max(8, r.top - gap - h)];
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+  focusLinks(m);
   el.querySelector('.rag-pick [aria-pressed="true"]')?.focus();
 }
 
 function hideQuick() {
   const el = document.getElementById('quick');
   if (el) el.hidden = true;
+  const was = quickId;
   quickId = null;
   quickDraft = null;
+  if (was) focusLinks(null);
 }
 
 // Has anything in the panel changed from the saved item?
@@ -2191,7 +2615,7 @@ function dependentCount(id) {
 }
 
 const ragButtons = (current, attrs = '') => STATUSES.map(st => `
-  <button type="button" data-rag="${escAttr(st)}" ${attrs} aria-pressed="${st === current}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
+  <button type="button" data-rag="${escAttr(st)}" ${attrs} aria-pressed="${st === current}" title="${escAttr(st)}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
 
 function renderQuick() {
   const m = itemById(quickId), d = quickDraft;
@@ -2250,7 +2674,9 @@ function refreshQuickSave() {
 
 function setRag(m, st) {
   if (m.status === st) return false;
+  const snap = snapshotData();
   m.status = st;
+  offerUndo(snap, `${itemLabel(m)} RAG is now ${st}`);
   saveData(`${itemLabel(m)} RAG is now ${st}`);
   return true;
 }
@@ -2309,6 +2735,7 @@ async function onQuickDateSubmit(e) {
     quickMsg = 'The end date is before the start date.';
     return renderQuick();
   }
+  const snap = snapshotData();
   const msgs = [];
   if (d.status !== m.status) { m.status = d.status; msgs.push(`RAG ${d.status}`); }
   const changes = { type: d.type, end: d.end, start: task ? d.start : d.end };
@@ -2325,7 +2752,9 @@ async function onQuickDateSubmit(e) {
   }
   hideQuick();
   renderGantt();
-  await saveData([`${itemLabel(m)}: ${msgs.join(', ')}`, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
+  const msg = [`${itemLabel(m)}: ${msgs.join(', ')}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
+  offerUndo(snap, msg);
+  await saveData(msg);
 }
 
 /* ---- markdown ---- */
@@ -2913,10 +3342,12 @@ async function submitReport(e) {
 async function deleteReport() {
   if (!rpEditing) return;
   const m = itemById(rpEditing.item_id);
-  if (!confirm(`Delete the report${m ? ` on “${fullLabel(m)}”` : ''} for the period ending ${fmtNice(rpEditing.period_end)}?`)) return;
+  const snap = snapshotData();
+  const label = `Deleted the report${m ? ` on ${itemLabel(m)}` : ''} for ${fmtShort(rpEditing.period_end)}`;
   state.reports = state.reports.filter(r => r !== rpEditing);
   document.getElementById('report-dialog').close();
   rerenderCurrentView();
+  offerUndo(snap, label);
   await saveReports('Report deleted');
 }
 
@@ -2926,19 +3357,22 @@ const orphanReports = () => state.reports.filter(r => !itemById(r.item_id));
 async function deleteOrphanReports() {
   const gone = new Set(orphanReports());
   if (!gone.size || !leavePaneEdit()) return;
-  if (!confirm(`Delete ${count(gone.size, 'report', 'reports')} on ${T.items} that no longer exist in this workspace?\n\nThis can’t be undone.`)) return;
+  const snap = snapshotData();
   state.reports = state.reports.filter(r => !gone.has(r));
   paneEditing = false;
   rerenderCurrentView();
+  offerUndo(snap, `Deleted ${count(gone.size, 'report', 'reports')} on deleted ${T.items}`);
   await saveReports(`${count(gone.size, 'report', 'reports')} deleted`);
 }
 
 function rerenderCurrentView() {
+  updateDueBadge();
   if (isShown('gantt')) renderGantt();
   if (isShown('reports')) renderReports();
   if (isShown('workspaces')) renderWorkspaces();
   if (isShown('overview')) renderOverview();
   if (isShown('lanes')) renderLaneOverview();
+  if (isShown('changes')) renderChanges();
 }
 
 /* ---- reports list ---- */
@@ -3020,7 +3454,97 @@ function stampCell(iso) {
   return `<td class="rc-stamp" title="${escAttr(fmtStamp(iso))}">${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}<small>${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</small></td>`;
 }
 
+/* ---- reports due ---- */
+// What still needs a report this period. An item is being reported on once it has started or has
+// a report, until it reaches a done status. Its cadence is that of its latest report (weekly if it
+// has none); it's covered once a report's period reaches into the current one.
+
+let rptMode = 'all'; // 'all' reports, or what's 'due'
+
+function reportsDue(items = state.items) {
+  const today = todayISO();
+  const out = [];
+  for (const m of items) {
+    if (isDoneStatus(m.status, m.workspace_id)) continue;
+    const reps = reportsFor(m.id);
+    const last = reps[0];
+    if (!last && !(m.start && m.start <= today)) continue; // not started and never reported on
+    const cadence = last?.cadence || 'Weekly';
+    const end = defaultPeriodEnd(cadence);
+    const start = periodStart(end, cadence);
+    if (last && last.period_end >= start) continue; // this period is covered
+    const missed = last ? Math.max(0, Math.floor(daysBetween(last.period_end, start) / (cadence === 'Monthly' ? 30 : cadence === 'Fortnightly' ? 14 : 7))) : 0;
+    out.push({ m, cadence, end, last, missed });
+  }
+  return out;
+}
+
+function updateDueBadge() {
+  const n = reportsDue().length;
+  for (const id of ['nav-due', 'rp-due-count']) {
+    const el = document.getElementById(id);
+    el.textContent = n || '';
+    el.hidden = !n;
+  }
+  document.getElementById('nav-due').title = `${count(n, 'report', 'reports')} due this period`;
+}
+
+function renderDue() {
+  const due = reportsDue();
+  const byOwner = new Map();
+  for (const d of due) {
+    const k = d.m.owner || '';
+    if (!byOwner.has(k)) byOwner.set(k, []);
+    byOwner.get(k).push(d);
+  }
+  const owners = [...byOwner.keys()].sort((a, b) => (!a) - (!b) || a.localeCompare(b));
+  const when = (d) => {
+    if (!d.last) return '<span class="due-late">No reports yet</span>';
+    const ago = `${statusPill(d.last.status)} <span class="muted">period ending ${fmtShort(d.last.period_end)}</span>`;
+    return d.missed ? `${ago} <span class="due-late">· ${count(d.missed, 'period', 'periods')} missed</span>` : ago;
+  };
+  document.getElementById('rp-due').innerHTML = due.length ? `
+    <table class="due-table">
+      <thead><tr><th>${escAttr(T.Item)}</th><th>RAG</th><th>Cadence</th><th>Due for the period ending</th><th>Last report</th><th></th></tr></thead>
+      ${owners.map(o => `
+        <tbody>
+          <tr class="due-owner"><th colspan="6">${o ? escAttr(o) : '<span class="muted">No owner</span>'} <span class="muted">· ${count(byOwner.get(o).length, 'report', 'reports')} due</span></th></tr>
+          ${byOwner.get(o).sort((a, b) => b.missed - a.missed || cmpRef(a.m, b.m)).map(d => `
+            <tr>
+              <td>${d.m.ref ? `<b class="ref">${escAttr(d.m.ref)}</b> ` : ''}${escAttr(d.m.title)}</td>
+              <td>${statusPill(d.m.status)}</td>
+              <td>${d.cadence}</td>
+              <td>${fmtNice(d.end)}</td>
+              <td>${when(d)}</td>
+              <td class="due-act"><button type="button" class="btn btn-sm" data-due-report="${d.m.id}">Provide report…</button></td>
+            </tr>`).join('')}
+        </tbody>`).join('')}
+    </table>`
+    : `<p class="due-empty">Every ${escAttr(T.item)} that’s under way has a report for this period. Nothing is due.</p>`;
+}
+
+function setReportsMode(mode) {
+  if (mode === rptMode) return;
+  if (mode === 'due' && !leavePaneEdit()) return (document.querySelector('[name="rp-mode"][value="all"]').checked = true);
+  rptMode = mode;
+  saveAppPrefs({ reportsMode: mode });
+  renderReports();
+}
+
 function renderReports() {
+  updateDueBadge();
+  document.querySelectorAll('[name="rp-mode"]').forEach(r => { r.checked = r.value === rptMode; });
+  const due = rptMode === 'due';
+  document.getElementById('rp-due').hidden = !due;
+  document.getElementById('rp-split').hidden = due;
+  document.querySelector('#view-reports .rp-filters').hidden = due;
+  document.getElementById('rp-hint').hidden = due;
+  document.getElementById('rp-due-hint').hidden = !due;
+  for (const id of ['btn-reports-csv', 'rp-count']) document.getElementById(id).hidden = due;
+  if (due) {
+    document.getElementById('btn-rp-orphans').hidden = true;
+    return renderDue();
+  }
   refreshSelectFilters(rptTable);
   const qEl = document.getElementById('rpf-q');
   if (document.activeElement !== qEl) qEl.value = rptSearch; // don't disturb the caret while typing
@@ -3282,7 +3806,7 @@ async function deletePane() {
   const r = selectedReport();
   if (!r) return;
   const m = itemById(r.item_id);
-  if (!confirm(`Delete the report${m ? ` on “${fullLabel(m)}”` : ''} for the period ending ${fmtNice(r.period_end)}?`)) return;
+  const snap = snapshotData();
   const i = rptRows.indexOf(r);
   const next = rptRows[i + 1] || rptRows[i - 1];
   state.reports = state.reports.filter(x => x !== r);
@@ -3290,6 +3814,7 @@ async function deletePane() {
   paneEditing = false;
   rerenderCurrentView();
   focusSelectedRow();
+  offerUndo(snap, `Deleted the report${m ? ` on ${itemLabel(m)}` : ''} for ${fmtShort(r.period_end)}`);
   await saveReports('Report deleted');
 }
 
@@ -3409,6 +3934,12 @@ function wirePane() {
   divider.addEventListener('dblclick', () => { split.style.removeProperty('--rp-list-w'); saveAppPrefs({ rptListW: null }); });
 
   rptPreview = loadAppPrefs().rptPreview ?? true;
+  rptMode = loadAppPrefs().reportsMode === 'due' ? 'due' : 'all';
+  document.querySelectorAll('[name="rp-mode"]').forEach(r => r.addEventListener('change', () => setReportsMode(r.value)));
+  document.getElementById('rp-due').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-due-report]');
+    if (b) openReportDialog({ itemId: b.dataset.dueReport });
+  });
   const toggle = document.getElementById('rp-preview-toggle');
   toggle.checked = rptPreview;
   toggle.addEventListener('change', () => setPreview(toggle.checked));
@@ -3782,6 +4313,7 @@ function planImport() {
 // Applies the plan to the workspace. Links that would make a loop are left out (and reported).
 async function applyImport() {
   const plan = planImport();
+  const snap = snapshotData();
   const itemOf = new Map();
   let added = 0, updated = 0;
   for (const m of plan.deletes) removeItem(m.id);
@@ -3824,6 +4356,7 @@ async function applyImport() {
   renderGantt();
   const parts = [added && `${added} added`, updated && `${updated} updated`, plan.deletes.length && `${plan.deletes.length} deleted`,
     dropped && `${count(dropped, 'link', 'links')} left out to avoid a circular dependency`].filter(Boolean);
+  if (added || updated || plan.deletes.length) offerUndo(snap, `Imported: ${parts.slice(0, 3).join(', ')}`);
   await saveData(`Imported: ${parts.join(', ') || 'nothing changed'}`);
 }
 
@@ -3973,8 +4506,6 @@ function wireImport() {
   });
   document.getElementById('import-form').addEventListener('submit', (e) => {
     e.preventDefault();
-    const plan = imp.plan;
-    if (plan.deletes.length && !confirm(`Delete ${count(plan.deletes.length, T.item, T.items)} that ${plan.deletes.length === 1 ? "isn't" : "aren't"} in the file? Their reports are kept.`)) return;
     applyImport();
   });
 }
@@ -4058,6 +4589,7 @@ function applyWorkspaceChrome() {
   renderReportRagChoices();
   renderRagLegend();
   updatePageHead();
+  updateDueBadge();
 }
 
 // The Gantt key lists the workspace's own RAG options.
@@ -4067,7 +4599,7 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { overview: () => 'Program overview', lanes: () => 'Swimlane overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports' };
+const VIEW_TITLES = { overview: () => 'Program overview', lanes: () => 'Swimlane overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
@@ -4098,23 +4630,38 @@ function workspaceStats(p) {
 // green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and
 // the rest (Green, or any other on-track status) count as Green, so the five add up to the total.
 const MS_BUCKETS = [['notStarted', 'Not started'], ['green', 'Green'], ['redAmber', 'Red/Amber'], ['closed', 'Closed'], ['total', 'Total']];
+function msBucket(status, workspaceId, rg = ragOf(workspaceId)) {
+  if (isDoneStatus(status, workspaceId)) return 'closed';
+  if (rg.offTrack.includes(status)) return 'redAmber';
+  if (status === rg.def || /^not\s*started$/i.test(status)) return 'notStarted';
+  return 'green';
+}
 function milestoneOverview(workspaceId, lane = null) { // lane: only that swimlane's milestones
   const rg = ragOf(workspaceId);
   const out = { notStarted: 0, green: 0, redAmber: 0, closed: 0, total: 0 };
   for (const m of allItems()) {
     if (m.workspace_id !== workspaceId || isTask(m) || (lane != null && m.swimlane !== lane)) continue;
     out.total++;
-    if (isDoneStatus(m.status, workspaceId)) out.closed++;
-    else if (rg.offTrack.includes(m.status)) out.redAmber++;
-    else if (m.status === rg.def || /^not\s*started$/i.test(m.status)) out.notStarted++;
-    else out.green++;
+    out[msBucket(m.status, workspaceId, rg)]++;
   }
   return out;
 }
 
+// A count is a way in: it opens the Gantt chart showing just those milestones.
+async function openBucket(workspaceId, bucket, lane = '') {
+  await switchWorkspace(workspaceId, 'gantt');
+  clearGanttFilters();
+  ganttFilter.type = 'milestone';
+  ganttFilter.lane = lane;
+  if (bucket !== 'total') ganttFilter.rag = STATUSES.filter(st => msBucket(st, workspaceId) === bucket);
+  renderGantt();
+}
+
 function milestoneStrip(workspaceId) {
   const ov = milestoneOverview(workspaceId);
-  return `<div class="ms-strip">${MS_BUCKETS.map(([k, label]) => `<div class="ms-${k}"><b>${ov[k]}</b><span>${label}</span></div>`).join('')}</div>`;
+  return `<div class="ms-strip">${MS_BUCKETS.map(([k, label]) => ov[k]
+    ? `<button type="button" class="ms-${k}" data-bucket="${k}" title="Show these on the Gantt chart"><b>${ov[k]}</b><span>${label}</span></button>`
+    : `<div class="ms-${k}"><b>${ov[k]}</b><span>${label}</span></div>`).join('')}</div>`;
 }
 
 // Trend is set by hand (or from the weekly update) and shown as just an arrow; its name is the tooltip.
@@ -4452,7 +4999,7 @@ async function deleteWorkspace() {
   const st = workspaceStats(p);
   const t = makeTerms(p);
   const lost = [st.items.length && count(st.items.length, t.item, t.items), st.reports.length && count(st.reports.length, 'report', 'reports')].filter(Boolean);
-  if (!confirm(`Delete the workspace “${p.name}”?` + (lost.length ? `\n\nThis also permanently deletes its ${lost.join(' and ')}.` : ''))) return;
+  const snap = snapshotData();
   document.getElementById('workspace-dialog').close();
   const leaving = p.id === state.workspaceId;
   if (leaving) await switchWorkspace(state.workspaces.find(x => x !== p).id, APP_VIEWS.includes(currentView()) ? currentView() : 'workspaces');
@@ -4467,6 +5014,7 @@ async function deleteWorkspace() {
   state.lanes = state.lanes.filter(l => l.workspace_id !== p.id);
   applyWorkspaceChrome();
   rerenderCurrentView();
+  offerUndo(snap, `Deleted the workspace ${p.name}${lost.length ? ` and its ${lost.join(' and ')}` : ''}`);
   await Promise.all([saveData(), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadLanes && saveLanes()]);
 }
 
@@ -4479,6 +5027,8 @@ function wireWorkspaces() {
     if (edit) return openWorkspaceDialog(workspaceById(edit.dataset.editWorkspace));
     if (e.target.closest('[data-new-workspace]')) return openWorkspaceDialog(null);
     const card = e.target.closest('[data-pid]');
+    const bucket = e.target.closest('[data-bucket]');
+    if (card && bucket) return openBucket(card.dataset.pid, bucket.dataset.bucket);
     if (card) switchWorkspace(card.dataset.pid, 'gantt');
   });
 
@@ -4563,8 +5113,17 @@ function programsInOrder() {
   return [...state.workspaces].sort((a, b) => (!a.number) - (!b.number)
     || a.number.localeCompare(b.number, undefined, { numeric: true }) || a.name.localeCompare(b.name));
 }
-// The current workspace's swimlanes in the order the Gantt chart lists them (first appearance).
-const lanesInOrder = () => [...new Set(state.items.map(m => m.swimlane))];
+// The current workspace's swimlanes in the order the Gantt chart lists them (its Sort setting).
+function lanesInOrder() {
+  const lanes = [], byName = new Map();
+  for (const m of state.items) {
+    let lane = byName.get(m.swimlane);
+    if (!lane) byName.set(m.swimlane, lane = { name: m.swimlane, items: [], subs: [] }), lanes.push(lane);
+    lane.items.push({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end) });
+  }
+  sortLanes(lanes);
+  return lanes.map(l => l.name);
+}
 
 const isStale = (u) => !u || u.week_ending < addDays(defaultPeriodEnd('Weekly'), -6);
 
@@ -4597,7 +5156,7 @@ function overviewRow(sub) {
       <td class="ov-rag">${ragCell(cur, true)}</td>
       <td class="ov-trend">${trendBadge(rec.trend)}</td>
       <td class="ov-summary">${cur?.summary ? `<div class="md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No update yet</span>'}</td>
-      ${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}${ov[k] ? '' : ' zero'}">${ov[k]}</td>`).join('')}
+      ${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}${ov[k] ? '' : ' zero'}">${ov[k] ? `<button type="button" class="ov-count" data-bucket="${k}" title="Show these on the Gantt chart">${ov[k]}</button>` : 0}</td>`).join('')}
       <td class="ov-act">${canUpdate ? `<button type="button" class="btn btn-sm" data-update>Update</button>` : ''}</td>
     </tr>` };
 }
@@ -4750,10 +5309,12 @@ async function submitUpdate(e) {
 }
 
 async function deleteUpdate() {
-  if (!upEditing || !confirm(`Delete the update for the week ending ${fmtNice(upEditing.week_ending)}?`)) return;
+  if (!upEditing) return;
+  const snap = snapshotData();
   state.updates = state.updates.filter(u => u !== upEditing);
   document.getElementById('update-dialog').close();
   rerenderCurrentView();
+  offerUndo(snap, `Deleted the update for the week ending ${fmtShort(upEditing.week_ending)}`);
   await saveUpdates('Update deleted');
 }
 
@@ -4770,6 +5331,8 @@ function wireOverview() {
   document.getElementById('overview-body').addEventListener('click', (e) => {
     const row = e.target.closest('[data-pid]');
     if (e.target.closest('[data-update]')) return openUpdateDialog(programSubject(workspaceById(row.dataset.pid)));
+    const bucket = e.target.closest('[data-bucket]');
+    if (bucket) return openBucket(row.dataset.pid, bucket.dataset.bucket);
     const open = e.target.closest('[data-open-workspace]');
     if (open) switchWorkspace(open.dataset.openWorkspace, 'gantt');
   });
@@ -4777,6 +5340,8 @@ function wireOverview() {
     const row = e.target.closest('[data-lane]');
     if (!row) return;
     if (e.target.closest('[data-update]')) return openUpdateDialog(laneSubject(currentWorkspace(), row.dataset.lane));
+    const bucket = e.target.closest('[data-bucket]');
+    if (bucket) return openBucket(state.workspaceId, bucket.dataset.bucket, row.dataset.lane);
     if (e.target.closest('[data-open-lane]')) openLaneOnGantt(row.dataset.lane);
   });
   const dlg = document.getElementById('update-dialog');
@@ -4792,10 +5357,171 @@ function wireOverview() {
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
+/* ================= what changed ================= */
+// This workspace now against the start of an earlier day, from the server's daily backups:
+// RAG changes, dates that moved, items added and removed, and reports written since. The
+// summary can be copied, or used to start the program's weekly update.
+
+let chHistory = null;   // { milestones: [days], reports: [...], updates: [...] } once fetched
+let chSince = '';       // the day compared with
+const chCache = new Map(); // day → items of every workspace on that day
+let chSummary = '';     // the summary as Markdown, as last shown
+
+async function loadHistory() {
+  try {
+    const res = await fetch('api/history', { cache: 'no-store' });
+    chHistory = res.ok ? await res.json() : { milestones: [] };
+  } catch { chHistory = { milestones: [] }; }
+}
+
+async function itemsOn(day) {
+  if (!chCache.has(day)) {
+    const res = await fetch(`api/history/milestones/${day}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`no copy for ${day}`);
+    const lastId = state.lastId; // reading old rows mustn't move the id counter
+    chCache.set(day, rowsToItems(parseAny(await res.text())));
+    state.lastId = lastId;
+  }
+  return chCache.get(day);
+}
+
+// Today's items against those of the day compared with.
+function diffItems(before, now) {
+  const old = new Map(before.map(m => [m.id, m]));
+  const cur = new Map(now.map(m => [m.id, m]));
+  const out = { rag: [], dates: [], added: [], removed: [] };
+  for (const m of now) {
+    const o = old.get(m.id);
+    if (!o) { out.added.push(m); continue; }
+    if (o.status !== m.status) out.rag.push({ m, from: o.status, to: m.status });
+    if (o.end !== m.end || (isTask(m) && o.start !== m.start)) out.dates.push({ m, o, days: o.end && m.end ? daysBetween(o.end, m.end) : 0 });
+  }
+  for (const o of before) if (!cur.has(o.id)) out.removed.push(o);
+  const rank = (st) => (OFF_TRACK.includes(st) ? 0 : isDoneStatus(st) ? 2 : 1);
+  out.rag.sort((a, b) => rank(a.to) - rank(b.to) || cmpRef(a.m, b.m));
+  out.dates.sort((a, b) => b.days - a.days || cmpRef(a.m, b.m));
+  out.added.sort(cmpRef);
+  out.removed.sort(cmpRef);
+  return out;
+}
+
+const changesSince = (day) => state.reports.filter(r => (r.created || '').slice(0, 10) >= day || (r.updated || '').slice(0, 10) >= day);
+
+function changeSummary(d, reports, day) {
+  const lbl = (m) => `${m.ref ? `${m.ref} ` : ''}${m.title}`;
+  const moved = (x) => (x.days > 0 ? `slipped ${daysText(x.days)}` : x.days < 0 ? `${daysText(-x.days)} earlier` : 'start moved');
+  const lines = [`Changes since ${fmtNice(day)}:`, ''];
+  if (d.rag.length) lines.push(...d.rag.map(x => `- **${lbl(x.m)}**: RAG ${x.from} → ${x.to}`));
+  if (d.dates.length) lines.push(...d.dates.map(x => `- **${lbl(x.m)}**: ${moved(x)} (now ${isTask(x.m) ? `${fmtShort(x.m.start)} – ${fmtNice(x.m.end)}` : fmtNice(x.m.end)})`));
+  if (d.added.length) lines.push(`- Added: ${d.added.map(lbl).join('; ')}`);
+  if (d.removed.length) lines.push(`- Removed: ${d.removed.map(lbl).join('; ')}`);
+  if (reports.length) lines.push(`- ${count(reports.length, 'report', 'reports')} written or updated`);
+  if (lines.length === 2) lines.push('- Nothing changed.');
+  return lines.join('\n');
+}
+
+async function renderChanges() {
+  const body = document.getElementById('ch-body');
+  const sel = document.getElementById('ch-since');
+  if (!chHistory) {
+    body.innerHTML = '<p class="due-empty">Loading…</p>';
+    await loadHistory();
+    if (!isShown('changes')) return;
+  }
+  const days = (chHistory.milestones || []).filter(d => d <= todayISO());
+  const btns = ['ch-copy', 'ch-update'].map(id => document.getElementById(id));
+  if (!days.length) {
+    sel.innerHTML = '<option>No earlier copies yet</option>';
+    sel.disabled = true;
+    btns.forEach(b => { b.disabled = true; });
+    document.getElementById('ch-count').textContent = '';
+    body.innerHTML = `<p class="due-empty">There’s nothing to compare with yet. The server keeps a copy of the ${escAttr(T.items)} file at the start of each day it changes, so from tomorrow you’ll see what changed since today.</p>`;
+    return;
+  }
+  // default: about a week ago (the latest copy at least 7 days old), else the oldest there is
+  if (!days.includes(chSince)) chSince = [...days].reverse().find(d => d <= addDays(todayISO(), -7)) || days[0];
+  sel.disabled = false;
+  btns.forEach(b => { b.disabled = false; });
+  sel.innerHTML = [...days].reverse().map(d => {
+    const ago = daysBetween(d, todayISO());
+    return `<option value="${d}" ${d === chSince ? 'selected' : ''}>the start of ${fmtNice(d)}${ago ? ` (${ago === 1 ? 'yesterday' : `${ago} days ago`})` : ' (today)'}</option>`;
+  }).join('');
+  let before;
+  try {
+    before = (await itemsOn(chSince)).filter(m => m.workspace_id === state.workspaceId);
+  } catch (err) {
+    body.innerHTML = `<p class="due-empty">Couldn’t read the copy from ${fmtNice(chSince)} (${escAttr(err.message)}).</p>`;
+    return;
+  }
+  if (!isShown('changes')) return;
+  const d = diffItems(before, state.items);
+  const reports = changesSince(chSince);
+  chSummary = changeSummary(d, reports, chSince);
+  const n = d.rag.length + d.dates.length + d.added.length + d.removed.length;
+  document.getElementById('ch-count').textContent = `${count(n, `${T.item} changed`, `${T.items} changed`)} · ${count(reports.length, 'report', 'reports')}`;
+
+  const lbl = (m) => `<span class="ch-item">${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>`;
+  const link = (m) => `<button type="button" class="link-btn ch-open" data-ch-item="${m.id}" title="Show it on the Gantt chart">${lbl(m)}</button>`;
+  const when = (m) => (isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end));
+  const section = (title, rows, empty) => `
+    <section class="ch-sec">
+      <h3>${title} <span class="muted">${rows.length || ''}</span></h3>
+      ${rows.length ? `<ul>${rows.join('')}</ul>` : `<p class="muted">${empty}</p>`}
+    </section>`;
+  body.innerHTML = `
+    <div class="ch-grid">
+      ${section('RAG changes', d.rag.map(x => `<li>${link(x.m)}<span class="ch-what">${statusPill(x.from)} <span class="ch-arrow">→</span> ${statusPill(x.to)}</span></li>`), 'No RAG changes.')}
+      ${section('Dates moved', d.dates.map(x => `<li>${link(x.m)}<span class="ch-what"><b class="${x.days > 0 ? 'ch-slip' : x.days < 0 ? 'ch-gain' : ''}">${x.days > 0 ? `+${daysText(x.days)}` : x.days < 0 ? `−${daysText(-x.days)}` : 'start moved'}</b> <span class="muted">was ${when(x.o)}, now ${when(x.m)}</span></span></li>`), 'No dates moved.')}
+      ${section(`${T.Items} added`, d.added.map(m => `<li>${link(m)}<span class="ch-what muted">${escAttr(typeName(m))} · ${when(m)}</span></li>`), `No ${escAttr(T.items)} added.`)}
+      ${section(`${T.Items} removed`, d.removed.map(m => `<li>${lbl(m)}<span class="ch-what muted">${escAttr(m.status)} · ${when(m)}</span></li>`), `No ${escAttr(T.items)} removed.`)}
+      ${section('Reports written or updated', reports.sort((a, b) => b.period_end.localeCompare(a.period_end)).map(r => {
+        const m = itemById(r.item_id);
+        return `<li>${m ? link(m) : `<i>Deleted ${escAttr(T.item)}</i>`}<span class="ch-what">${statusPill(r.status)} <span class="muted">period ending ${fmtShort(r.period_end)}</span></span></li>`;
+      }), 'No reports since then.')}
+    </div>
+    <section class="ch-sec ch-summary"><h3>Summary</h3><div class="md">${mdToHtml(chSummary)}</div></section>`;
+}
+
+function wireChanges() {
+  document.getElementById('ch-since').onchange = (e) => { chSince = e.target.value; renderChanges(); };
+  document.getElementById('ch-copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(chSummary); showToast('Summary copied'); } catch { showToast('Couldn’t copy — select the summary text instead'); }
+  };
+  document.getElementById('ch-update').onclick = () => {
+    openUpdateDialog(programSubject(currentWorkspace()));
+    const f = document.getElementById('update-form').elements;
+    f.summary.value = [f.summary.value.trim(), chSummary].filter(Boolean).join('\n\n');
+    edLoad(f.summary);
+  };
+  document.getElementById('ch-body').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ch-item]');
+    if (b) showItemOnGantt(b.dataset.chItem);
+  });
+}
+
+// Open the Gantt chart on one item: clear filters that hide it, unfold its swimlane, scroll to it
+// and give it the keyboard focus (its chain lit and its card showing).
+function showItemOnGantt(id) {
+  const m = itemById(id);
+  if (!m) return;
+  switchView('gantt');
+  if (!ganttMatches(m)) clearGanttFilters();
+  if (collapsedLanes().has(m.swimlane)) toggleLane(m.swimlane, false);
+  const d = parseDate(m.start), e = parseDate(m.end);
+  if (d < state.rangeStart || e > state.rangeEnd) { autoRange(); }
+  renderGantt();
+  document.getElementById('gantt-container').focus({ preventScroll: true });
+  setKbItem(id);
+}
+
 /* ================= PNG export ================= */
 
 function downloadPNG() {
+  // Exported in the light colours whatever the theme, so it sits well on a slide.
+  const themed = G !== GANTT_THEMES.light;
+  if (themed) { G = GANTT_THEMES.light; renderGantt(); }
   const svg = document.querySelector('#gantt-container svg');
+  if (themed) { G = GANTT_THEMES.dark; renderGantt(); }
   if (!svg) return;
   const copy = svg.cloneNode(true); // drop the scroll offsets of the pinned layers
   for (const g of copy.querySelectorAll('.gantt-col, .gantt-head, .gantt-corner')) g.removeAttribute('transform');
@@ -4821,9 +5547,186 @@ function downloadPNG() {
   img.src = url;
 }
 
+/* ================= find (⌘K) ================= */
+// One box to jump anywhere: any item in any workspace (by ref, title, owner or swimlane), a
+// workspace, or a page. Every word typed has to match; refs and the starts of titles rank first.
+
+let palHits = [], palSel = 0;
+
+function palPages() {
+  const ws = currentWorkspace();
+  return [
+    ['overview', 'Program overview'], ['workspaces', 'All workspaces'], ['gantt', `Gantt chart · ${ws.name}`],
+    ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`],
+    ['changes', `What changed · ${ws.name}`], ['lanes', `Swimlane overview · ${ws.name}`],
+  ].map(([view, label]) => ({ kind: 'page', view, label, hay: label.toLowerCase() }));
+}
+
+function palSearch(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const pages = palPages();
+  if (!words.length) return pages;
+  const hits = [];
+  const score = (ref, title, hay) => {
+    if (!words.every(w => hay.includes(w))) return -1;
+    const w0 = words[0];
+    return (ref && ref.toLowerCase() === w0 ? 0 : ref && ref.toLowerCase().startsWith(w0) ? 1 : title.toLowerCase().startsWith(w0) ? 2 : 3);
+  };
+  for (const p of pages) { const s = score('', p.label, p.hay); if (s >= 0) hits.push({ ...p, s: s + 0.5 }); }
+  for (const p of state.workspaces) {
+    const s = score(p.code, p.name, [p.code, p.number, p.name, p.owner, p.lead].join(' ').toLowerCase());
+    if (s >= 0) hits.push({ kind: 'ws', p, s });
+  }
+  for (const m of allItems()) {
+    const p = workspaceById(m.workspace_id);
+    const s = score(m.ref, m.title, [m.ref, m.title, m.owner, m.swimlane, m.subswimlane, p?.code, p?.name].join(' ').toLowerCase());
+    if (s >= 0) hits.push({ kind: 'item', m, p, s });
+  }
+  return hits.sort((a, b) => a.s - b.s || (a.kind === 'item' && b.kind === 'item' ? (a.p.id === state.workspaceId ? -1 : 0) - (b.p.id === state.workspaceId ? -1 : 0) || cmpRef(a.m, b.m) : 0)).slice(0, 40);
+}
+
+function renderPalette() {
+  const q = document.getElementById('pal-q').value;
+  palHits = palSearch(q);
+  palSel = Math.min(palSel, Math.max(0, palHits.length - 1));
+  const row = (h, i) => {
+    let main, sub;
+    if (h.kind === 'item') {
+      const rg = ragOf(h.p.id);
+      main = `${h.m.ref ? `<b class="ref">${escAttr(h.m.ref)}</b> ` : ''}${escAttr(h.m.title)}`;
+      sub = `${statusPill(h.m.status, rg.map)} <span>${escAttr([h.p.code || h.p.name, h.m.swimlane, h.m.owner].filter(Boolean).join(' · '))}</span>`;
+    } else if (h.kind === 'ws') {
+      main = `${escAttr(h.p.name)}${h.p.code ? ` <span class="prog-code">${escAttr(h.p.code)}</span>` : ''}`;
+      sub = '<span>Workspace</span>';
+    } else {
+      main = escAttr(h.label);
+      sub = '<span>Page</span>';
+    }
+    return `<li role="option" id="pal-${i}" data-i="${i}" aria-selected="${i === palSel}" class="${i === palSel ? 'sel' : ''}"><span class="pal-main">${main}</span><span class="pal-sub">${sub}</span></li>`;
+  };
+  document.getElementById('pal-list').innerHTML = palHits.map(row).join('') || '<li class="pal-none">Nothing matches.</li>';
+  document.getElementById('pal-q').setAttribute('aria-activedescendant', palHits.length ? `pal-${palSel}` : '');
+  document.getElementById(`pal-${palSel}`)?.scrollIntoView({ block: 'nearest' });
+}
+
+function openPalette() {
+  const dlg = document.getElementById('palette');
+  if (dlg.open) return;
+  hideQuick();
+  const q = document.getElementById('pal-q');
+  q.value = '';
+  palSel = 0;
+  renderPalette();
+  dlg.showModal();
+  q.focus();
+}
+
+async function pickPalette(i) {
+  const h = palHits[i];
+  if (!h) return;
+  document.getElementById('palette').close();
+  if (h.kind === 'page') {
+    if (h.view === 'due') { rptMode = 'due'; return switchView('reports'); }
+    if (h.view === 'reports') rptMode = 'all';
+    return switchView(h.view);
+  }
+  if (h.kind === 'ws') return switchWorkspace(h.p.id, 'gantt');
+  if (h.p.id !== state.workspaceId) await switchWorkspace(h.p.id, 'gantt');
+  showItemOnGantt(h.m.id);
+}
+
+function wirePalette() {
+  const dlg = document.getElementById('palette');
+  const q = document.getElementById('pal-q');
+  document.getElementById('nav-search').onclick = openPalette;
+  if (!/Mac|iPhone|iPad/.test(navigator.platform)) document.getElementById('nav-kbd').textContent = 'Ctrl K';
+  document.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey) && !e.altKey) {
+      if (document.querySelector('dialog[open]:not(#palette)')) return;
+      e.preventDefault();
+      openPalette();
+    }
+  });
+  q.addEventListener('input', () => { palSel = 0; renderPalette(); });
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (palHits.length) palSel = (palSel + (e.key === 'ArrowDown' ? 1 : -1) + palHits.length) % palHits.length;
+      renderPalette();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      pickPalette(palSel);
+    }
+  });
+  document.getElementById('pal-list').addEventListener('click', (e) => {
+    const li = e.target.closest('[data-i]');
+    if (li) pickPalette(+li.dataset.i);
+  });
+  document.getElementById('pal-list').addEventListener('mousemove', (e) => {
+    const li = e.target.closest('[data-i]');
+    if (li && +li.dataset.i !== palSel) { palSel = +li.dataset.i; renderPalette(); }
+  });
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+}
+
+/* ================= links ================= */
+// The address says where you are, so it can be bookmarked or sent to someone: the view, the
+// workspace and, on the Gantt chart, its search and filters — e.g.
+// #/ws/3/gantt?lane=Delivery&rag=Red,Amber&late=1. #…&item=12 opens the chart on item 12.
+
+let routeReady = false; // until the first view is shown, nothing is written over the address
+let lastHash = '';
+
+function readHash() {
+  const m = location.hash.match(/^#\/(?:ws\/([^/?]+)\/)?(\w+)(?:\?(.*))?$/);
+  if (!m || !VIEWS.includes(m[2])) return null;
+  const q = new URLSearchParams(m[3] || '');
+  const filter = {};
+  for (const k of ['q', 'lane', 'owner']) if (q.has(k)) filter[k] = q.get(k);
+  if (['milestone', 'task'].includes(q.get('type'))) filter.type = q.get('type');
+  if (q.get('rag')) filter.rag = q.get('rag').split(',').filter(Boolean);
+  if (q.get('late') === '1') filter.late = true;
+  return { ws: m[1] ? decodeURIComponent(m[1]) : '', view: m[2], filter: m[2] === 'gantt' && Object.keys(filter).length ? filter : null, item: q.get('item') || '' };
+}
+
+function writeHash() {
+  if (!routeReady) return;
+  const view = currentView();
+  let h = APP_VIEWS.includes(view) ? `#/${view}` : `#/ws/${encodeURIComponent(state.workspaceId)}/${view}`;
+  if (view === 'gantt') {
+    const f = ganttFilter, q = new URLSearchParams();
+    if (f.q.trim()) q.set('q', f.q.trim());
+    if (f.lane) q.set('lane', f.lane);
+    if (f.owner) q.set('owner', f.owner);
+    if (f.type) q.set('type', f.type);
+    if (f.rag.length) q.set('rag', f.rag.join(','));
+    if (f.late) q.set('late', '1');
+    if (q.toString()) h += `?${q}`;
+  }
+  if (h === location.hash) return;
+  lastHash = h;
+  history.replaceState(null, '', h);
+}
+
+// An address typed or pasted into this tab.
+async function followHash() {
+  const link = readHash();
+  if (!link) return;
+  if (link.ws && link.ws !== state.workspaceId && workspaceById(link.ws)) await switchWorkspace(link.ws, link.view);
+  if (link.view === 'gantt') { clearGanttFilters(); Object.assign(ganttFilter, link.filter || {}); }
+  switchView(link.view);
+  if (link.item && itemById(link.item)) showItemOnGantt(link.item);
+}
+
+async function copyLink() {
+  writeHash();
+  try { await navigator.clipboard.writeText(location.href); showToast('Link copied — it opens this view with the same filters'); }
+  catch { showToast('Couldn’t copy the link — copy it from the address bar'); }
+}
+
 /* ================= wiring ================= */
 
-const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'lanes'];
+const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'changes', 'lanes'];
 const APP_VIEWS = ['overview', 'workspaces']; // views across every workspace
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 const currentView = () => VIEWS.find(isShown) || 'gantt';
@@ -4841,6 +5744,7 @@ function switchView(view) {
   else if (view === 'reports') renderReports();
   else if (view === 'overview') renderOverview();
   else if (view === 'lanes') renderLaneOverview();
+  else if (view === 'changes') renderChanges();
   else renderWorkspaces();
   for (const v of VIEWS) {
     document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
@@ -4850,6 +5754,24 @@ function switchView(view) {
   document.getElementById('app-main').scrollTop = 0;
   updatePageHead();
   saveAppPrefs({ view });
+  writeHash();
+}
+
+// Theme: Auto (follows the system), Light or Dark; a per-browser choice. The chart has its own
+// colour set (G), so it's redrawn when the theme changes.
+const THEMES = ['auto', 'light', 'dark'];
+let printTheme = null; // the chart's colours while a print is under way
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme(theme = loadAppPrefs().theme || 'auto') {
+  const root = document.documentElement;
+  if (theme === 'auto') delete root.dataset.theme; else root.dataset.theme = theme;
+  const dark = theme === 'dark' || (theme === 'auto' && darkQuery.matches);
+  if (dark) root.dataset.dark = ''; else delete root.dataset.dark;
+  G = GANTT_THEMES[dark ? 'dark' : 'light'];
+  const name = { auto: 'Auto', light: 'Light', dark: 'Dark' }[theme];
+  document.getElementById('nav-theme-label').textContent = `Theme: ${name}`;
+  document.getElementById('nav-theme').title = theme === 'auto' ? `Theme: follows the system (${dark ? 'dark' : 'light'} now) — click for Light` : `Theme: ${name} — click for ${theme === 'light' ? 'Dark' : 'Auto'}`;
+  if (state.rangeStart && isShown('gantt')) renderGantt();
 }
 
 function setNavCollapsed(collapsed) {
@@ -4863,6 +5785,20 @@ function setNavCollapsed(collapsed) {
 function wireEvents() {
   for (const v of VIEWS) document.getElementById(`nav-${v}`).onclick = () => switchView(v);
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
+  document.querySelectorAll('[data-print]').forEach(b => { b.onclick = () => window.print(); });
+  // Printing: light colours, and the chart drawn from its top-left corner (not its scroll position).
+  window.addEventListener('beforeprint', () => {
+    printTheme = G;
+    G = GANTT_THEMES.light;
+    if (isShown('gantt')) { renderGantt(); const w = document.getElementById('gantt-scroll'); w.scrollLeft = w.scrollTop = 0; syncGanttSticky(); }
+  });
+  window.addEventListener('afterprint', () => { if (printTheme) { G = printTheme; printTheme = null; if (isShown('gantt')) renderGantt(); } });
+  document.getElementById('nav-theme').onclick = () => {
+    const next = THEMES[(THEMES.indexOf(loadAppPrefs().theme || 'auto') + 1) % THEMES.length];
+    saveAppPrefs({ theme: next });
+    applyTheme(next);
+  };
+  darkQuery.addEventListener('change', () => applyTheme());
   document.getElementById('app-main').addEventListener('scroll', () => { if (!quickDirty()) hideQuick(); hideTip(); });
   wireWorkspaces();
   wireOverview();
@@ -4891,10 +5827,16 @@ function wireEvents() {
   document.getElementById('toggle-months').onchange = (e) => { state.showMonths = e.target.checked; renderGantt(); };
   document.getElementById('toggle-quarters').onchange = (e) => { state.showQuarters = e.target.checked; renderGantt(); };
   document.getElementById('toggle-today').onchange = (e) => { state.showToday = e.target.checked; renderGantt(); };
-  document.getElementById('toggle-links').onchange = (e) => { state.showLinks = e.target.checked; renderGantt(); };
+  document.getElementById('link-mode').onchange = (e) => { state.linkMode = e.target.value; saveAppPrefs({ linkMode: state.linkMode }); renderGantt(); };
+  document.getElementById('toggle-baseline').onchange = (e) => { state.showBaseline = e.target.checked; saveAppPrefs({ showBaseline: state.showBaseline }); renderGantt(); };
+  document.getElementById('fold-all').onclick = () => foldAllLanes(true);
+  document.getElementById('unfold-all').onclick = () => foldAllLanes(false);
+  document.getElementById('baseline-set').onclick = () => setBaseline(true);
+  document.getElementById('baseline-clear').onclick = () => setBaseline(false);
 
   document.getElementById('btn-png').onclick = downloadPNG;
   document.getElementById('btn-gantt-add').onclick = () => openEditDialog(null);
+  document.getElementById('btn-link').onclick = copyLink;
 
   // gantt: hover card + click for the quick update panel
   const gc = document.getElementById('gantt-container');
@@ -4903,13 +5845,42 @@ function wireEvents() {
     return g && state.items.find(m => m.id === g.dataset.id);
   };
   gc.addEventListener('mouseover', (e) => {
+    if (drag?.active) return;
     const m = !document.getElementById('edit-dialog').open && document.getElementById('quick').hidden && itemAt(e);
     if (m) showTip(m, e); else hideTip();
     focusLinks(itemAt(e));
   });
   gc.addEventListener('mousemove', (e) => { if (document.getElementById('tip').classList.contains('show')) moveTip(e); });
   gc.addEventListener('mouseleave', () => { hideTip(); focusLinks(null); });
-  for (const type of ['click', 'contextmenu']) gc.addEventListener(type, (e) => { const m = itemAt(e); if (m) showQuick(m, e); });
+  gc.addEventListener('pointerdown', (e) => {
+    const g = e.button === 0 && !e.ctrlKey && e.target.closest('.gantt-item');
+    const m = g && itemById(g.dataset.id);
+    if (!m || collapsedLanes().has(m.swimlane)) return;
+    e.preventDefault(); // no text selection while dragging
+    drag = { m, g, mode: dragModeAt(g, m, e.clientX), x0: e.clientX, days: 0, active: false };
+  });
+  document.addEventListener('pointermove', onDragMove);
+  document.addEventListener('pointerup', onDragEnd);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && drag?.active) { drag.days = 0; onDragEnd(); }
+  });
+  gc.addEventListener('mousemove', (e) => { // a task's ends show the resize cursor
+    if (drag) return;
+    const g = e.target.closest('.gantt-item');
+    const m = g && itemById(g.dataset.id);
+    gc.style.cursor = m && !collapsedLanes().has(m.swimlane) && dragModeAt(g, m, e.clientX) !== 'move' ? 'ew-resize' : '';
+  });
+  gc.tabIndex = 0;
+  gc.setAttribute('aria-label', 'Chart: use the arrow keys to move between items and Enter to update one');
+  gc.addEventListener('keydown', ganttKeyNav);
+  gc.addEventListener('focusout', (e) => { if (!gc.contains(e.relatedTarget) && kbId && !quickId) { kbId = null; document.querySelectorAll('#gantt-container .gantt-item.kb').forEach(g => g.classList.remove('kb')); hideTip(); focusLinks(null); } });
+  for (const type of ['click', 'contextmenu']) gc.addEventListener(type, (e) => {
+    if (dragSuppressClick) return;
+    const lane = type === 'click' && e.target.closest('.lane-toggle');
+    if (lane) return toggleLane(lane.dataset.lane);
+    const m = itemAt(e);
+    if (m) showQuick(m, e);
+  });
 
   // edit dialog
   const dlg = document.getElementById('edit-dialog');
@@ -4973,6 +5944,20 @@ function wireEvents() {
   wireBulk();
 
   wireReports();
+  wireChanges();
+  wirePalette();
+
+  // undo: the toast's button, or ⌘/Ctrl+Z when not typing (typing keeps the browser's own undo)
+  document.getElementById('toast').addEventListener('click', (e) => {
+    if (e.target.closest('[data-undo]')) undoLast();
+    else if (e.target.closest('.toast-close')) e.currentTarget.hidden = true;
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() !== 'z' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+    if (isTyping(document.activeElement) || document.querySelector('dialog[open]')) return;
+    e.preventDefault();
+    undoLast();
+  });
 
   // Leaving the page with a save still pending: send it anyway.
   window.addEventListener('pagehide', () => {
@@ -5014,8 +5999,13 @@ async function loadConfig() {
   document.getElementById('row-slider').value = state.rowH;
   const prefs = loadAppPrefs();
   setNavCollapsed(!!prefs.navCollapsed);
+  applyTheme();
+  if (['all', 'hover', 'none'].includes(prefs.linkMode)) state.linkMode = prefs.linkMode;
+  if (prefs.showBaseline === false) state.showBaseline = false;
   wireEvents();
   await loadConfig();
+  const linked = readHash()?.ws;
+  if (linked) state.workspaceId = linked; // a link names its workspace; loadData checks it exists
   try {
     await loadData();
   } catch (err) {
@@ -5027,6 +6017,12 @@ async function loadConfig() {
     return;
   }
   applyWorkspaceChrome();
-  switchView(VIEWS.includes(prefs.view) ? prefs.view : 'gantt');
+  const link = readHash();
+  if (link?.filter) Object.assign(ganttFilter, link.filter);
+  switchView(link?.view || (VIEWS.includes(prefs.view) ? prefs.view : 'gantt'));
   setTimescale(prefs.timescale); // Quarters fits; the ResizeObserver keeps it fitted as layout settles
+  if (link?.item && itemById(link.item)) showItemOnGantt(link.item);
+  routeReady = true;
+  writeHash();
+  window.addEventListener('hashchange', () => { if (location.hash !== lastHash) followHash(); });
 })();

@@ -34,7 +34,19 @@ Changes show when the page is reloaded; there's no need to restart the server. I
 
 ## Workspaces
 
-Everything belongs to a **workspace**. The left-hand menu has **Program overview**, **All workspaces**, a workspace switcher, and the current workspace's **Gantt chart**, **Items**, **Reports**, **Swimlane overview** and **Workspace settings**. Collapse the menu to icons with **Collapse** at the bottom; the app remembers the open workspace, view and menu state per browser.
+Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Program overview**, **All workspaces**, a workspace switcher (with a ⚙ for **Workspace settings**), and the current workspace's **Gantt chart**, **Items**, **Reports** (with a count of reports due), **What changed** and **Swimlane overview**. At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, and **Collapse** shrinks the menu to icons; the app remembers the open workspace, view, theme and menu state per browser.
+
+### Find (⌘K)
+
+**Find…** in the menu, or ⌘K (Ctrl+K on Windows), opens one box to jump anywhere: any item in any workspace (by ref, title, owner or swimlane), a workspace, or a page. Every word typed has to match; refs and the starts of titles rank first. ↑ ↓ to choose, Enter to open: an item opens on the Gantt chart, scrolled to and picked out.
+
+### Links
+
+The address bar says where you are, so a view can be bookmarked or sent to someone: the workspace, the view and, on the Gantt chart, its search and filters (e.g. `#/ws/1/gantt?lane=Delivery&rag=Red,Amber&late=1`). The link button on the Gantt toolbar copies it. Adding `&item=12` opens the chart on item 12.
+
+### Undo
+
+Deleting (items, reports, weekly updates, a whole workspace), importing, bulk edits, dragging on the chart, quick updates, one-click RAG changes and setting a baseline all happen straight away, and the message at the foot of the window offers **Undo**; so does ⌘/Ctrl+Z when you're not typing in a box. Undo puts back everything as it was before that change and saves it. Closing a form with unsaved changes still asks first, since those changes aren't saved anywhere yet.
 
 **All workspaces** shows a card per workspace: its RAG, code, program number, owner and area lead, trend, timeline, last report, a RAG breakdown of its items, its milestone overview and counts. Click a card to open it, **Edit** to change it, or **+ New workspace**. A workspace has:
 
@@ -51,6 +63,8 @@ Everything belongs to a **workspace**. The left-hand menu has **Program overview
 - **Previous weekly RAG** and **Current weekly RAG**: from the two most recent weekly updates, with their week-ending dates. The date turns red when there's no update for this week yet
 - **Trend**, shown as an arrow (↑ improving, → stable, ↓ declining; hover for the word), and the **summary of last week's progress** (key points for management) from the latest update
 - **Milestones overview**: the program's milestones counted as **Not started**, **Green**, **Red/Amber**, **Closed** and **Total**. Done statuses (named or described as complete) are Closed, statuses that need a get to green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and anything else counts as Green, so the four add up to the total. A totals row sums every program
+
+Each count in the milestones overview (here, on the swimlane overview and on the workspace cards) opens the Gantt chart showing just those milestones. **Print / PDF** prints the table on a landscape page without the menu and buttons (choose *Save as PDF* in the print dialog for a PDF).
 
 **Update** on a row records that program's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend, summary (with formatting) and area lead. If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one; the trend and area lead are saved to the workspace. **Download CSV** saves the table.
 
@@ -70,6 +84,12 @@ A swimlane's area lead and trend live in [swimlanes.csv](swimlanes.csv), created
 workspace_id,name,lead,trend
 ```
 
+### What changed
+
+**What changed** compares the workspace with how it stood at the start of an earlier day: RAG changes (worst first), dates that moved (by how many days, slips first), items added and removed, and reports written or updated since. Click an item to see it on the Gantt chart. It defaults to about a week ago. The comparison comes from the daily backups (see **Backups** above), so the days you can pick are the days the items file changed, up to 30 back; on a new install there's nothing to compare with until the next day.
+
+The page ends with a **summary** of the changes. **Copy summary** copies it as text (Markdown) for an email or chat, and **Use in weekly update** starts the program's weekly update with it. **Print / PDF** prints the page.
+
 ### RAG options
 
 **Workspace settings → RAG options** sets the RAG statuses a workspace uses. Every workspace starts with the standard five: Green (on track), Amber (at risk), Red (off track), Complete and Not Started, with Amber and Red needing a get to green plan and new items starting at Not Started. For each status you can set:
@@ -87,7 +107,7 @@ RAG options are stored in [statuses.csv](statuses.csv), created the first time a
 workspace_id,position,name,color,description,get_to_green,is_default
 ```
 
-Deleting a workspace also deletes its items and reports (you're told how many first). There must always be at least one workspace.
+Deleting a workspace also deletes its items, reports and weekly updates; the message afterwards says how many, with **Undo**. There must always be at least one workspace.
 
 Workspaces live in [workspaces.csv](workspaces.csv):
 
@@ -102,7 +122,7 @@ Items and reports carry a `workspace_id`. Ids stay unique across all workspaces,
 Items live in [milestones.csv](milestones.csv) with columns:
 
 ```
-id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on
+id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on,baseline_start,baseline_end
 ```
 
 - **workspace_id**: the workspace the item belongs to (`id` in workspaces.csv)
@@ -116,13 +136,14 @@ id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,
 - **swimlane / subswimlane**: free text — each distinct value becomes a lane / nested sub-lane
 - **parent**: id of the milestone this item rolls up to (the milestone can't fall before it finishes)
 - **depends_on**: `;`-separated ids this item depends on (finish-to-start)
+- **baseline_start / baseline_end**: the dates recorded by **View → Baseline → Set from current dates** on the Gantt chart, to measure slippage against (blank until a baseline is set). Files without these columns still load
 
 Changing an item's end date in the **Items** screen shifts everything downstream of it by the same number of days; anything that would then start before a predecessor finishes is pushed later. Circular dependencies are rejected. The old `name,date,rag` CSV format still loads.
 
 RAG and dates change far more often than anything else, so they are the quickest to update:
 
-- **Gantt chart**: click (or right-click) an item to open the quick update panel. Change its RAG, switch it between milestone and task, or change its dates, then **Save** (or Enter) — nothing changes until you do, and **Cancel** / Esc throws the changes away. Switching the type back and forth keeps both dates, and moving a milestone's date keeps the task's length if you switch back. Clicking away with unsaved changes gives the panel a nudge instead of losing them. The panel says how many dependent items will move. From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
-- **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. Click a RAG to set it, or edit any cell. Switch to **All fields** for lanes, links, shape and so on.
+- **Gantt chart**: drag an item to move it, or drag either end of a task's bar to change its start or end (see **Gantt chart** below). Or click (or right-click) an item to open the quick update panel, which opens beside it. Change its RAG, switch it between milestone and task, or change its dates, then **Save** (or Enter) — nothing changes until you do, and **Cancel** / Esc throws the changes away. Switching the type back and forth keeps both dates, and moving a milestone's date keeps the task's length if you switch back. Clicking away with unsaved changes gives the panel a nudge instead of losing them. The panel says how many dependent items will move. From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
+- **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. The current RAG shows as a pill and the others as dots (hover for the name): click one to set it, or edit any cell. An end date in red means the item is overdue. Switch to **All fields** for lanes, links, shape and so on.
 - The quick update panel on the chart also has a **Type** switch.
 
 ### Importing
@@ -154,7 +175,7 @@ The exec summary, achievements, next steps and get to green plan are **formatted
 
 The item's previous report is shown in a panel beside the form while you write the new one, with ‹ › to step back through older reports. Its sections can be copied across: last period's *next steps* into this period's *achievements*, the *exec summary*, or the *get to green plan* (carried forward). You can only have one report per item per period; if one exists, you'll be offered a link to open it.
 
-The **Reports** tab lists every report in the current workspace, newest period first. Like the Items grid, click a header to sort, use the filter row (item, RAG, cadence, text…) to narrow the list, and drag a header edge to resize a column; the toolbar search looks through every report field. **View reports** in the item's edit dialog, the quick update panel and the report form jumps here filtered to that item. Select a report to read it in the **preview** beside the list, and use **↑ ↓** to move through the list, like previewing files in a folder. Click into the preview (or press **Enter**, or double-click the row) to edit the report in place: **Save** (⌘/Ctrl+Enter) or **Cancel** (Esc). Moving to another report saves your edits if they're complete, and otherwise asks before discarding them. **Delete** is there too. If some reports belong to items that no longer exist (shown as *Deleted item #…*), **Delete N reports on deleted items** in the toolbar clears them all at once. Drag the divider to resize the list; double-click it to reset. Untick **Preview** to use the full-width list, where clicking a report opens it in the report form. Edits are tracked with `created` / `updated` timestamps. **Download CSV** saves the reports currently listed (filters applied) with the item's `ref` and `title` added for readability.
+The **Reports** tab lists every report in the current workspace, newest period first. Switch it to **Due** to see what still needs a report this period, grouped by owner, with **Provide report…** on each: anything that has started or already has reports, until it reaches a done status. Each follows the cadence of its latest report (weekly if it has none); a report whose period reaches into the current one covers it, and **periods missed** counts the periods since its last report. The menu shows how many are due. Like the Items grid, click a header to sort, use the filter row (item, RAG, cadence, text…) to narrow the list, and drag a header edge to resize a column; the toolbar search looks through every report field. **View reports** in the item's edit dialog, the quick update panel and the report form jumps here filtered to that item. Select a report to read it in the **preview** beside the list, and use **↑ ↓** to move through the list, like previewing files in a folder. Click into the preview (or press **Enter**, or double-click the row) to edit the report in place: **Save** (⌘/Ctrl+Enter) or **Cancel** (Esc). Moving to another report saves your edits if they're complete, and otherwise asks before discarding them. **Delete** is there too. If some reports belong to items that no longer exist (shown as *Deleted item #…*), **Delete N reports on deleted items** in the toolbar clears them all at once. Drag the divider to resize the list; double-click it to reset. Untick **Preview** to use the full-width list, where clicking a report opens it in the report form. Edits are tracked with `created` / `updated` timestamps. **Download CSV** saves the reports currently listed (filters applied) with the item's `ref` and `title` added for readability.
 
 Reports are stored in [reports.csv](reports.csv), one row per report:
 
@@ -174,7 +195,13 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 - Milestones drawn as RAG-coloured shapes, tasks as bars, with title, dates and owner; overlapping items stack automatically
 - Each task shows its duration in days after its title (e.g. **24d**, counting start and end day)
 - Each milestone with tasks rolling up to it shows its **% complete**: the share of those tasks' total duration that is at a complete RAG (a status named or described as Complete / Done). Tasks rolling up through other milestones count too, and the hover card shows the days and tasks behind it
-- Dependency arrows and dashed roll-up arrows (toggle with **View → Dependencies**)
+- Dependency arrows and dashed roll-up arrows, with rounded corners and the vertical run just before what they lead to. **View → Dependency lines** shows them always, only for the item under the pointer, or not at all
+- **Hover an item to trace its chain**: everything it waits on and everything waiting on it, however distant, stays lit (its own links strongest) and the rest fades. The hover card counts them (*waits on 9 · holds up 6*) and sits on whichever side covers least of the chain. While an item's quick update panel is open, its chain stays lit
+- **Drag to reschedule**: drag an item to move it, or the left or right end of a task's bar to change its start or end. Days snap as you drag, and the card beside the pointer shows the new dates and how many items downstream move with it. Let go to save (Esc cancels); **Undo** takes it back
+- **Overdue** items (past their end date and not at a done status) get a red **!**, and tasks that should have started but are still at the default status an amber one; the hover card says by how much. **Filter → Only overdue or late starting** shows just those
+- **Baseline**: **View → Baseline → Set from current dates** records every item's dates as the plan. Where an item has moved since, a grey bar under a task (or a dashed outline of a milestone) shows where it was planned, and the hover card says *slipped 12 days* or *3 days early*. **View → Baseline** hides them; **Clear** removes the baseline
+- **Fold a swimlane** by clicking its name: its items share one summary row, small and unlabelled (the hover card still works). **View → Swimlanes → Fold all / Unfold all**. Folding is remembered per workspace, per browser
+- **Keyboard**: Tab into the chart, then ← → move along a swimlane, ↑ ↓ to the row above or below, Enter opens the quick update panel and Esc lets go. Enter on a swimlane's name folds it
 - **View → Row height** — below 40px the dates/owner line under each item is hidden for a compact view
 - Hover an item for a summary card (including its last report); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)
 - The chart fills the window below its toolbar and scrolls inside its own panel
@@ -185,5 +212,6 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 - The date range button shows the months in view; open it to pick dates, or **Fit to items** to fit the range to everything shown
 - **Search** by ref, title, description, owner or swimlane, and **Filter** by swimlane, owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
 - **Sort** swimlanes A–Z (the default), as listed, by earliest start, by latest end, or most at risk first (most items at an off-track RAG). Items are packed several to a row by date, or choose one per row sorted by start, end, ref, title, RAG or owner, ascending or descending. A dot on **Sort** shows it's changed from the default, and the sort is remembered per browser
-- **View** toggles the **top** and **bottom timescale**, **today line** and **dependencies**
-- **Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the workspace
+- **View** toggles the **top** and **bottom timescale**, **today line** (labelled in the timescale header, so it never covers an item) and **baseline**, and sets the dependency lines, folding and baseline
+- **Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the workspace, always in the light colours
+- The link button copies a link to the chart with its filters (see **Links**)
