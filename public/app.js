@@ -930,9 +930,13 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
       continue;
     }
     for (const sub of lane.subs) {
-      sub.items.sort(oneEach ? ganttItemOrder : (a, b) => a._s - b._s || a._e - b._e);
+      // Milestones take the top rows of their sub-lane and the tasks that roll up to them sit
+      // below, so each band is packed on its own.
+      sub.items.sort((a, b) => a._task - b._task || (oneEach ? ganttItemOrder(a, b) : a._s - b._s || a._e - b._e));
       const rowEnds = [];
+      let bandStart = 0, band = false;
       for (const m of sub.items) {
+        if (m._task !== band) { band = m._task; bandStart = rowEnds.length; }
         const x1 = xOf(m._s), x2 = xOf(m._e);
         m._meta = rm.detail ? truncate(metaText(m), MAX_LABEL_W, 10.5) : '';
         const metaW = m._meta ? textW(m._meta, 10.5) : 0;
@@ -959,7 +963,7 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
             m._side = 'left'; m._lx = leftX; left = leftX - labelW; right = itemR;
           }
         }
-        let r = oneEach ? -1 : rowEnds.findIndex(end => left - 10 > end);
+        let r = oneEach ? -1 : rowEnds.findIndex((end, i) => i >= bandStart && left - 10 > end);
         if (r < 0) { r = rowEnds.length; rowEnds.push(right); } else rowEnds[r] = right;
         m._row = r;
       }
