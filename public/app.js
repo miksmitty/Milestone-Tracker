@@ -1854,6 +1854,7 @@ function openEditDialog(m) {
   f.swimlane.innerHTML = laneOptions(v.swimlane);
   for (const k of EDIT_FIELDS) f[k].value = v[k] ?? '';
   f.swimlane.dataset.prev = f.swimlane.value;
+  closeNewLane(f);
   edDeps = [...v.deps];
 
   document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : `New ${T.item}`;
@@ -1874,19 +1875,26 @@ function openEditDialog(m) {
 }
 
 // The workspace's existing swimlanes (A–Z), plus a way to start a new one.
-const NEW_LANE = '\u0000new';
 function laneOptions(current) {
   const names = [...new Set([...lanesInOrder(), ...state.lanes.filter(l => l.workspace_id === state.workspaceId).map(l => l.name), current])]
     .filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   return names.map(n => `<option value="${escAttr(n)}">${escAttr(n)}</option>`).join('') +
-    `<option value="${NEW_LANE}">+ New swimlane…</option>`;
+    '<option value="" data-new>+ New swimlane…</option>';
 }
+// Choosing "+ New swimlane…" swaps the list for a name box; Esc (or leaving it empty) swaps back.
 function pickEdLane(sel) {
-  if (sel.value !== NEW_LANE) return (sel.dataset.prev = sel.value);
-  const name = (prompt('New swimlane name') || '').trim();
-  if (name && ![...sel.options].some(o => o.value === name)) sel.add(new Option(name, name), sel.options.length - 1);
-  sel.value = name || sel.dataset.prev || '';
-  sel.dataset.prev = sel.value;
+  if (!('new' in sel.selectedOptions[0].dataset)) return (sel.dataset.prev = sel.value);
+  const box = sel.form.elements.newlane;
+  sel.hidden = true;
+  box.hidden = false;
+  box.value = '';
+  box.focus();
+}
+function closeNewLane(f) {
+  f.newlane.hidden = true;
+  f.newlane.value = '';
+  f.swimlane.hidden = false;
+  f.swimlane.value = f.swimlane.dataset.prev || '';
 }
 
 function renderEdDeps() {
@@ -1917,6 +1925,8 @@ async function submitEditDialog(e) {
   const changes = {};
   for (const k of EDIT_FIELDS) changes[k] = f[k].value.trim();
   changes.deps = edDeps;
+  if (!f.newlane.hidden) changes.swimlane = f.newlane.value.trim();
+  if (!changes.swimlane) { (f.newlane.hidden ? f.swimlane : f.newlane).focus(); return (err.textContent = 'Name the new swimlane.'); }
 
   if (!changes.title) return (err.textContent = 'Title is required.');
   for (const k in URL_FIELDS) {
@@ -1940,9 +1950,9 @@ async function submitEditDialog(e) {
   }
   document.getElementById('edit-dialog').close();
   rerenderCurrentView();
-  if (!editing && isShown('editor')) { // new on the Items tab: add it at the bottom and show where it went
-    refreshEditor([m.id]);
-    document.querySelector(`#editor-body tr[data-id="${m.id}"]`)?.scrollIntoView({ block: 'nearest' });
+  if (isShown('editor')) { // redraw the Items grid so saving can't copy its old values back; a new item goes at the bottom
+    refreshEditor(editing ? [] : [m.id]);
+    if (!editing) document.querySelector(`#editor-body tr[data-id="${m.id}"]`)?.scrollIntoView({ block: 'nearest' });
   }
   const note = [editing ? `${itemLabel(m)} saved` : `Added ${fullLabel(m)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
   offerUndo(snap, note);
@@ -1956,6 +1966,7 @@ async function deleteFromDialog() {
   removeItem(editing.id);
   document.getElementById('edit-dialog').close();
   rerenderCurrentView();
+  if (isShown('editor')) refreshEditor();
   offerUndo(snap, label);
   await saveData(label, 'Edit dialog');
 }
@@ -6315,6 +6326,13 @@ function wireEvents() {
   form.addEventListener('submit', submitEditDialog);
   form.elements.type.addEventListener('change', updateEdType);
   form.elements.swimlane.addEventListener('change', (e) => pickEdLane(e.target));
+  form.elements.newlane.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault(); // keep the dialog open
+    closeNewLane(form.elements);
+    form.elements.swimlane.focus();
+  });
+  form.elements.newlane.addEventListener('blur', (e) => { if (!e.target.value.trim()) closeNewLane(form.elements); });
   form.elements.end.addEventListener('input', updateEdType); // keeps a milestone's hidden start in step
   document.getElementById('ed-cancel').onclick = () => dlg.close();
   document.getElementById('ed-close').onclick = () => dlg.close();
