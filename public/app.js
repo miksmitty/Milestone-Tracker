@@ -97,7 +97,7 @@ const GANTT_THEMES = {
   },
 };
 let G = GANTT_THEMES.light;
-const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url'];
+const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url', 'top_level'];
 const MS_DAY = 86400000;
 
 const state = {
@@ -207,7 +207,7 @@ function toCSV(items) {
   const lines = [COLUMNS.join(',')];
   for (const m of items) {
     lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
-      m.status, m.shape, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
+      m.status, m.shape, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url, m.top_level].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -233,6 +233,7 @@ const HEADER_ALIASES = {
   baseline_end: ['baselineend'],
   gitlab_url: ['gitlaburl', 'gitlab'],
   use_case_url: ['usecaseurl', 'usecase'],
+  top_level: ['toplevel'],
 };
 
 function rowsToItems(rows) {
@@ -270,6 +271,7 @@ function rowsToItems(rows) {
       baseline_end: get(r, 'baseline_end'),
       gitlab_url: get(r, 'gitlab_url'),
       use_case_url: get(r, 'use_case_url'),
+      top_level: readYes(get(r, 'top_level')),
     };
   });
 
@@ -670,7 +672,7 @@ const versionsNow = () => Object.fromEntries(FILE_NAMES.map(f => [f, synced[f]?.
 // change back (and saves it), which is then just another change for everyone else to receive.
 const FIELD_NAMES = {
   status: 'RAG', start: 'Start', end: 'End', ref: 'Ref', deps: 'Depends on', parent: 'Rolls up to', subswimlane: 'Sub-swimlane',
-  baseline_start: 'Baseline start', baseline_end: 'Baseline end', gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
+  baseline_start: 'Baseline start', baseline_end: 'Baseline end', gitlab_url: 'GitLab URL', use_case_url: 'Use case URL', top_level: 'Top level',
   exec_summary: 'Executive summary', next_steps: 'Next steps', get_to_green: 'Get to green plan', period_end: 'Period ending',
   week_ending: 'Week ending', lead: 'Area lead', author: 'Author', number: 'Program number', rows: 'RAG options',
   item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task',
@@ -1117,6 +1119,75 @@ function movedMessage(m, moved) {
   const others = moved.filter(id => id !== m.id).length;
   if (others) parts.push(`${others} downstream ${others > 1 ? T.items : T.item} rescheduled`);
   return parts.join(' · ');
+}
+
+/* ---- change control ---- */
+// Top level milestones are under change control: anything that would move one (directly or as a
+// knock-on), delete it or take it out of change control first lists what changes and asks.
+
+const readYes = (v) => (/^(y|yes|true|1|x|✓)$/i.test(String(v ?? '').trim()) ? 'yes' : '');
+const isTopLevel = (m) => !!m && !isTask(m) && m.top_level === 'yes';
+
+// How each top level milestone in `before` ([{ m, start, end }]) has been changed since.
+function topLevelHits(before) {
+  return before.map(({ m, end }) => {
+    if (!state.items.includes(m)) return { m, kind: 'deleted' };
+    if (!isTopLevel(m)) return { m, kind: 'unflagged', task: isTask(m) };
+    if (m.end !== end) return { m, kind: 'moved', from: end, to: m.end };
+    return null;
+  }).filter(Boolean);
+}
+
+// Make a change, but if it touches a top level milestone, take it back and ask first; if confirmed
+// the change is made again. Resolves to the change's result, or null if it was cancelled.
+async function guardTopLevel(apply) {
+  const list = state.items, kept = [...list];
+  const saved = list.map(x => [x, structuredClone(x)]);
+  const audit = [new Set(knockOn), new Set(directEdits)];
+  const before = list.filter(isTopLevel).map(m => ({ m, end: m.end }));
+  const res = apply();
+  if (res?.error) return res;
+  const hits = topLevelHits(before);
+  if (!hits.length) return res;
+  state.items = list;
+  list.splice(0, list.length, ...kept);
+  for (const [x, v] of saved) { for (const k of Object.keys(x)) delete x[k]; Object.assign(x, v); }
+  for (const [set, was] of [[knockOn, audit[0]], [directEdits, audit[1]]]) { set.clear(); was.forEach(id => set.add(id)); }
+  if (!await confirmTopLevel(hits)) return null;
+  return apply();
+}
+
+function confirmTopLevel(hits) {
+  const dlg = document.getElementById('tl-dialog');
+  if (dlg.open) return Promise.resolve(false); // one at a time
+  const n = hits.length;
+  document.getElementById('tl-heading').textContent = n > 1
+    ? `This changes ${n} top level ${T.milestones}` : `This changes a top level ${T.milestone}`;
+  document.getElementById('tl-list').innerHTML = hits.map(h => {
+    const what = h.kind === 'deleted' ? '<span>Deleted</span><span>It will be removed from the plan.</span>'
+      : h.kind === 'unflagged' ? `<span>Control</span><span>${h.task ? `Becomes ${withArticle(T.task)}, so it` : 'It'} will no longer be under change control.</span>`
+      : `<span>Date</span><span>${fmtNice(h.from)} → <b>${fmtNice(h.to)}</b> (${daysBetween(h.from, h.to) > 0 ? '+' : '−'}${daysText(Math.abs(daysBetween(h.from, h.to)))})</span>`;
+    return `<li><div class="cf-what">${escAttr(fullLabel(h.m))}</div><div class="cf-vals">${what}</div></li>`;
+  }).join('');
+  dlg.returnValue = '';
+  dlg.showModal();
+  dlg.querySelector('[value="cancel"].btn').focus();
+  // Answered by the button pressed (or Esc), not the close event, which a hidden page can hold back.
+  return new Promise(resolve => {
+    const form = dlg.querySelector('form');
+    const done = (ok) => {
+      form.removeEventListener('submit', onSubmit);
+      dlg.removeEventListener('cancel', onCancel);
+      dlg.removeEventListener('close', onClose);
+      resolve(ok);
+    };
+    const onSubmit = (e) => done(e.submitter?.value === 'ok');
+    const onCancel = () => done(false);
+    const onClose = () => done(dlg.returnValue === 'ok');
+    form.addEventListener('submit', onSubmit);
+    dlg.addEventListener('cancel', onCancel);
+    dlg.addEventListener('close', onClose);
+  });
 }
 
 function removeItem(id) {
@@ -1627,6 +1698,8 @@ function renderGantt() {
         stroke: G.strong, 'stroke-width': 1, 'stroke-dasharray': '2 3',
       }));
       drawShape(g, m.shape, x1, cy, m.status, rm.shapeS);
+      // a top level milestone (under change control) wears a ring
+      if (isTopLevel(m)) g.appendChild(svgEl('circle', { cx: x1, cy, r: rm.shapeS + 5, fill: 'none', stroke: G.text, 'stroke-width': 1.4, 'pointer-events': 'none', class: 'gantt-tl' }));
     }
     if (m._side !== 'inside') {
       const anchor = m._side === 'left' ? 'end' : 'start';
@@ -1704,7 +1777,8 @@ function previewUpdate(m, changes) {
   const res = updateItem(m, changes);
   const others = (res.moved || []).filter(id => id !== m.id);
   const shifts = new Map(saved.filter(([x]) => others.includes(x.id)).map(([x, a]) => [x.id, daysBetween(a, x.start)]));
-  const out = { error: res.error, start: m.start, end: m.end, moved: others.length, shifts };
+  const topLevel = saved.filter(([x, , b]) => isTopLevel(x) && x.end !== b).map(([x]) => x);
+  const out = { error: res.error, start: m.start, end: m.end, moved: others.length, shifts, topLevel };
   for (const [x, a, b, t] of saved) Object.assign(x, { start: a, end: b, type: t });
   return out;
 }
@@ -1723,6 +1797,7 @@ function showKnockOn(shifts) {
     if (n === undefined) { g.removeAttribute('transform'); continue; }
     g.setAttribute('transform', `translate(${n * state.pxPerDay} 0)`);
     addHalo(g, `${n > 0 ? '+' : '−'}${daysText(Math.abs(n))}`);
+    g.classList.toggle('knock-tl', isTopLevel(itemById(g.dataset.id)));
   }
   svg.classList.toggle('drag-preview', shifts.size > 0);
   drag?.g.classList.toggle('knock-src', shifts.size > 0);
@@ -1805,7 +1880,8 @@ function onDragMove(e) {
     <div class="tip-head">${m.ref ? `<span class="tip-ref">${escAttr(m.ref)}</span>` : ''}<span>${what}</span></div>
     <div class="tip-row">${p.error ? escAttr(p.error) : isTask(m) ? `${fmtShort(p.start)} – ${fmtNice(p.end)} <span class="tip-muted">(${daysText(daysBetween(p.start, p.end) + 1)})</span>` : fmtNice(p.end)}</div>
     ${p.moved ? `<div class="tip-row tip-late amber">Moves ${count(p.moved, `${T.item} downstream`, `${T.items} downstream`)}</div>` : ''}
-    <div class="tip-hint">Let go to save · Esc to cancel</div>`;
+    ${p.topLevel?.length ? `<div class="tip-row tip-tl">⚠ Changes top level ${p.topLevel.length > 1 ? T.milestones : T.milestone} under change control: ${p.topLevel.map(x => escAttr(fullLabel(x))).join(', ')}</div>` : ''}
+    <div class="tip-hint">${p.topLevel?.length ? 'Let go to review and confirm' : 'Let go to save'} · Esc to cancel</div>`;
   tipAvoid = [];
   tip.classList.add('show');
   moveTip(e);
@@ -1822,7 +1898,8 @@ async function onDragEnd() {
   hideTip();
   if (!days) return renderGantt();
   const snap = snapshotData();
-  const res = updateItem(m, dragChanges(m, mode, days));
+  const res = await guardTopLevel(() => updateItem(m, dragChanges(m, mode, days)));
+  if (!res) return renderGantt();
   if (!res.error) flashMoved([m.id, ...res.moved]);
   renderGantt();
   if (res.error) return showToast(res.error);
@@ -2157,6 +2234,7 @@ function showTip(m, e) {
     <div class="tip-head">${m.ref ? `<span class="tip-ref">${escAttr(m.ref)}</span>` : ''}<span>${escAttr(m.title)}</span></div>
     <div class="tip-row"><span class="pill" style="background:${c.base};color:${c.text}">${m.status}</span><span>${escAttr(typeName(m))} · ${when}</span></div>
     ${progress}
+    ${isTopLevel(m) ? `<div class="tip-row tip-tl">Top level — under change control</div>` : ''}
     ${isLate(m) ? `<div class="tip-row tip-late">${lateText(m)}</div>` : isLateStart(m) ? `<div class="tip-row tip-late amber">${lateStartText(m)}</div>` : ''}
     ${baselineRow(m)}
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
@@ -2240,6 +2318,7 @@ function openEditDialog(m) {
     parents.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('');
   f.swimlane.innerHTML = laneOptions(v.swimlane);
   for (const k of EDIT_FIELDS) f[k].value = v[k] ?? '';
+  f.top_level.checked = v.top_level === 'yes';
   f.swimlane.dataset.prev = f.swimlane.value;
   closeNewLane(f);
   edDeps = [...v.deps];
@@ -2300,6 +2379,7 @@ function updateEdType() {
   badge.textContent = task ? T.Task : T.Milestone;
   badge.className = 'type-badge ' + (task ? 'task' : 'ms');
   f.shape.disabled = task;
+  f.top_level.disabled = task;
   document.getElementById('ed-start').classList.toggle('invisible', !task);
   document.getElementById('ed-end-label').textContent = task ? 'End' : 'Date';
   if (!task) f.start.value = f.end.value;
@@ -2311,6 +2391,7 @@ async function submitEditDialog(e) {
   const err = document.getElementById('ed-error');
   const changes = {};
   for (const k of EDIT_FIELDS) changes[k] = f[k].value.trim();
+  changes.top_level = f.top_level.checked ? 'yes' : '';
   changes.deps = edDeps;
   if (!f.newlane.hidden) changes.swimlane = f.newlane.value.trim();
   if (!changes.swimlane) { (f.newlane.hidden ? f.swimlane : f.newlane).focus(); return (err.textContent = 'Name the new swimlane.'); }
@@ -2331,7 +2412,11 @@ async function submitEditDialog(e) {
     m = { id: nextId(), workspace_id: state.workspaceId, ...changes, parent: '', deps: [] };
     state.items.push(m);
   }
-  const res = updateItem(m, changedFrom(changes, editOpened));
+  const res = await guardTopLevel(() => updateItem(m, changedFrom(changes, editOpened)));
+  if (!res) { // cancelled: the dialog stays open with the change in it
+    if (!editing) removeItem(m.id);
+    return;
+  }
   if (res.error) {
     if (!editing) removeItem(m.id);
     return (err.textContent = res.error);
@@ -2352,7 +2437,7 @@ async function deleteFromDialog() {
   if (!editing) return;
   const snap = snapshotData();
   const label = `Deleted ${fullLabel(editing)}`;
-  removeItem(editing.id);
+  if (!await guardTopLevel(() => removeItem(editing.id) ?? true)) return;
   document.getElementById('edit-dialog').close();
   rerenderCurrentView();
   if (isShown('editor')) refreshEditor();
@@ -2600,6 +2685,7 @@ const GRID_COLS = [
   { key: 'deps', label: 'Depends on', w: 190, filter: 'text' },
   { key: 'gitlab_url', label: 'GitLab URL', w: 200, filter: 'text' },
   { key: 'use_case_url', label: 'Use case URL', w: 200, filter: 'text' },
+  { key: 'top_level', label: 'Top level', w: 90, title: 'Under change control', filter: () => [['yes', 'Yes']] },
   { key: 'actions', label: '', w: 40, fixed: true },
 ];
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
@@ -2751,6 +2837,7 @@ function renderEditor(highlight = [], keepOrder = false) {
       owner: `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
       gitlab_url: `<input data-i="${i}" data-k="gitlab_url" type="url" value="${escAttr(m.gitlab_url)}" placeholder="https://…" />`,
       use_case_url: `<input data-i="${i}" data-k="use_case_url" type="url" value="${escAttr(m.use_case_url)}" placeholder="https://…" />`,
+      top_level: `<input data-i="${i}" data-k="top_level" type="checkbox" ${m.top_level === 'yes' ? 'checked' : ''} ${task ? `disabled title="Only ${escAttr(T.milestones)} can be top level"` : 'title="Under change control"'} />`,
       start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}"${dateTitle} />`,
       end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}"${late ? ` class="late" title="${escAttr(lateText(m))}"` : dateTitle} />`,
       status: quick ? `<div class="rag-pick sm compact">${ragButtons(m.status, `data-i="${i}"`)}</div>`
@@ -2794,12 +2881,17 @@ const pendingDates = new WeakSet(); // date cells typed into but not yet applied
 function syncEditorToState(skip) {
   document.querySelectorAll('#editor-body [data-k]').forEach(el => {
     // A date still being typed is left alone: applyDateEdit moves it, with its dependants, on leaving the field.
-    if (el !== skip && !pendingDates.has(el)) state.items[+el.dataset.i][el.dataset.k] = el.value;
+    if (el !== skip && !pendingDates.has(el)) state.items[+el.dataset.i][el.dataset.k] = el.type === 'checkbox' ? (el.checked ? 'yes' : '') : el.value;
   });
 }
 
-function applyTableChange(m, changes, msg) {
-  const res = updateItem(m, changes);
+async function applyTableChange(m, changes, msg) {
+  const res = await guardTopLevel(() => updateItem(m, changes));
+  if (!res) { // cancelled: rebuild the row so its cells show the saved values again
+    const tr = document.querySelector(`#editor-body tr[data-id="${m.id}"]`);
+    if (tr) delete tr.dataset.cols;
+    return refreshEditor();
+  }
   if (res.error) {
     flashStatus(res.error, false);
     return refreshEditor();
@@ -2837,6 +2929,13 @@ function onEditorChange(e) {
   if (k === 'parent') {
     syncEditorToState(t);
     return applyTableChange(m, { parent: t.value });
+  }
+
+  if (k === 'top_level') {
+    syncEditorToState(t);
+    const on = t.checked;
+    return applyTableChange(m, { top_level: on ? 'yes' : '' },
+      `${itemLabel(m)} is ${on ? 'now' : 'no longer'} a top level ${T.milestone}`);
   }
 
   if (k === 'start' || k === 'end') {
@@ -2885,10 +2984,12 @@ function onEditorClick(e) {
     syncEditorToState();
     const m = state.items[+del.dataset.del];
     const snap = snapshotData();
-    removeItem(m.id);
-    refreshEditor();
-    offerUndo(snap, `Deleted ${fullLabel(m)}`);
-    scheduleSave('Deleted');
+    guardTopLevel(() => removeItem(m.id) ?? true).then(ok => {
+      refreshEditor();
+      if (!ok) return;
+      offerUndo(snap, `Deleted ${fullLabel(m)}`);
+      scheduleSave('Deleted');
+    });
   }
 }
 
@@ -2960,7 +3061,7 @@ function renderBulkBar() {
   if (wasHidden) document.getElementById('bulk-value').innerHTML = bulkValueControl();
 }
 
-function applyBulk() {
+async function applyBulk() {
   syncEditorToState();
   const items = selectedItems();
   if (!items.length) return;
@@ -2973,9 +3074,13 @@ function applyBulk() {
   if (bulkField === 'shift') {
     const n = Math.round(+v);
     if (!n) return flashStatus('Enter a number of days to move by, e.g. 7 or -3', false);
-    for (const m of items) shiftItem(m, n);
-    cascadeShift(items.map(m => m.id), n);
-    enforceConstraints();
+    const ok = await guardTopLevel(() => {
+      for (const m of items) shiftItem(m, n);
+      cascadeShift(items.map(m => m.id), n);
+      enforceConstraints();
+      return true;
+    });
+    if (!ok) return;
     const moved = others();
     for (const m of items) directEdits.add(m.id);
     for (const id of moved) knockOn.add(id);
@@ -2986,10 +3091,15 @@ function applyBulk() {
   if (bulkField === 'swimlane' && !v) return flashStatus('Enter a swimlane', false);
 
   let done = 0, skipped = 0;
-  for (const m of items) {
-    if (bulkField === 'parent' && v === m.id) { skipped++; continue; } // can't roll up to itself
-    if (updateItem(m, { [bulkField]: v }).error) skipped++; else done++;
-  }
+  const ok = await guardTopLevel(() => {
+    done = skipped = 0;
+    for (const m of items) {
+      if (bulkField === 'parent' && v === m.id) { skipped++; continue; } // can't roll up to itself
+      if (updateItem(m, { [bulkField]: v }).error) skipped++; else done++;
+    }
+    return true;
+  });
+  if (!ok) return;
   const moved = others();
   const label = BULK_FIELDS().find(([k]) => k === bulkField)[1];
   refreshEditor(moved);
@@ -2998,13 +3108,13 @@ function applyBulk() {
     (skipped ? ` · ${skipped} skipped (would roll up to itself or create a loop)` : '') + also(moved));
 }
 
-function bulkDelete() {
+async function bulkDelete() {
   syncEditorToState();
   const items = selectedItems();
   if (!items.length) return;
   const what = count(items.length, T.item, T.items);
   const snap = snapshotData();
-  for (const m of items) removeItem(m.id);
+  if (!await guardTopLevel(() => { for (const m of items) removeItem(m.id); return true; })) return;
   gridSel.clear();
   refreshEditor();
   offerUndo(snap, `Deleted ${what}`);
@@ -3213,6 +3323,7 @@ function renderQuick() {
       </div>
     </div>
     ${itemLinks(m).length ? `<div class="q-links">${itemLinks(m).map(([k, u]) => `<span>${k}: ${linkOut(u)}</span>`).join('')}</div>` : ''}
+    ${isTopLevel(m) ? `<p class="q-note q-tl">⚠ Top level ${escAttr(T.milestone)} — under change control. Saving a new date asks for confirmation.</p>` : ''}
     ${deps ? `<p class="q-note">Moving the ${task ? 'end ' : ''}date moves ${deps} dependent ${escAttr(deps > 1 ? T.items : T.item)} by the same amount.</p>` : ''}
     <p class="q-msg">${escAttr(quickMsg)}</p>
     <div class="q-save">
@@ -3308,12 +3419,12 @@ async function onQuickDateSubmit(e) {
   }
   const snap = snapshotData();
   const msgs = [];
-  if (d.status !== m.status) { m.status = d.status; msgs.push(`RAG ${d.status}`); }
   const changes = { type: d.type, end: d.end, start: task ? d.start : d.end };
   let res = { moved: [] };
   if (changes.type !== m.type || changes.end !== m.end || changes.start !== m.start) {
     const typeChanged = changes.type !== m.type;
-    res = updateItem(m, changes);
+    res = await guardTopLevel(() => updateItem(m, changes));
+    if (!res) return; // the panel stays open with the change in it
     if (res.error) {
       quickMsg = res.error;
       return renderQuick();
@@ -3321,6 +3432,7 @@ async function onQuickDateSubmit(e) {
     if (typeChanged) msgs.push(`now ${withArticle(task ? T.task : T.milestone)}`);
     msgs.push(task ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end));
   }
+  if (d.status !== m.status) { m.status = d.status; msgs.unshift(`RAG ${d.status}`); }
   hideQuick();
   if (res.moved.length) flashMoved([m.id, ...res.moved]);
   renderGantt();
@@ -4602,7 +4714,7 @@ function itemsExportCSV(items) {
   const lines = [EXPORT_COLUMNS.join(',')];
   for (const m of items) {
     lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
-      m.status, m.shape, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
+      m.status, m.shape, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url, m.top_level].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -4645,14 +4757,14 @@ function downloadReportsCSV() {
 // item's value alone. Links (rolls up to, depends on) name an item by its ref.
 
 const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'deps',
-  'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url', 'id'];
+  'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url', 'top_level', 'id'];
 const IMPORT_DATES = ['start', 'end', 'baseline_start', 'baseline_end'];
 const importFieldLabel = (k) => ({
   ref: 'Ref', title: 'Title', type: `Type (${T.milestone} or ${T.task})`, description: 'Description', swimlane: 'Swimlane',
   subswimlane: 'Sub-swimlane', owner: 'Owner', start: 'Start date', end: `End date / ${T.milestone} date`, status: 'RAG',
   shape: 'Shape', parent: 'Rolls up to (ref)', deps: 'Depends on (refs)',
   baseline_start: 'Baseline start', baseline_end: `Baseline end / ${T.milestone} baseline date`, gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
-  id: 'ID (used to match links)',
+  top_level: `Top level ${T.milestone} (yes or no)`, id: 'ID (used to match links)',
 }[k]);
 // Headings are compared with everything but letters and digits removed.
 const IMPORT_ALIASES = {
@@ -4675,6 +4787,7 @@ const IMPORT_ALIASES = {
   baseline_end: ['baselineend', 'baselineenddate', 'baselinefinish', 'baselinedate', 'baselinedue'],
   gitlab_url: ['gitlaburl', 'gitlab', 'gitlablink', 'repo', 'repository', 'repourl'],
   use_case_url: ['usecaseurl', 'usecase', 'usecaselink'],
+  top_level: ['toplevel', 'toplevelmilestone', 'changecontrol', 'changecontrolled', 'undercontrol'],
 };
 
 const imp = { name: '', rows: [], hasHeader: true, map: [], order: 'auto', mode: 'merge', plan: null };
@@ -4810,6 +4923,7 @@ function planImport() {
 
     for (const k of ['ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner']) if (cell(k)) f[k] = cell(k);
     for (const k in URL_FIELDS) if (cell(k)) f[k] = withScheme(cell(k));
+    if (cell('top_level')) f.top_level = readYes(cell('top_level'));
     if (row.action === 'add' && !f.title) { row.action = 'skip'; row.notes.push('No title'); }
 
     // Dates
@@ -4924,40 +5038,45 @@ async function applyImport() {
   const plan = planImport();
   const snap = snapshotData();
   const itemOf = new Map();
-  let added = 0, updated = 0;
-  for (const m of plan.deletes) removeItem(m.id);
-  for (const r of plan.rows) {
-    if (r.action === 'skip') continue;
-    let m = r.target;
-    if (!m) {
-      m = {
-        id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: '', description: '', swimlane: 'General',
-        subswimlane: '', owner: '', start: '', end: '', status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
-      };
-      state.items.push(m);
-      added++;
-    } else if (r.action === 'update') updated++;
-    Object.assign(m, r.fields);
-    itemOf.set(r, m);
-  }
-  const target = (x) => (x && (itemOf.get(x) || (state.items.includes(x) ? x : null)));
-  let dropped = 0;
-  for (const r of plan.rows) {
-    const m = itemOf.get(r);
-    if (!m) continue;
-    const parent = target(r.parent);
-    if (parent && parent !== m) {
-      const before = m.parent;
-      m.parent = parent.id;
-      if (hasCycle()) { m.parent = before; dropped++; }
+  let added = 0, updated = 0, dropped = 0;
+  const ok = await guardTopLevel(() => {
+    itemOf.clear();
+    added = updated = dropped = 0;
+    for (const m of plan.deletes) removeItem(m.id);
+    for (const r of plan.rows) {
+      if (r.action === 'skip') continue;
+      let m = r.target;
+      if (!m) {
+        m = {
+          id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: '', description: '', swimlane: 'General',
+          subswimlane: '', owner: '', start: '', end: '', status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
+        };
+        state.items.push(m);
+        added++;
+      } else if (r.action === 'update') updated++;
+      Object.assign(m, r.fields);
+      itemOf.set(r, m);
     }
-    if (r.links?.deps) m.deps = []; // the file's list replaces the item's
-    for (const d of (r.deps || []).map(target)) {
-      if (!d || d === m || m.deps.includes(d.id)) continue;
-      m.deps.push(d.id);
-      if (hasCycle()) { m.deps.pop(); dropped++; }
+    const target = (x) => (x && (itemOf.get(x) || (state.items.includes(x) ? x : null)));
+    for (const r of plan.rows) {
+      const m = itemOf.get(r);
+      if (!m) continue;
+      const parent = target(r.parent);
+      if (parent && parent !== m) {
+        const before = m.parent;
+        m.parent = parent.id;
+        if (hasCycle()) { m.parent = before; dropped++; }
+      }
+      if (r.links?.deps) m.deps = []; // the file's list replaces the item's
+      for (const d of (r.deps || []).map(target)) {
+        if (!d || d === m || m.deps.includes(d.id)) continue;
+        m.deps.push(d.id);
+        if (hasCycle()) { m.deps.pop(); dropped++; }
+      }
     }
-  }
+    return true;
+  });
+  if (!ok) return; // the import dialog stays open
   document.getElementById('import-dialog').close();
   clearTableFilters(grid);
   autoRange();

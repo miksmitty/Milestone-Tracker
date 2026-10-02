@@ -44,7 +44,7 @@ const DATASETS = {
   },
   '/api/milestones': {
     file: path.join(DATA_DIR, 'milestones.csv'),
-    header: 'id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url\n',
+    header: 'id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url,top_level\n',
     audited: true, // date changes are logged to date-changes.csv
   },
   '/api/reports': {

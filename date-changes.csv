@@ -245,3 +245,251 @@ id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 380,2026-10-02T08:28:07.592Z,,1,18,5.2,UAT Sign-off,end,2026-09-24,2026-09-02,-22,Changed,Undo,Undone: 4.3: 3 Jul – 8 Sept 2026 · 5 downstream items rescheduled
 381,2026-10-02T08:28:07.592Z,,1,22,5.3,Training Delivery,start,2026-09-24,2026-09-14,-10,Changed,Undo,Undone: 4.3: 3 Jul – 8 Sept 2026 · 5 downstream items rescheduled
 382,2026-10-02T08:28:07.592Z,,1,22,5.3,Training Delivery,end,2026-10-19,2026-10-09,-10,Changed,Undo,Undone: 4.3: 3 Jul – 8 Sept 2026 · 5 downstream items rescheduled
+383,2026-10-02T09:29:23.879Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-11,2026-06-21,10,Changed,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+384,2026-10-02T09:29:23.879Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-11,2026-06-21,10,Changed,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+385,2026-10-02T09:29:23.879Z,,1,12,4.3,Build Phase 2,start,2026-06-11,2026-06-21,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+386,2026-10-02T09:29:23.879Z,,1,12,4.3,Build Phase 2,end,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+387,2026-10-02T09:29:23.879Z,,1,13,4.4,Build Phase 2 Complete,start,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+388,2026-10-02T09:29:23.879Z,,1,13,4.4,Build Phase 2 Complete,end,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+389,2026-10-02T09:29:23.879Z,,1,14,4.5,Integration Testing,start,2026-06-11,2026-06-21,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+390,2026-10-02T09:29:23.879Z,,1,14,4.5,Integration Testing,end,2026-08-10,2026-08-20,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+391,2026-10-02T09:29:23.879Z,,1,15,4.6,Security Pen Test,start,2026-07-06,2026-07-16,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+392,2026-10-02T09:29:23.879Z,,1,15,4.6,Security Pen Test,end,2026-07-17,2026-07-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+393,2026-10-02T09:29:23.879Z,,1,16,4.7,Test Exit,start,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+394,2026-10-02T09:29:23.879Z,,1,16,4.7,Test Exit,end,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+395,2026-10-02T09:29:23.879Z,,1,17,5.1,User Acceptance Testing,start,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+396,2026-10-02T09:29:23.879Z,,1,17,5.1,User Acceptance Testing,end,2026-09-02,2026-09-12,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+397,2026-10-02T09:29:23.879Z,,1,18,5.2,UAT Sign-off,start,2026-09-02,2026-09-12,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+398,2026-10-02T09:29:23.879Z,,1,18,5.2,UAT Sign-off,end,2026-09-02,2026-09-12,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+399,2026-10-02T09:29:23.879Z,,1,19,4.8,Migration Tooling,start,2026-06-15,2026-06-25,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+400,2026-10-02T09:29:23.879Z,,1,19,4.8,Migration Tooling,end,2026-08-28,2026-09-07,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+401,2026-10-02T09:29:23.879Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-01,2026-09-11,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+402,2026-10-02T09:29:23.879Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-02,2026-10-12,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+403,2026-10-02T09:29:23.879Z,,1,21,4.10,Migration Ready,start,2026-10-05,2026-10-12,7,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+404,2026-10-02T09:29:23.879Z,,1,21,4.10,Migration Ready,end,2026-10-05,2026-10-12,7,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+405,2026-10-02T09:29:23.879Z,,1,23,4.11,Cutover Preparation,start,2026-10-06,2026-10-12,6,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+406,2026-10-02T09:29:23.879Z,,1,23,4.11,Cutover Preparation,end,2026-10-16,2026-10-22,6,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+407,2026-10-02T09:29:23.879Z,,1,24,1.4,Go-Live,start,2026-10-19,2026-10-22,3,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+408,2026-10-02T09:29:23.879Z,,1,24,1.4,Go-Live,end,2026-10-19,2026-10-22,3,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+409,2026-10-02T09:29:23.879Z,,1,25,4.12,Hypercare,start,2026-10-20,2026-10-22,2,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+410,2026-10-02T09:29:23.879Z,,1,25,4.12,Hypercare,end,2026-11-12,2026-11-14,2,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+411,2026-10-02T09:29:23.879Z,,1,26,1.5,Hypercare Exit,start,2026-11-13,2026-11-14,1,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+412,2026-10-02T09:29:23.879Z,,1,26,1.5,Hypercare Exit,end,2026-11-13,2026-11-14,1,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+413,2026-10-02T09:29:32.094Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-21,2026-07-01,10,Changed,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+414,2026-10-02T09:29:32.094Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-21,2026-07-01,10,Changed,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+415,2026-10-02T09:29:32.094Z,,1,12,4.3,Build Phase 2,start,2026-06-21,2026-07-01,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+416,2026-10-02T09:29:32.094Z,,1,12,4.3,Build Phase 2,end,2026-08-27,2026-09-06,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+417,2026-10-02T09:29:32.094Z,,1,13,4.4,Build Phase 2 Complete,start,2026-08-27,2026-09-06,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+418,2026-10-02T09:29:32.094Z,,1,13,4.4,Build Phase 2 Complete,end,2026-08-27,2026-09-06,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+419,2026-10-02T09:29:32.094Z,,1,14,4.5,Integration Testing,start,2026-06-21,2026-07-01,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+420,2026-10-02T09:29:32.094Z,,1,14,4.5,Integration Testing,end,2026-08-20,2026-08-30,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+421,2026-10-02T09:29:32.094Z,,1,15,4.6,Security Pen Test,start,2026-07-16,2026-07-26,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+422,2026-10-02T09:29:32.094Z,,1,15,4.6,Security Pen Test,end,2026-07-27,2026-08-06,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+423,2026-10-02T09:29:32.094Z,,1,16,4.7,Test Exit,start,2026-08-27,2026-09-06,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+424,2026-10-02T09:29:32.094Z,,1,16,4.7,Test Exit,end,2026-08-27,2026-09-06,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+425,2026-10-02T09:29:32.094Z,,1,17,5.1,User Acceptance Testing,start,2026-08-27,2026-09-06,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+426,2026-10-02T09:29:32.094Z,,1,17,5.1,User Acceptance Testing,end,2026-09-12,2026-09-22,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+427,2026-10-02T09:29:32.094Z,,1,18,5.2,UAT Sign-off,start,2026-09-12,2026-09-22,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+428,2026-10-02T09:29:32.094Z,,1,18,5.2,UAT Sign-off,end,2026-09-12,2026-09-22,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+429,2026-10-02T09:29:32.094Z,,1,19,4.8,Migration Tooling,start,2026-06-25,2026-07-05,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+430,2026-10-02T09:29:32.094Z,,1,19,4.8,Migration Tooling,end,2026-09-07,2026-09-17,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+431,2026-10-02T09:29:32.094Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-11,2026-09-21,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+432,2026-10-02T09:29:32.094Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-12,2026-10-22,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+433,2026-10-02T09:29:32.094Z,,1,21,4.10,Migration Ready,start,2026-10-12,2026-10-22,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+434,2026-10-02T09:29:32.094Z,,1,21,4.10,Migration Ready,end,2026-10-12,2026-10-22,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+435,2026-10-02T09:29:32.094Z,,1,22,5.3,Training Delivery,start,2026-09-14,2026-09-22,8,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+436,2026-10-02T09:29:32.094Z,,1,22,5.3,Training Delivery,end,2026-10-09,2026-10-17,8,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+437,2026-10-02T09:29:32.094Z,,1,23,4.11,Cutover Preparation,start,2026-10-12,2026-10-22,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+438,2026-10-02T09:29:32.094Z,,1,23,4.11,Cutover Preparation,end,2026-10-22,2026-11-01,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+439,2026-10-02T09:29:32.094Z,,1,24,1.4,Go-Live,start,2026-10-22,2026-11-01,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+440,2026-10-02T09:29:32.094Z,,1,24,1.4,Go-Live,end,2026-10-22,2026-11-01,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+441,2026-10-02T09:29:32.094Z,,1,25,4.12,Hypercare,start,2026-10-22,2026-11-01,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+442,2026-10-02T09:29:32.094Z,,1,25,4.12,Hypercare,end,2026-11-14,2026-11-24,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+443,2026-10-02T09:29:32.094Z,,1,26,1.5,Hypercare Exit,start,2026-11-14,2026-11-24,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+444,2026-10-02T09:29:32.094Z,,1,26,1.5,Hypercare Exit,end,2026-11-14,2026-11-24,10,Knock-on,Dragged on the Gantt chart,4.2: 1 Jul 2026 · 15 downstream items rescheduled
+445,2026-10-02T09:29:54.034Z,,1,11,4.2,Build Phase 1 Complete,start,2026-07-01,2026-06-21,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+446,2026-10-02T09:29:54.034Z,,1,11,4.2,Build Phase 1 Complete,end,2026-07-01,2026-06-21,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+447,2026-10-02T09:29:54.034Z,,1,12,4.3,Build Phase 2,start,2026-07-01,2026-06-21,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+448,2026-10-02T09:29:54.034Z,,1,12,4.3,Build Phase 2,end,2026-09-06,2026-08-27,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+449,2026-10-02T09:29:54.034Z,,1,13,4.4,Build Phase 2 Complete,start,2026-09-06,2026-08-27,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+450,2026-10-02T09:29:54.034Z,,1,13,4.4,Build Phase 2 Complete,end,2026-09-06,2026-08-27,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+451,2026-10-02T09:29:54.034Z,,1,14,4.5,Integration Testing,start,2026-07-01,2026-06-21,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+452,2026-10-02T09:29:54.034Z,,1,14,4.5,Integration Testing,end,2026-08-30,2026-08-20,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+453,2026-10-02T09:29:54.034Z,,1,15,4.6,Security Pen Test,start,2026-07-26,2026-07-16,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+454,2026-10-02T09:29:54.034Z,,1,15,4.6,Security Pen Test,end,2026-08-06,2026-07-27,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+455,2026-10-02T09:29:54.034Z,,1,16,4.7,Test Exit,start,2026-09-06,2026-08-27,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+456,2026-10-02T09:29:54.034Z,,1,16,4.7,Test Exit,end,2026-09-06,2026-08-27,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+457,2026-10-02T09:29:54.034Z,,1,17,5.1,User Acceptance Testing,start,2026-09-06,2026-08-27,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+458,2026-10-02T09:29:54.034Z,,1,17,5.1,User Acceptance Testing,end,2026-09-22,2026-09-12,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+459,2026-10-02T09:29:54.034Z,,1,18,5.2,UAT Sign-off,start,2026-09-22,2026-09-12,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+460,2026-10-02T09:29:54.034Z,,1,18,5.2,UAT Sign-off,end,2026-09-22,2026-09-12,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+461,2026-10-02T09:29:54.034Z,,1,19,4.8,Migration Tooling,start,2026-07-05,2026-06-25,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+462,2026-10-02T09:29:54.034Z,,1,19,4.8,Migration Tooling,end,2026-09-17,2026-09-07,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+463,2026-10-02T09:29:54.034Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-21,2026-09-11,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+464,2026-10-02T09:29:54.034Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-22,2026-10-12,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+465,2026-10-02T09:29:54.034Z,,1,21,4.10,Migration Ready,start,2026-10-22,2026-10-12,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+466,2026-10-02T09:29:54.034Z,,1,21,4.10,Migration Ready,end,2026-10-22,2026-10-12,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+467,2026-10-02T09:29:54.034Z,,1,22,5.3,Training Delivery,start,2026-09-22,2026-09-14,-8,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+468,2026-10-02T09:29:54.034Z,,1,22,5.3,Training Delivery,end,2026-10-17,2026-10-09,-8,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+469,2026-10-02T09:29:54.034Z,,1,23,4.11,Cutover Preparation,start,2026-10-22,2026-10-12,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+470,2026-10-02T09:29:54.034Z,,1,23,4.11,Cutover Preparation,end,2026-11-01,2026-10-22,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+471,2026-10-02T09:29:54.034Z,,1,24,1.4,Go-Live,start,2026-11-01,2026-10-22,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+472,2026-10-02T09:29:54.034Z,,1,24,1.4,Go-Live,end,2026-11-01,2026-10-22,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+473,2026-10-02T09:29:54.034Z,,1,25,4.12,Hypercare,start,2026-11-01,2026-10-22,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+474,2026-10-02T09:29:54.034Z,,1,25,4.12,Hypercare,end,2026-11-24,2026-11-14,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+475,2026-10-02T09:29:54.034Z,,1,26,1.5,Hypercare Exit,start,2026-11-24,2026-11-14,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+476,2026-10-02T09:29:54.034Z,,1,26,1.5,Hypercare Exit,end,2026-11-24,2026-11-14,-10,Changed,Undo,Undone: 4.2: 1 Jul 2026 · 15 downstream items rescheduled
+477,2026-10-02T09:29:54.042Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+478,2026-10-02T09:29:54.042Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+479,2026-10-02T09:29:54.042Z,,1,12,4.3,Build Phase 2,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+480,2026-10-02T09:29:54.042Z,,1,12,4.3,Build Phase 2,end,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+481,2026-10-02T09:29:54.042Z,,1,13,4.4,Build Phase 2 Complete,start,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+482,2026-10-02T09:29:54.042Z,,1,13,4.4,Build Phase 2 Complete,end,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+483,2026-10-02T09:29:54.042Z,,1,14,4.5,Integration Testing,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+484,2026-10-02T09:29:54.042Z,,1,14,4.5,Integration Testing,end,2026-08-20,2026-08-10,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+485,2026-10-02T09:29:54.042Z,,1,15,4.6,Security Pen Test,start,2026-07-16,2026-07-06,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+486,2026-10-02T09:29:54.042Z,,1,15,4.6,Security Pen Test,end,2026-07-27,2026-07-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+487,2026-10-02T09:29:54.042Z,,1,16,4.7,Test Exit,start,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+488,2026-10-02T09:29:54.042Z,,1,16,4.7,Test Exit,end,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+489,2026-10-02T09:29:54.042Z,,1,17,5.1,User Acceptance Testing,start,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+490,2026-10-02T09:29:54.042Z,,1,17,5.1,User Acceptance Testing,end,2026-09-12,2026-09-02,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+491,2026-10-02T09:29:54.042Z,,1,18,5.2,UAT Sign-off,start,2026-09-12,2026-09-02,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+492,2026-10-02T09:29:54.042Z,,1,18,5.2,UAT Sign-off,end,2026-09-12,2026-09-02,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+493,2026-10-02T09:29:54.042Z,,1,19,4.8,Migration Tooling,start,2026-06-25,2026-06-15,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+494,2026-10-02T09:29:54.042Z,,1,19,4.8,Migration Tooling,end,2026-09-07,2026-08-28,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+495,2026-10-02T09:29:54.042Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-11,2026-09-01,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+496,2026-10-02T09:29:54.042Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-12,2026-10-02,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+497,2026-10-02T09:29:54.042Z,,1,21,4.10,Migration Ready,start,2026-10-12,2026-10-05,-7,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+498,2026-10-02T09:29:54.042Z,,1,21,4.10,Migration Ready,end,2026-10-12,2026-10-05,-7,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+499,2026-10-02T09:29:54.042Z,,1,23,4.11,Cutover Preparation,start,2026-10-12,2026-10-06,-6,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+500,2026-10-02T09:29:54.042Z,,1,23,4.11,Cutover Preparation,end,2026-10-22,2026-10-16,-6,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+501,2026-10-02T09:29:54.042Z,,1,24,1.4,Go-Live,start,2026-10-22,2026-10-19,-3,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+502,2026-10-02T09:29:54.042Z,,1,24,1.4,Go-Live,end,2026-10-22,2026-10-19,-3,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+503,2026-10-02T09:29:54.042Z,,1,25,4.12,Hypercare,start,2026-10-22,2026-10-20,-2,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+504,2026-10-02T09:29:54.042Z,,1,25,4.12,Hypercare,end,2026-11-14,2026-11-12,-2,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+505,2026-10-02T09:29:54.042Z,,1,26,1.5,Hypercare Exit,start,2026-11-14,2026-11-13,-1,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+506,2026-10-02T09:29:54.042Z,,1,26,1.5,Hypercare Exit,end,2026-11-14,2026-11-13,-1,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+507,2026-10-02T09:30:00.111Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-11,2026-06-21,10,Changed,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+508,2026-10-02T09:30:00.111Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-11,2026-06-21,10,Changed,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+509,2026-10-02T09:30:00.111Z,,1,12,4.3,Build Phase 2,start,2026-06-11,2026-06-21,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+510,2026-10-02T09:30:00.111Z,,1,12,4.3,Build Phase 2,end,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+511,2026-10-02T09:30:00.111Z,,1,13,4.4,Build Phase 2 Complete,start,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+512,2026-10-02T09:30:00.111Z,,1,13,4.4,Build Phase 2 Complete,end,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+513,2026-10-02T09:30:00.111Z,,1,14,4.5,Integration Testing,start,2026-06-11,2026-06-21,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+514,2026-10-02T09:30:00.111Z,,1,14,4.5,Integration Testing,end,2026-08-10,2026-08-20,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+515,2026-10-02T09:30:00.111Z,,1,15,4.6,Security Pen Test,start,2026-07-06,2026-07-16,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+516,2026-10-02T09:30:00.111Z,,1,15,4.6,Security Pen Test,end,2026-07-17,2026-07-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+517,2026-10-02T09:30:00.111Z,,1,16,4.7,Test Exit,start,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+518,2026-10-02T09:30:00.111Z,,1,16,4.7,Test Exit,end,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+519,2026-10-02T09:30:00.111Z,,1,17,5.1,User Acceptance Testing,start,2026-08-17,2026-08-27,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+520,2026-10-02T09:30:00.111Z,,1,17,5.1,User Acceptance Testing,end,2026-09-02,2026-09-12,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+521,2026-10-02T09:30:00.111Z,,1,18,5.2,UAT Sign-off,start,2026-09-02,2026-09-12,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+522,2026-10-02T09:30:00.111Z,,1,18,5.2,UAT Sign-off,end,2026-09-02,2026-09-12,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+523,2026-10-02T09:30:00.111Z,,1,19,4.8,Migration Tooling,start,2026-06-15,2026-06-25,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+524,2026-10-02T09:30:00.111Z,,1,19,4.8,Migration Tooling,end,2026-08-28,2026-09-07,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+525,2026-10-02T09:30:00.111Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-01,2026-09-11,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+526,2026-10-02T09:30:00.111Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-02,2026-10-12,10,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+527,2026-10-02T09:30:00.111Z,,1,21,4.10,Migration Ready,start,2026-10-05,2026-10-12,7,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+528,2026-10-02T09:30:00.111Z,,1,21,4.10,Migration Ready,end,2026-10-05,2026-10-12,7,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+529,2026-10-02T09:30:00.111Z,,1,23,4.11,Cutover Preparation,start,2026-10-06,2026-10-12,6,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+530,2026-10-02T09:30:00.111Z,,1,23,4.11,Cutover Preparation,end,2026-10-16,2026-10-22,6,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+531,2026-10-02T09:30:00.111Z,,1,24,1.4,Go-Live,start,2026-10-19,2026-10-22,3,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+532,2026-10-02T09:30:00.111Z,,1,24,1.4,Go-Live,end,2026-10-19,2026-10-22,3,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+533,2026-10-02T09:30:00.111Z,,1,25,4.12,Hypercare,start,2026-10-20,2026-10-22,2,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+534,2026-10-02T09:30:00.111Z,,1,25,4.12,Hypercare,end,2026-11-12,2026-11-14,2,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+535,2026-10-02T09:30:00.111Z,,1,26,1.5,Hypercare Exit,start,2026-11-13,2026-11-14,1,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+536,2026-10-02T09:30:00.111Z,,1,26,1.5,Hypercare Exit,end,2026-11-13,2026-11-14,1,Knock-on,Dragged on the Gantt chart,4.2: 21 Jun 2026 · 14 downstream items rescheduled
+537,2026-10-02T09:30:14.631Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+538,2026-10-02T09:30:14.631Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+539,2026-10-02T09:30:14.631Z,,1,12,4.3,Build Phase 2,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+540,2026-10-02T09:30:14.631Z,,1,12,4.3,Build Phase 2,end,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+541,2026-10-02T09:30:14.631Z,,1,13,4.4,Build Phase 2 Complete,start,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+542,2026-10-02T09:30:14.631Z,,1,13,4.4,Build Phase 2 Complete,end,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+543,2026-10-02T09:30:14.631Z,,1,14,4.5,Integration Testing,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+544,2026-10-02T09:30:14.631Z,,1,14,4.5,Integration Testing,end,2026-08-20,2026-08-10,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+545,2026-10-02T09:30:14.631Z,,1,15,4.6,Security Pen Test,start,2026-07-16,2026-07-06,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+546,2026-10-02T09:30:14.631Z,,1,15,4.6,Security Pen Test,end,2026-07-27,2026-07-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+547,2026-10-02T09:30:14.631Z,,1,16,4.7,Test Exit,start,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+548,2026-10-02T09:30:14.631Z,,1,16,4.7,Test Exit,end,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+549,2026-10-02T09:30:14.631Z,,1,17,5.1,User Acceptance Testing,start,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+550,2026-10-02T09:30:14.631Z,,1,17,5.1,User Acceptance Testing,end,2026-09-12,2026-09-02,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+551,2026-10-02T09:30:14.631Z,,1,18,5.2,UAT Sign-off,start,2026-09-12,2026-09-02,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+552,2026-10-02T09:30:14.631Z,,1,18,5.2,UAT Sign-off,end,2026-09-12,2026-09-02,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+553,2026-10-02T09:30:14.631Z,,1,19,4.8,Migration Tooling,start,2026-06-25,2026-06-15,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+554,2026-10-02T09:30:14.631Z,,1,19,4.8,Migration Tooling,end,2026-09-07,2026-08-28,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+555,2026-10-02T09:30:14.631Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-11,2026-09-01,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+556,2026-10-02T09:30:14.631Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-12,2026-10-02,-10,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+557,2026-10-02T09:30:14.631Z,,1,21,4.10,Migration Ready,start,2026-10-12,2026-10-05,-7,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+558,2026-10-02T09:30:14.631Z,,1,21,4.10,Migration Ready,end,2026-10-12,2026-10-05,-7,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+559,2026-10-02T09:30:14.631Z,,1,23,4.11,Cutover Preparation,start,2026-10-12,2026-10-06,-6,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+560,2026-10-02T09:30:14.631Z,,1,23,4.11,Cutover Preparation,end,2026-10-22,2026-10-16,-6,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+561,2026-10-02T09:30:14.631Z,,1,24,1.4,Go-Live,start,2026-10-22,2026-10-19,-3,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+562,2026-10-02T09:30:14.631Z,,1,24,1.4,Go-Live,end,2026-10-22,2026-10-19,-3,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+563,2026-10-02T09:30:14.631Z,,1,25,4.12,Hypercare,start,2026-10-22,2026-10-20,-2,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+564,2026-10-02T09:30:14.631Z,,1,25,4.12,Hypercare,end,2026-11-14,2026-11-12,-2,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+565,2026-10-02T09:30:14.631Z,,1,26,1.5,Hypercare Exit,start,2026-11-14,2026-11-13,-1,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+566,2026-10-02T09:30:14.631Z,,1,26,1.5,Hypercare Exit,end,2026-11-14,2026-11-13,-1,Changed,Undo,Undone: 4.2: 21 Jun 2026 · 14 downstream items rescheduled
+567,2026-10-02T09:30:18.102Z,,1,24,1.4,Go-Live,start,2026-10-19,,,Deleted,Items table,Deleted
+568,2026-10-02T09:30:18.102Z,,1,24,1.4,Go-Live,end,2026-10-19,,,Deleted,Items table,Deleted
+569,2026-10-02T09:30:29.801Z,,1,24,1.4,Go-Live,start,,2026-10-19,,Added,Undo,Undone: Deleted 1.4 Go-Live
+570,2026-10-02T09:30:29.801Z,,1,24,1.4,Go-Live,end,,2026-10-19,,Added,Undo,Undone: Deleted 1.4 Go-Live
+571,2026-10-02T09:32:14.932Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-11,2026-06-16,5,Changed,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+572,2026-10-02T09:32:14.932Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-11,2026-06-16,5,Changed,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+573,2026-10-02T09:32:14.932Z,,1,12,4.3,Build Phase 2,start,2026-06-11,2026-06-16,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+574,2026-10-02T09:32:14.932Z,,1,12,4.3,Build Phase 2,end,2026-08-17,2026-08-22,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+575,2026-10-02T09:32:14.932Z,,1,13,4.4,Build Phase 2 Complete,start,2026-08-17,2026-08-22,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+576,2026-10-02T09:32:14.932Z,,1,13,4.4,Build Phase 2 Complete,end,2026-08-17,2026-08-22,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+577,2026-10-02T09:32:14.932Z,,1,14,4.5,Integration Testing,start,2026-06-11,2026-06-16,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+578,2026-10-02T09:32:14.932Z,,1,14,4.5,Integration Testing,end,2026-08-10,2026-08-15,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+579,2026-10-02T09:32:14.932Z,,1,15,4.6,Security Pen Test,start,2026-07-06,2026-07-11,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+580,2026-10-02T09:32:14.932Z,,1,15,4.6,Security Pen Test,end,2026-07-17,2026-07-22,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+581,2026-10-02T09:32:14.932Z,,1,16,4.7,Test Exit,start,2026-08-17,2026-08-22,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+582,2026-10-02T09:32:14.932Z,,1,16,4.7,Test Exit,end,2026-08-17,2026-08-22,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+583,2026-10-02T09:32:14.932Z,,1,17,5.1,User Acceptance Testing,start,2026-08-17,2026-08-22,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+584,2026-10-02T09:32:14.932Z,,1,17,5.1,User Acceptance Testing,end,2026-09-02,2026-09-07,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+585,2026-10-02T09:32:14.932Z,,1,18,5.2,UAT Sign-off,start,2026-09-02,2026-09-07,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+586,2026-10-02T09:32:14.932Z,,1,18,5.2,UAT Sign-off,end,2026-09-02,2026-09-07,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+587,2026-10-02T09:32:14.932Z,,1,19,4.8,Migration Tooling,start,2026-06-15,2026-06-20,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+588,2026-10-02T09:32:14.932Z,,1,19,4.8,Migration Tooling,end,2026-08-28,2026-09-02,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+589,2026-10-02T09:32:14.932Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-01,2026-09-06,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+590,2026-10-02T09:32:14.932Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-02,2026-10-07,5,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+591,2026-10-02T09:32:14.932Z,,1,21,4.10,Migration Ready,start,2026-10-05,2026-10-07,2,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+592,2026-10-02T09:32:14.932Z,,1,21,4.10,Migration Ready,end,2026-10-05,2026-10-07,2,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+593,2026-10-02T09:32:14.932Z,,1,23,4.11,Cutover Preparation,start,2026-10-06,2026-10-07,1,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+594,2026-10-02T09:32:14.932Z,,1,23,4.11,Cutover Preparation,end,2026-10-16,2026-10-17,1,Knock-on,Items table,Moved 1 item 5 days later · 11 downstream items rescheduled
+595,2026-10-02T09:32:21.399Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-16,2026-06-11,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+596,2026-10-02T09:32:21.399Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-16,2026-06-11,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+597,2026-10-02T09:32:21.399Z,,1,12,4.3,Build Phase 2,start,2026-06-16,2026-06-11,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+598,2026-10-02T09:32:21.399Z,,1,12,4.3,Build Phase 2,end,2026-08-22,2026-08-17,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+599,2026-10-02T09:32:21.399Z,,1,13,4.4,Build Phase 2 Complete,start,2026-08-22,2026-08-17,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+600,2026-10-02T09:32:21.399Z,,1,13,4.4,Build Phase 2 Complete,end,2026-08-22,2026-08-17,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+601,2026-10-02T09:32:21.399Z,,1,14,4.5,Integration Testing,start,2026-06-16,2026-06-11,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+602,2026-10-02T09:32:21.399Z,,1,14,4.5,Integration Testing,end,2026-08-15,2026-08-10,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+603,2026-10-02T09:32:21.399Z,,1,15,4.6,Security Pen Test,start,2026-07-11,2026-07-06,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+604,2026-10-02T09:32:21.399Z,,1,15,4.6,Security Pen Test,end,2026-07-22,2026-07-17,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+605,2026-10-02T09:32:21.399Z,,1,16,4.7,Test Exit,start,2026-08-22,2026-08-17,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+606,2026-10-02T09:32:21.399Z,,1,16,4.7,Test Exit,end,2026-08-22,2026-08-17,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+607,2026-10-02T09:32:21.399Z,,1,17,5.1,User Acceptance Testing,start,2026-08-22,2026-08-17,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+608,2026-10-02T09:32:21.399Z,,1,17,5.1,User Acceptance Testing,end,2026-09-07,2026-09-02,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+609,2026-10-02T09:32:21.399Z,,1,18,5.2,UAT Sign-off,start,2026-09-07,2026-09-02,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+610,2026-10-02T09:32:21.399Z,,1,18,5.2,UAT Sign-off,end,2026-09-07,2026-09-02,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+611,2026-10-02T09:32:21.399Z,,1,19,4.8,Migration Tooling,start,2026-06-20,2026-06-15,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+612,2026-10-02T09:32:21.399Z,,1,19,4.8,Migration Tooling,end,2026-09-02,2026-08-28,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+613,2026-10-02T09:32:21.399Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-06,2026-09-01,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+614,2026-10-02T09:32:21.399Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-07,2026-10-02,-5,Changed,Undo,Undone: Moved 1 item 5 days later
+615,2026-10-02T09:32:21.399Z,,1,21,4.10,Migration Ready,start,2026-10-07,2026-10-05,-2,Changed,Undo,Undone: Moved 1 item 5 days later
+616,2026-10-02T09:32:21.399Z,,1,21,4.10,Migration Ready,end,2026-10-07,2026-10-05,-2,Changed,Undo,Undone: Moved 1 item 5 days later
+617,2026-10-02T09:32:21.399Z,,1,23,4.11,Cutover Preparation,start,2026-10-07,2026-10-06,-1,Changed,Undo,Undone: Moved 1 item 5 days later
+618,2026-10-02T09:32:21.399Z,,1,23,4.11,Cutover Preparation,end,2026-10-17,2026-10-16,-1,Changed,Undo,Undone: Moved 1 item 5 days later
+619,2026-10-02T09:32:30.422Z,,1,24,1.4,Go-Live,start,2026-10-19,2026-10-21,2,Changed,Quick update panel,1.4: 21 Oct 2026 · 2 downstream items rescheduled
+620,2026-10-02T09:32:30.422Z,,1,24,1.4,Go-Live,end,2026-10-19,2026-10-21,2,Changed,Quick update panel,1.4: 21 Oct 2026 · 2 downstream items rescheduled
+621,2026-10-02T09:32:30.422Z,,1,25,4.12,Hypercare,start,2026-10-20,2026-10-22,2,Knock-on,Quick update panel,1.4: 21 Oct 2026 · 2 downstream items rescheduled
+622,2026-10-02T09:32:30.422Z,,1,25,4.12,Hypercare,end,2026-11-12,2026-11-14,2,Knock-on,Quick update panel,1.4: 21 Oct 2026 · 2 downstream items rescheduled
+623,2026-10-02T09:32:30.422Z,,1,26,1.5,Hypercare Exit,start,2026-11-13,2026-11-14,1,Knock-on,Quick update panel,1.4: 21 Oct 2026 · 2 downstream items rescheduled
+624,2026-10-02T09:32:30.422Z,,1,26,1.5,Hypercare Exit,end,2026-11-13,2026-11-14,1,Knock-on,Quick update panel,1.4: 21 Oct 2026 · 2 downstream items rescheduled
+625,2026-10-02T09:32:30.928Z,,1,24,1.4,Go-Live,start,2026-10-21,2026-10-19,-2,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
+626,2026-10-02T09:32:30.928Z,,1,24,1.4,Go-Live,end,2026-10-21,2026-10-19,-2,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
+627,2026-10-02T09:32:30.928Z,,1,25,4.12,Hypercare,start,2026-10-22,2026-10-20,-2,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
+628,2026-10-02T09:32:30.928Z,,1,25,4.12,Hypercare,end,2026-11-14,2026-11-12,-2,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
+629,2026-10-02T09:32:30.928Z,,1,26,1.5,Hypercare Exit,start,2026-11-14,2026-11-13,-1,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
+630,2026-10-02T09:32:30.928Z,,1,26,1.5,Hypercare Exit,end,2026-11-14,2026-11-13,-1,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
