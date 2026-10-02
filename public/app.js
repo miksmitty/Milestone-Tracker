@@ -1679,6 +1679,7 @@ function renderGantt() {
   container.appendChild(svg);
   syncGanttSticky();
   if (kbId) svg.querySelector(`.gantt-item[data-id="${kbId}"]`)?.classList.add('kb');
+  markRecentMoved(svg);
   focusLinks(null); // keep a pinned item's chain picked out
 }
 
@@ -1696,13 +1697,69 @@ function dragChanges(m, mode, days) {
   return { start: addDays(m.start, Math.min(days, daysBetween(m.start, m.end))) };
 }
 
-// What a change would do, without keeping it: the item's new dates and what else would move.
+// What a change would do, without keeping it: the item's new dates and what else would move
+// (`shifts`: each other item that moves, and by how many days).
 function previewUpdate(m, changes) {
   const saved = state.items.map(x => [x, x.start, x.end, x.type]);
   const res = updateItem(m, changes);
-  const out = { error: res.error, start: m.start, end: m.end, moved: (res.moved || []).filter(id => id !== m.id).length };
+  const others = (res.moved || []).filter(id => id !== m.id);
+  const shifts = new Map(saved.filter(([x]) => others.includes(x.id)).map(([x, a]) => [x.id, daysBetween(a, x.start)]));
+  const out = { error: res.error, start: m.start, end: m.end, moved: others.length, shifts };
   for (const [x, a, b, t] of saved) Object.assign(x, { start: a, end: b, type: t });
   return out;
+}
+
+// While dragging, everything the drag would move slides to where it would land, outlined and
+// labelled with how far it moves; the rest of the chart fades back. Links stay where they were
+// until you let go, so they fade too.
+function showKnockOn(shifts) {
+  const svg = document.querySelector('#gantt-container svg');
+  if (!svg) return;
+  for (const g of svg.querySelectorAll('.gantt-item')) {
+    if (g === drag?.g) continue;
+    const n = shifts.get(g.dataset.id);
+    g.querySelectorAll('.knock-halo').forEach(h => h.remove());
+    g.classList.toggle('knock', n !== undefined);
+    if (n === undefined) { g.removeAttribute('transform'); continue; }
+    g.setAttribute('transform', `translate(${n * state.pxPerDay} 0)`);
+    addHalo(g, `${n > 0 ? '+' : '−'}${daysText(Math.abs(n))}`);
+  }
+  svg.classList.toggle('drag-preview', shifts.size > 0);
+  drag?.g.classList.toggle('knock-src', shifts.size > 0);
+}
+
+// An outline around an item's bar or shape, with an optional note beside it.
+function addHalo(g, note) {
+  const shape = g.querySelector('.gantt-shape');
+  if (!shape) return;
+  const b = shape.getBBox(), pad = 4;
+  const halo = svgEl('rect', { class: 'knock-halo', 'pointer-events': 'none', x: b.x - pad, y: b.y - pad, width: b.width + pad * 2, height: b.height + pad * 2, rx: 7 });
+  g.insertBefore(halo, g.firstChild);
+  if (note) { // on the outline's top edge, over the item, so it doesn't cover the label beside it
+    const tag = svgEl('g', { class: 'knock-halo knock-tag', 'pointer-events': 'none' });
+    const w = note.length * 5.6 + 10, x = b.x - pad, y = b.y - pad;
+    tag.appendChild(svgEl('rect', { x, y: y - 7.5, width: w, height: 15, rx: 7.5 }));
+    tag.appendChild(svgEl('text', { x: x + w / 2, y: y + 3.4, 'text-anchor': 'middle', 'font-size': 9.5, 'font-weight': 700 }, note));
+    g.appendChild(tag);
+  }
+  return halo;
+}
+
+// After a change on the chart, what moved stays outlined for a few seconds (through redraws).
+let recentMoved = { ids: new Set(), until: 0 };
+function flashMoved(ids) {
+  recentMoved = { ids: new Set(ids), until: Date.now() + 4000 };
+}
+function markRecentMoved(svg) {
+  const left = recentMoved.until - Date.now();
+  if (left <= 0) return;
+  for (const g of svg.querySelectorAll('.gantt-item')) {
+    if (!recentMoved.ids.has(g.dataset.id)) continue;
+    const halo = addHalo(g);
+    if (!halo) continue;
+    halo.classList.add('fading');
+    halo.style.animationDuration = `${left}ms`;
+  }
 }
 
 // Which part of an item the pointer is on: a task's ends are for resizing.
@@ -1740,6 +1797,7 @@ function onDragMove(e) {
     bar.setAttribute('width', w);
   }
   const p = previewUpdate(m, dragChanges(m, mode, days));
+  showKnockOn(p.error ? new Map() : p.shifts);
   const what = mode === 'move' ? (days ? `${days > 0 ? '+' : '−'}${daysText(Math.abs(days))}` : 'No change')
     : `${mode === 'end' ? 'End' : 'Start'} ${days > 0 ? '+' : days < 0 ? '−' : ''}${days ? daysText(Math.abs(days)) : 'unchanged'}`;
   const tip = document.getElementById('tip');
@@ -1765,6 +1823,7 @@ async function onDragEnd() {
   if (!days) return renderGantt();
   const snap = snapshotData();
   const res = updateItem(m, dragChanges(m, mode, days));
+  if (!res.error) flashMoved([m.id, ...res.moved]);
   renderGantt();
   if (res.error) return showToast(res.error);
   const msg = [`${itemLabel(m)}: ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
@@ -2278,6 +2337,7 @@ async function submitEditDialog(e) {
     return (err.textContent = res.error);
   }
   document.getElementById('edit-dialog').close();
+  if (res.moved.length) flashMoved([m.id, ...res.moved]);
   rerenderCurrentView();
   if (isShown('editor')) { // redraw the Items grid so saving can't copy its old values back; a new item goes at the bottom
     refreshEditor(editing ? [] : [m.id]);
@@ -3262,6 +3322,7 @@ async function onQuickDateSubmit(e) {
     msgs.push(task ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end));
   }
   hideQuick();
+  if (res.moved.length) flashMoved([m.id, ...res.moved]);
   renderGantt();
   const msg = [`${itemLabel(m)}: ${msgs.join(', ')}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
   offerUndo(snap, msg);

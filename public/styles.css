@@ -1059,6 +1059,16 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 #gantt-container.dragging, #gantt-container.dragging * { cursor: grabbing !important; }
 #gantt-container.dragging .gantt-item:hover { filter: none; }
 
+/* what a move on the chart changes: outlined while dragging (with how far each item moves), then briefly after */
+#gantt-container rect.knock-halo { fill: var(--warn); fill-opacity: .14; stroke: var(--warn); stroke-width: 2; stroke-dasharray: 4 2.5; }
+#gantt-container .knock-tag rect { fill: var(--warn); }
+#gantt-container .knock-tag text { fill: var(--bg); }
+#gantt-container .knock-halo.fading { animation: knock-fade 4s ease-in forwards; stroke-dasharray: none; }
+@keyframes knock-fade { 0%, 60% { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #gantt-container .knock-halo.fading { animation: none; } }
+#gantt-container svg.drag-preview .gantt-link { opacity: .12; }
+#gantt-container svg.drag-preview .gantt-item:not(.knock):not(.knock-src) { opacity: .35; }
+
 /* overview counts open the Gantt chart filtered to them */
 .ov-count { border: 0; background: none; padding: 2px 8px; border-radius: 6px; font: inherit; color: inherit; cursor: pointer; }
 .ov-count:hover { background: var(--hover, var(--hover)); text-decoration: underline; }
