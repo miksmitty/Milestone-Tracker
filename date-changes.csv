@@ -493,3 +493,57 @@ id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 628,2026-10-02T09:32:30.928Z,,1,25,4.12,Hypercare,end,2026-11-14,2026-11-12,-2,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
 629,2026-10-02T09:32:30.928Z,,1,26,1.5,Hypercare Exit,start,2026-11-14,2026-11-13,-1,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
 630,2026-10-02T09:32:30.928Z,,1,26,1.5,Hypercare Exit,end,2026-11-14,2026-11-13,-1,Changed,Undo,Undone: 1.4: 21 Oct 2026 · 2 downstream items rescheduled
+631,2026-10-06T13:36:46.533Z,,1,10,4.1,Build Phase 1,end,2026-06-11,2026-06-20,9,Changed,Quick update panel,4.1: 30 Apr – 20 Jun 2026
+632,2026-10-06T13:36:58.872Z,,1,10,4.1,Build Phase 1,end,2026-06-20,2026-06-11,-9,Changed,Undo,Undone: 4.1: 30 Apr – 20 Jun 2026
+633,2026-10-06T13:37:55.915Z,,1,10,4.1,Build Phase 1,end,2026-06-11,2026-06-21,10,Changed,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+634,2026-10-06T13:37:55.915Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-11,2026-06-21,10,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+635,2026-10-06T13:37:55.915Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-11,2026-06-21,10,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+636,2026-10-06T13:37:55.915Z,,1,12,4.3,Build Phase 2,start,2026-06-11,2026-06-21,10,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+637,2026-10-06T13:37:55.915Z,,1,12,4.3,Build Phase 2,end,2026-08-17,2026-08-27,10,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+638,2026-10-06T13:37:55.915Z,,1,14,4.5,Integration Testing,start,2026-06-11,2026-06-21,10,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+639,2026-10-06T13:37:55.915Z,,1,14,4.5,Integration Testing,end,2026-08-10,2026-08-20,10,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+640,2026-10-06T13:37:55.915Z,,1,16,4.7,Test Exit,start,2026-08-17,2026-08-20,3,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+641,2026-10-06T13:37:55.915Z,,1,16,4.7,Test Exit,end,2026-08-17,2026-08-20,3,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+642,2026-10-06T13:37:55.915Z,,1,17,5.1,User Acceptance Testing,start,2026-08-17,2026-08-20,3,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+643,2026-10-06T13:37:55.915Z,,1,17,5.1,User Acceptance Testing,end,2026-09-02,2026-09-05,3,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+644,2026-10-06T13:37:55.915Z,,1,18,5.2,UAT Sign-off,start,2026-09-02,2026-09-05,3,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+645,2026-10-06T13:37:55.915Z,,1,18,5.2,UAT Sign-off,end,2026-09-02,2026-09-05,3,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+646,2026-10-06T13:37:55.915Z,,1,19,4.8,Migration Tooling,start,2026-06-15,2026-06-21,6,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+647,2026-10-06T13:37:55.915Z,,1,19,4.8,Migration Tooling,end,2026-08-28,2026-09-03,6,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+648,2026-10-06T13:37:55.915Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-01,2026-09-04,3,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+649,2026-10-06T13:37:55.915Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-02,2026-10-05,3,Knock-on,Quick update panel,4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+650,2026-10-06T13:38:04.290Z,,1,10,4.1,Build Phase 1,end,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+651,2026-10-06T13:38:04.290Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+652,2026-10-06T13:38:04.290Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+653,2026-10-06T13:38:04.290Z,,1,12,4.3,Build Phase 2,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+654,2026-10-06T13:38:04.290Z,,1,12,4.3,Build Phase 2,end,2026-08-27,2026-08-17,-10,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+655,2026-10-06T13:38:04.290Z,,1,14,4.5,Integration Testing,start,2026-06-21,2026-06-11,-10,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+656,2026-10-06T13:38:04.290Z,,1,14,4.5,Integration Testing,end,2026-08-20,2026-08-10,-10,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+657,2026-10-06T13:38:04.290Z,,1,16,4.7,Test Exit,start,2026-08-20,2026-08-17,-3,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+658,2026-10-06T13:38:04.290Z,,1,16,4.7,Test Exit,end,2026-08-20,2026-08-17,-3,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+659,2026-10-06T13:38:04.290Z,,1,17,5.1,User Acceptance Testing,start,2026-08-20,2026-08-17,-3,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+660,2026-10-06T13:38:04.290Z,,1,17,5.1,User Acceptance Testing,end,2026-09-05,2026-09-02,-3,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+661,2026-10-06T13:38:04.290Z,,1,18,5.2,UAT Sign-off,start,2026-09-05,2026-09-02,-3,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+662,2026-10-06T13:38:04.290Z,,1,18,5.2,UAT Sign-off,end,2026-09-05,2026-09-02,-3,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+663,2026-10-06T13:38:04.290Z,,1,19,4.8,Migration Tooling,start,2026-06-21,2026-06-15,-6,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+664,2026-10-06T13:38:04.290Z,,1,19,4.8,Migration Tooling,end,2026-09-03,2026-08-28,-6,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+665,2026-10-06T13:38:04.290Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-04,2026-09-01,-3,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+666,2026-10-06T13:38:04.290Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-05,2026-10-02,-3,Changed,Undo,Undone: 4.1: 30 Apr – 21 Jun 2026 · 8 downstream items rescheduled
+667,2026-10-06T13:38:43.811Z,,1,22,5.3,Training Delivery,end,2026-10-09,2026-10-25,16,Changed,Quick update panel,5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+668,2026-10-06T13:38:43.811Z,,1,24,1.4,Go-Live,start,2026-10-19,2026-10-25,6,Knock-on,Quick update panel,5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+669,2026-10-06T13:38:43.811Z,,1,24,1.4,Go-Live,end,2026-10-19,2026-10-25,6,Knock-on,Quick update panel,5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+670,2026-10-06T13:38:43.811Z,,1,25,4.12,Hypercare,start,2026-10-20,2026-10-25,5,Knock-on,Quick update panel,5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+671,2026-10-06T13:38:43.811Z,,1,25,4.12,Hypercare,end,2026-11-12,2026-11-17,5,Knock-on,Quick update panel,5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+672,2026-10-06T13:38:43.811Z,,1,26,1.5,Hypercare Exit,start,2026-11-13,2026-11-17,4,Knock-on,Quick update panel,5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+673,2026-10-06T13:38:43.811Z,,1,26,1.5,Hypercare Exit,end,2026-11-13,2026-11-17,4,Knock-on,Quick update panel,5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+674,2026-10-06T13:38:44.311Z,,1,22,5.3,Training Delivery,end,2026-10-25,2026-10-09,-16,Changed,Undo,Undone: 5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+675,2026-10-06T13:38:44.311Z,,1,24,1.4,Go-Live,start,2026-10-25,2026-10-19,-6,Changed,Undo,Undone: 5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+676,2026-10-06T13:38:44.311Z,,1,24,1.4,Go-Live,end,2026-10-25,2026-10-19,-6,Changed,Undo,Undone: 5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+677,2026-10-06T13:38:44.311Z,,1,25,4.12,Hypercare,start,2026-10-25,2026-10-20,-5,Changed,Undo,Undone: 5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+678,2026-10-06T13:38:44.311Z,,1,25,4.12,Hypercare,end,2026-11-17,2026-11-12,-5,Changed,Undo,Undone: 5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+679,2026-10-06T13:38:44.311Z,,1,26,1.5,Hypercare Exit,start,2026-11-17,2026-11-13,-4,Changed,Undo,Undone: 5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+680,2026-10-06T13:38:44.311Z,,1,26,1.5,Hypercare Exit,end,2026-11-17,2026-11-13,-4,Changed,Undo,Undone: 5.3: 14 Sept – 25 Oct 2026 · 3 downstream items rescheduled
+681,2026-10-06T13:38:55.368Z,,1,39,,Extra build work,start,,2026-06-01,,Added,New item dialog,
+682,2026-10-06T13:38:55.368Z,,1,39,,Extra build work,end,,2026-06-15,,Added,New item dialog,
+683,2026-10-06T13:39:04.634Z,,1,39,,Extra build work,start,2026-06-01,,,Deleted,Undo,Undone: Added Extra build work
+684,2026-10-06T13:39:04.634Z,,1,39,,Extra build work,end,2026-06-15,,,Deleted,Undo,Undone: Added Extra build work

@@ -393,6 +393,7 @@
         <span class="legend-item"><i class="late-dot"></i> Overdue</span>
         <span class="legend-item"><i class="usecase-dot"></i> Use case linked</span>
         <span class="legend-item"><i class="tl-ring"></i> Top level (change control)</span>
+        <span class="legend-item"><i class="clash-flag"></i> Roll-up clash (flagged)</span>
       </span>
     </div>
   </main>
@@ -677,6 +678,23 @@
         <span class="spacer"></span>
         <button value="cancel" class="btn">Cancel</button>
         <button value="ok" class="btn btn-primary">Make the change</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="ru-dialog" class="edit-dialog tl-dialog ru-dialog">
+    <form method="dialog">
+      <header class="dlg-head">
+        <span class="type-badge upd">Rolls up</span>
+        <h2 id="ru-heading">A milestone now finishes before what rolls up to it</h2>
+        <button value="cancel" class="dlg-close" title="Cancel">✕</button>
+      </header>
+      <p class="cf-intro">Choose for each one: move it later so everything fits, or keep its date and flag the clash. Flagged clashes show in red until they're resolved.</p>
+      <ul id="ru-list" class="cf-list"></ul>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button value="cancel" class="btn">Cancel</button>
+        <button value="ok" class="btn btn-primary">Save</button>
       </footer>
     </form>
   </dialog>

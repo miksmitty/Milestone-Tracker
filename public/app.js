@@ -1055,8 +1055,10 @@ function cascadeShift(ids, delta) {
   }
 }
 
-// Push items later wherever a dependency or roll-up is violated (topological order).
+// Push items later wherever a dependency is violated (topological order), and move a milestone
+// later to fit what rolls up to it when that was chosen for this change (see guardChange).
 // Task → task dependencies start the next day; anything involving a milestone can share the day.
+let rollupMove = new Set(); // ids of milestones that may move to fit their roll-ups, during one change
 function enforceConstraints() {
   const byId = new Map(state.items.map(m => [m.id, m]));
   const children = new Map();
@@ -1075,7 +1077,7 @@ function enforceConstraints() {
       const lag = isTask(p) && isTask(m) ? 1 : 0;
       shift = Math.max(shift, daysBetween(m.start, addDays(p.end, lag)));
     }
-    for (const c of children.get(m.id) || []) {
+    if (rollupMove.has(m.id)) for (const c of children.get(m.id) || []) {
       if (c.end) shift = Math.max(shift, daysBetween(m.end, c.end));
     }
     shiftItem(m, shift);
@@ -1141,20 +1143,148 @@ function topLevelHits(before) {
 // Make a change, but if it touches a top level milestone, take it back and ask first; if confirmed
 // the change is made again. Resolves to the change's result, or null if it was cancelled.
 async function guardTopLevel(apply) {
-  const list = state.items, kept = [...list];
-  const saved = list.map(x => [x, structuredClone(x)]);
-  const audit = [new Set(knockOn), new Set(directEdits)];
-  const before = list.filter(isTopLevel).map(m => ({ m, end: m.end }));
+  const restore = checkpoint();
+  const before = state.items.filter(isTopLevel).map(m => ({ m, end: m.end }));
   const res = apply();
   if (res?.error) return res;
   const hits = topLevelHits(before);
   if (!hits.length) return res;
-  state.items = list;
-  list.splice(0, list.length, ...kept);
-  for (const [x, v] of saved) { for (const k of Object.keys(x)) delete x[k]; Object.assign(x, v); }
-  for (const [set, was] of [[knockOn, audit[0]], [directEdits, audit[1]]]) { set.clear(); was.forEach(id => set.add(id)); }
+  restore();
   if (!await confirmTopLevel(hits)) return null;
   return apply();
+}
+
+// Returns a function that puts the items (and the change log's notes) back exactly as they are now.
+function checkpoint() {
+  const list = state.items, kept = [...list];
+  const saved = list.map(x => [x, structuredClone(x)]);
+  const audit = [new Set(knockOn), new Set(directEdits)];
+  return () => {
+    state.items = list;
+    list.splice(0, list.length, ...kept);
+    for (const [x, v] of saved) { for (const k of Object.keys(x)) delete x[k]; Object.assign(x, v); }
+    for (const [set, was] of [[knockOn, audit[0]], [directEdits, audit[1]]]) { set.clear(); was.forEach(id => set.add(id)); }
+  };
+}
+
+/* ---- roll-up clashes ---- */
+// Something that ends after the milestone it rolls up to is a clash. When a change makes one (or
+// makes one worse), the person chooses for each milestone: move it later to fit, or keep its date
+// and flag the clash, which then shows on the chart and in the Items grid until it's resolved.
+
+// Each clash: { c, p, gap } — c ends `gap` days after p, the milestone it rolls up to.
+function rollupClashes() {
+  const byId = new Map(state.items.map(m => [m.id, m]));
+  const out = [];
+  for (const c of state.items) {
+    const p = c.parent && byId.get(c.parent);
+    if (p?.end && c.end && c.end > p.end) out.push({ c, p, gap: daysBetween(p.end, c.end) });
+  }
+  return out;
+}
+const clashGaps = () => new Map(rollupClashes().map(x => [x.c.id, x.gap]));
+// Clashes that are new, or wider than they were, since `gaps` (from clashGaps()).
+const freshClashes = (gaps) => rollupClashes().filter(x => x.gap > (gaps.get(x.c.id) || 0));
+const clashOf = (m) => rollupClashes().find(x => x.c === m);
+const clashesInto = (m) => rollupClashes().filter(x => x.p === m);
+
+// Every change on the items goes through here: roll-up clashes it causes are asked about (move the
+// milestone or flag it), then top level milestones it touches are confirmed (guardTopLevel).
+// Resolves to the change's result, or null if it was cancelled at either step.
+async function guardChange(apply) {
+  const gaps = clashGaps();
+  const first = rollupPlan(apply, gaps, new Map());
+  if (first.error) return first.error;
+  let moves = new Set();
+  if (first.rows.length) {
+    const decided = await askRollup((choices) => rollupPlan(apply, gaps, choices));
+    if (!decided) return null;
+    moves = new Set([...decided].filter(([, v]) => v === 'move').map(([id]) => id));
+  }
+  rollupMove = moves;
+  try { return await guardTopLevel(apply); } finally { rollupMove = new Set(); }
+}
+
+// What the change would ask about, given the choices made so far (Map id → 'move' | 'flag'): one
+// row per milestone it leaves finishing before what rolls up to it. Moving a milestone can push
+// others (and what rolls up to them) along, so this repeats until nothing new comes up. Nothing
+// is kept. Returns { rows: [{ p, end, latest, kids, choice }], decided }, or { error }.
+function rollupPlan(apply, gaps, choices) {
+  const decided = new Map(), rows = [];
+  for (;;) {
+    const restore = checkpoint();
+    rollupMove = new Set([...decided].filter(([, v]) => v === 'move').map(([id]) => id));
+    const res = apply();
+    rollupMove = new Set();
+    const groups = new Map();
+    if (!res?.error) for (const x of freshClashes(gaps)) {
+      if (decided.has(x.p.id)) continue;
+      if (!groups.has(x.p.id)) groups.set(x.p.id, { p: x.p, end: x.p.end, kids: [] });
+      groups.get(x.p.id).kids.push({ c: x.c, end: x.c.end, gap: x.gap });
+    }
+    restore();
+    if (res?.error) return { error: res };
+    if (!groups.size) return { rows, decided };
+    for (const g of groups.values()) {
+      g.latest = g.kids.reduce((a, k) => (k.end > a ? k.end : a), g.end);
+      // under change control, keeping the date is the safer default
+      g.choice = choices.get(g.p.id) || (isTopLevel(g.p) ? 'flag' : 'move');
+      decided.set(g.p.id, g.choice);
+      rows.push(g);
+    }
+  }
+}
+
+// The roll-up question: a row per milestone, each to move or flag. Changing one re-works the list
+// (moving a milestone can reach others). Resolves to Map(id → 'move' | 'flag'), or null.
+function askRollup(plan) {
+  const dlg = document.getElementById('ru-dialog');
+  if (dlg.open) return Promise.resolve(null);
+  const choices = new Map();
+  let current;
+  const render = () => {
+    current = plan(choices);
+    const rows = current.rows, n = rows.length;
+    document.getElementById('ru-heading').textContent = n > 1
+      ? `${n} ${T.milestones} now finish before what rolls up to them` : `${fullLabel(rows[0].p)} now finishes before what rolls up to it`;
+    document.getElementById('ru-list').innerHTML = rows.map(g => {
+      const kids = g.kids.map(k => `<span>${escAttr(isTask(k.c) ? T.Task : T.Milestone)}</span><span>${escAttr(fullLabel(k.c))} ends ${fmtNice(k.end)}, ${daysText(k.gap)} after it</span>`).join('');
+      return `<li><div class="cf-what">${escAttr(fullLabel(g.p))} <small>· ${fmtNice(g.end)}${isTopLevel(g.p) ? ' · top level' : ''}</small></div>
+        <div class="cf-vals">${kids}</div>
+        <div class="ru-pick" role="radiogroup">
+          <label><input type="radio" name="ru-${g.p.id}" data-ru="${g.p.id}" value="move" ${g.choice === 'move' ? 'checked' : ''} /> Move it to <b>${fmtNice(g.latest)}</b></label>
+          <label><input type="radio" name="ru-${g.p.id}" data-ru="${g.p.id}" value="flag" ${g.choice === 'flag' ? 'checked' : ''} /> Keep ${fmtNice(g.end)} and flag the clash</label>
+        </div></li>`;
+    }).join('');
+  };
+  render();
+  dlg.returnValue = '';
+  dlg.showModal();
+  dlg.querySelector('.btn[value="ok"]').focus();
+  // Answered by the button pressed (or Esc), not the close event, which a hidden page can hold back.
+  return new Promise(resolve => {
+    const form = dlg.querySelector('form');
+    const done = (ok) => {
+      form.removeEventListener('submit', onSubmit);
+      form.removeEventListener('change', onChange);
+      dlg.removeEventListener('cancel', onCancel);
+      dlg.removeEventListener('close', onClose);
+      resolve(ok ? current.decided : null);
+    };
+    const onChange = (e) => {
+      if (!e.target.dataset.ru) return;
+      choices.set(e.target.dataset.ru, e.target.value);
+      render();
+      dlg.querySelector(`[data-ru="${e.target.dataset.ru}"][value="${e.target.value}"]`)?.focus();
+    };
+    const onSubmit = (e) => done(e.submitter?.value === 'ok');
+    const onCancel = () => done(false);
+    const onClose = () => done(dlg.returnValue === 'ok');
+    form.addEventListener('submit', onSubmit);
+    form.addEventListener('change', onChange);
+    dlg.addEventListener('cancel', onCancel);
+    dlg.addEventListener('close', onClose);
+  });
 }
 
 function confirmTopLevel(hits) {
@@ -1264,7 +1394,7 @@ function svgEl(tag, attrs, text) {
 }
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-const MAX_LABEL_W = 220; // longer titles are cut with … on the chart (the hover card shows them in full)
+const MAX_LABEL_W = 220; // longer task titles are cut with … on the chart (the hover card shows them in full); milestone titles never are
 const REF_GAP = 5;
 const measureCtx = document.createElement('canvas').getContext('2d');
 
@@ -1361,7 +1491,7 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
           right = Math.max(x2, x1 + metaW);
         } else {
           // label beside the item: to the right, or to the left if it would run off the chart
-          const out = fitLabel(m, MAX_LABEL_W, 12.5);
+          const out = fitLabel(m, m._task ? MAX_LABEL_W : Infinity, 12.5);
           const labelW = Math.max(out.w, metaW);
           const itemL = m._task ? x1 : x1 - rm.shapeS - 3;
           const itemR = m._task ? x2 : x1 + rm.shapeS + 3;
@@ -1423,7 +1553,7 @@ function roundedPath(pts, r = 5) {
 
 // Elbow connector from the end of `a` to the start of `b`. The vertical run sits just before `b`,
 // so lines drop into what they lead to rather than hanging off early items across the chart.
-function drawLink(svg, a, b, rollup, rm) {
+function drawLink(svg, a, b, rollup, rm, clash = false) {
   const fx = a.x2 + (a.task ? 0 : rm.shapeS + 2), fy = a.cy;
   const tx = b.x1 - (b.task ? 0 : rm.shapeS + 3), ty = b.cy;
   let d;
@@ -1434,8 +1564,8 @@ function drawLink(svg, a, b, rollup, rm) {
     d = roundedPath([[fx, fy], [fx + 7, fy], [fx + 7, midY], [tx - 9, midY], [tx - 9, ty], [tx, ty]]);
   }
   svg.appendChild(svgEl('path', {
-    d, fill: 'none', class: 'gantt-link', 'data-from': a.id, 'data-to': b.id,
-    stroke: G.links[rollup ? 'roll' : 'dep'], 'stroke-width': 1.4, 'stroke-opacity': 0.75,
+    d, fill: 'none', class: `gantt-link${clash ? ' clash' : ''}`, 'data-from': a.id, 'data-to': b.id,
+    stroke: clash ? G.accent : G.links[rollup ? 'roll' : 'dep'], 'stroke-width': clash ? 1.8 : 1.4, 'stroke-opacity': clash ? 0.9 : 0.75,
     'stroke-dasharray': rollup ? '4 3' : 'none',
     'marker-end': `url(#arrow-${rollup ? 'roll' : 'dep'})`,
   }));
@@ -1642,6 +1772,10 @@ function renderGantt() {
     }
   }
 
+  // flagged roll-up clashes: their link is drawn red and the milestone gets a flag
+  const clashList = rollupClashes();
+  const clashed = new Set(clashList.map(x => x.c.id)), clashedInto = new Set(clashList.map(x => x.p.id));
+
   // ---- dependency + roll-up connectors (under the items) ----
   if (state.linkMode !== 'none') {
     const shown = (id) => pos.has(id) && !items.find(x => x.id === id)._collapsed; // folded swimlanes draw no links
@@ -1649,7 +1783,7 @@ function renderGantt() {
       if (m._collapsed) continue;
       const b = pos.get(m.id);
       for (const d of m.deps) if (shown(d)) drawLink(svg, pos.get(d), b, false, rm);
-      if (m.parent && shown(m.parent)) drawLink(svg, b, pos.get(m.parent), true, rm);
+      if (m.parent && shown(m.parent)) drawLink(svg, b, pos.get(m.parent), true, rm, clashed.has(m.id));
     }
   }
 
@@ -1700,6 +1834,14 @@ function renderGantt() {
       drawShape(g, m.shape, x1, cy, m.status, rm.shapeS);
       // a top level milestone (under change control) wears a ring
       if (isTopLevel(m)) g.appendChild(svgEl('circle', { cx: x1, cy, r: rm.shapeS + 5, fill: 'none', stroke: G.text, 'stroke-width': 1.4, 'pointer-events': 'none', class: 'gantt-tl' }));
+    }
+    // a flagged roll-up clash: a red flag on the milestone's top-left corner
+    if (clashedInto.has(m.id)) {
+      const fx = m._task ? x1 + 1 : x1 - rm.shapeS - 1, fy = m._task ? cy - rm.barH / 2 : cy - rm.shapeS - 1;
+      const flag = svgEl('g', { class: 'gantt-clash', 'pointer-events': 'none' });
+      flag.appendChild(svgEl('circle', { cx: fx, cy: fy, r: 6.5, fill: G.accent, stroke: G.bg, 'stroke-width': 1.5 }));
+      flag.appendChild(svgEl('path', { d: `M ${fx - 2} ${fy + 3.5} V ${fy - 3.5} H ${fx + 3} L ${fx + 1.6} ${fy - 1.8} L ${fx + 3} ${fy} H ${fx - 2}`, fill: '#fff', stroke: '#fff', 'stroke-width': 0.6, 'stroke-linejoin': 'round' }));
+      g.appendChild(flag);
     }
     if (m._side !== 'inside') {
       const anchor = m._side === 'left' ? 'end' : 'start';
@@ -1774,11 +1916,13 @@ function dragChanges(m, mode, days) {
 // (`shifts`: each other item that moves, and by how many days).
 function previewUpdate(m, changes) {
   const saved = state.items.map(x => [x, x.start, x.end, x.type]);
+  const gaps = clashGaps();
   const res = updateItem(m, changes);
+  const clashes = res.error ? [] : freshClashes(gaps);
   const others = (res.moved || []).filter(id => id !== m.id);
   const shifts = new Map(saved.filter(([x]) => others.includes(x.id)).map(([x, a]) => [x.id, daysBetween(a, x.start)]));
   const topLevel = saved.filter(([x, , b]) => isTopLevel(x) && x.end !== b).map(([x]) => x);
-  const out = { error: res.error, start: m.start, end: m.end, moved: others.length, shifts, topLevel };
+  const out = { error: res.error, start: m.start, end: m.end, moved: others.length, shifts, topLevel, clashes };
   for (const [x, a, b, t] of saved) Object.assign(x, { start: a, end: b, type: t });
   return out;
 }
@@ -1881,7 +2025,8 @@ function onDragMove(e) {
     <div class="tip-row">${p.error ? escAttr(p.error) : isTask(m) ? `${fmtShort(p.start)} – ${fmtNice(p.end)} <span class="tip-muted">(${daysText(daysBetween(p.start, p.end) + 1)})</span>` : fmtNice(p.end)}</div>
     ${p.moved ? `<div class="tip-row tip-late amber">Moves ${count(p.moved, `${T.item} downstream`, `${T.items} downstream`)}</div>` : ''}
     ${p.topLevel?.length ? `<div class="tip-row tip-tl">⚠ Changes top level ${p.topLevel.length > 1 ? T.milestones : T.milestone} under change control: ${p.topLevel.map(x => escAttr(fullLabel(x))).join(', ')}</div>` : ''}
-    <div class="tip-hint">${p.topLevel?.length ? 'Let go to review and confirm' : 'Let go to save'} · Esc to cancel</div>`;
+    ${p.clashes.map(x => `<div class="tip-row tip-tl">⚑ ${escAttr(itemLabel(x.c))} would end ${daysText(x.gap)} after ${escAttr(fullLabel(x.p))}, which it rolls up to</div>`).join('')}
+    <div class="tip-hint">${p.topLevel?.length || p.clashes.length ? 'Let go to choose and confirm' : 'Let go to save'} · Esc to cancel</div>`;
   tipAvoid = [];
   tip.classList.add('show');
   moveTip(e);
@@ -1898,7 +2043,7 @@ async function onDragEnd() {
   hideTip();
   if (!days) return renderGantt();
   const snap = snapshotData();
-  const res = await guardTopLevel(() => updateItem(m, dragChanges(m, mode, days)));
+  const res = await guardChange(() => updateItem(m, dragChanges(m, mode, days)));
   if (!res) return renderGantt();
   if (!res.error) flashMoved([m.id, ...res.moved]);
   renderGantt();
@@ -2235,6 +2380,7 @@ function showTip(m, e) {
     <div class="tip-row"><span class="pill" style="background:${c.base};color:${c.text}">${m.status}</span><span>${escAttr(typeName(m))} · ${when}</span></div>
     ${progress}
     ${isTopLevel(m) ? `<div class="tip-row tip-tl">Top level — under change control</div>` : ''}
+    ${clashTipRows(m)}
     ${isLate(m) ? `<div class="tip-row tip-late">${lateText(m)}</div>` : isLateStart(m) ? `<div class="tip-row tip-late amber">${lateStartText(m)}</div>` : ''}
     ${baselineRow(m)}
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
@@ -2247,6 +2393,14 @@ function showTip(m, e) {
   tipAvoid = [...document.querySelectorAll('#gantt-container .gantt-item')].filter(g => ids.has(g.dataset.id)).map(g => g.getBoundingClientRect());
   tip.classList.add('show');
   moveTip(e);
+}
+// Flagged roll-up clashes: this item ends after what it rolls up to, or things rolling up to it end after it.
+function clashTipRows(m) {
+  const own = clashOf(m);
+  return [
+    own && `<div class="tip-row tip-tl">⚑ Ends ${daysText(own.gap)} after ${escAttr(fullLabel(own.p))}, which it rolls up to</div>`,
+    ...clashesInto(m).map(x => `<div class="tip-row tip-tl">⚑ ${escAttr(fullLabel(x.c))} ends ${daysText(x.gap)} after this</div>`),
+  ].filter(Boolean).join('');
 }
 // Roll-up links both ways: what this item rolls up to, and what rolls up to it.
 function tipLinks(m) {
@@ -2412,7 +2566,7 @@ async function submitEditDialog(e) {
     m = { id: nextId(), workspace_id: state.workspaceId, ...changes, parent: '', deps: [] };
     state.items.push(m);
   }
-  const res = await guardTopLevel(() => updateItem(m, changedFrom(changes, editOpened)));
+  const res = await guardChange(() => updateItem(m, changedFrom(changes, editOpened)));
   if (!res) { // cancelled: the dialog stays open with the change in it
     if (!editing) removeItem(m.id);
     return;
@@ -2437,7 +2591,7 @@ async function deleteFromDialog() {
   if (!editing) return;
   const snap = snapshotData();
   const label = `Deleted ${fullLabel(editing)}`;
-  if (!await guardTopLevel(() => removeItem(editing.id) ?? true)) return;
+  if (!await guardChange(() => removeItem(editing.id) ?? true)) return;
   document.getElementById('edit-dialog').close();
   rerenderCurrentView();
   if (isShown('editor')) refreshEditor();
@@ -2507,8 +2661,8 @@ function refreshDatalists() {
 // function returning [[value, label]] options (exact match). Sort order, widths and the view mode
 // are a per-browser convenience (storage may be unavailable) and never change the CSV order.
 
-function makeTable({ table, store, cols, onChange, mode, fill }) {
-  const t = { table, store, cols, onChange, mode, fill, sort: { key: null, dir: 1 }, filters: {}, widths: {} };
+function makeTable({ table, store, cols, onChange, mode }) {
+  const t = { table, store, cols, onChange, mode, sort: { key: null, dir: 1 }, filters: {}, widths: {} };
   try {
     const saved = JSON.parse(localStorage.getItem(store) || '{}');
     for (const k of ['sort', 'widths', 'mode']) if (saved[k]) t[k] = saved[k];
@@ -2541,7 +2695,7 @@ function renderTableHead(t) {
     <tr>${cols.map(c => c.fixed ? `<th${c.head ? ` class="col-${c.key}"` : ''}>${c.head ? c.head() : ''}</th>` : `
       <th data-sort="${c.key}" class="sortable" title="${escAttr(c.title || 'Click to sort')}">
         <span>${escAttr(typeof c.label === 'function' ? c.label() : c.label)}</span><span class="sort-ind"></span>
-        <span class="col-resizer" data-resize="${c.key}" title="Drag to resize · double-click to reset"></span>
+        <span class="col-resizer" data-resize="${c.key}" title="Drag to resize · double-click to fit the contents"></span>
       </th>`).join('')}</tr>
     <tr class="filter-row">${cols.map(filterCell).join('')}</tr>`;
   applyTableWidths(t);
@@ -2556,18 +2710,65 @@ function refreshSelectFilters(t) {
   }
 }
 
-// A table with a `fill` column stretches to its container: that column takes the spare width,
-// and the set widths become the minimum before the table scrolls sideways.
+// Like a spreadsheet: every column is exactly its width, and the table is as wide as its columns
+// (it scrolls sideways when that's wider than the window).
+const MIN_COL_W = 24, MAX_FIT_W = 640;
 function applyTableWidths(t) {
   let total = 0;
   for (const c of t.cols()) {
     const w = colWidth(t, c);
-    tableEl(t).querySelector(`col[data-key="${c.key}"]`).style.width = c.key === t.fill ? '' : w + 'px';
+    tableEl(t).querySelector(`col[data-key="${c.key}"]`).style.width = w + 'px';
     total += w;
   }
-  tableEl(t).style.width = t.fill ? '100%' : total + 'px';
-  tableEl(t).style.minWidth = t.fill ? total + 'px' : '';
+  tableEl(t).style.width = total + 'px';
 }
+
+// Double-clicking a column's edge fits it to the widest thing in it, as a spreadsheet does:
+// the heading, and each row's text (an input's or a list's chosen value, or the cell's content).
+function fitColumn(t, c) {
+  const i = t.cols().indexOf(c);
+  const tbl = tableEl(t);
+  const pad = (el) => { const cs = getComputedStyle(el); return parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth); };
+  const measure = (text, el) => { measureCtx.font = getComputedStyle(el).font; return measureCtx.measureText(text).width; };
+  const th = tbl.querySelector(`thead tr:first-child th:nth-child(${i + 1})`);
+  const label = th?.querySelector('span');
+  let w = label ? label.scrollWidth + pad(th) + 16 : 0; // as shown (capitals, spacing), plus room for the sort arrow
+  for (const td of tbl.querySelectorAll(`tbody tr > td:nth-child(${i + 1})`)) {
+    if (td.colSpan > 1) continue;
+    const el = td.children.length === 1 ? td.firstElementChild : null;
+    let inner;
+    if (el?.matches('input[type=date]')) inner = 118 + pad(el);
+    else if (el?.matches('input[type=checkbox]')) inner = el.offsetWidth;
+    else if (el?.matches('input')) inner = measure(el.value || el.placeholder || '', el) + pad(el) + 2;
+    else if (el?.matches('select')) inner = measure(el.selectedOptions[0]?.text || '', el) + pad(el) + 22; // the arrow
+    else { // other content: a copy laid out on one line, inside the cell so it's styled the same
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:absolute;visibility:hidden;left:0;top:0;width:max-content;white-space:nowrap;pointer-events:none';
+      for (const n of td.childNodes) probe.appendChild(n.cloneNode(true));
+      probe.querySelectorAll('*').forEach(x => { x.style.flexWrap = 'nowrap'; });
+      td.appendChild(probe);
+      inner = probe.offsetWidth;
+      probe.remove();
+    }
+    w = Math.max(w, inner + pad(td));
+  }
+  return Math.round(Math.min(MAX_FIT_W, Math.max(MIN_COL_W, w + 2)));
+}
+
+// While a column is being resized, its width shows beside the pointer.
+function showWidthTip(e, w) {
+  let tip = document.getElementById('col-width-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'col-width-tip';
+    document.body.appendChild(tip);
+  }
+  tip.textContent = `Width: ${w} pixels`;
+  tip.style.left = `${e.clientX + 12}px`;
+  tip.style.top = `${e.clientY + 14}px`;
+  tip.hidden = false;
+}
+const hideWidthTip = () => { const tip = document.getElementById('col-width-tip'); if (tip) tip.hidden = true; };
 
 function updateSortIndicators(t) {
   tableEl(t).querySelectorAll('thead [data-sort]').forEach(th => {
@@ -2626,39 +2827,35 @@ function wireTable(t) {
     const cols = t.cols();
     const c = cols.find(x => x.key === handle.dataset.resize);
     const startX = e.clientX, startW = colWidth(t, c);
-    const key = (x) => x.wkey || x.key;
-    // The fill column takes the spare width, so while there is some, dragging its edge moves
-    // the border: the fill column shrinks or grows by what the next column takes or gives,
-    // and both stop at the minimum width so the border never runs away from the pointer.
-    const wrap = tableEl(t).parentElement;
-    const next = cols[cols.indexOf(c) + 1];
-    const border = c.key === t.fill && next && wrap.clientWidth > parseFloat(tableEl(t).style.minWidth);
-    const fillW = handle.parentElement.getBoundingClientRect().width, nextW = next && colWidth(t, next);
+    // Only this column changes; the ones to its right move along with its edge.
     handle.setPointerCapture(e.pointerId);
     document.body.classList.add('col-resizing');
+    handle.closest('th').classList.add('resizing');
+    showWidthTip(e, startW);
     const move = (ev) => {
-      const dx = Math.round(ev.clientX - startX);
-      if (border) {
-        const d = Math.min(Math.max(dx, 48 - fillW), nextW - 48);
-        t.widths[key(c)] = Math.round(Math.min(startW, fillW + d));
-        t.widths[key(next)] = Math.round(nextW - d);
-      } else t.widths[key(c)] = Math.max(48, startW + dx);
+      const w = Math.max(MIN_COL_W, Math.round(startW + ev.clientX - startX));
+      t.widths[c.wkey || c.key] = w;
       applyTableWidths(t);
+      showWidthTip(ev, w);
     };
     const up = () => {
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
       document.body.classList.remove('col-resizing');
+      handle.closest('th')?.classList.remove('resizing');
+      hideWidthTip();
       saveTablePrefs(t);
     };
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
   });
   head.addEventListener('dblclick', (e) => {
     const handle = e.target.closest('[data-resize]');
     if (!handle) return;
     const c = t.cols().find(x => x.key === handle.dataset.resize);
-    delete t.widths[c.wkey || c.key];
+    t.widths[c.wkey || c.key] = fitColumn(t, c);
     applyTableWidths(t);
     saveTablePrefs(t);
   });
@@ -2669,36 +2866,35 @@ function wireTable(t) {
 const opts = (values) => () => values.map(v => [v, v]);
 const GRID_COLS = [
   { key: 'sel', label: '', w: 36, fixed: true, head: () => `<input type="checkbox" id="grid-sel-all" title="Select all shown" />` },
-  { key: 'id', label: 'ID', w: 64, title: 'Primary key — assigned automatically, never changes', filter: 'text' },
-  { key: 'ref', label: 'Ref', w: 80, filter: 'text' },
   { key: 'title', label: 'Title', w: 200, filter: 'text' },
-  { key: 'type', label: 'Type', w: 130, title: 'A single date (shape) or a date range (bar)', filter: () => [['milestone', T.Milestone], ['task', T.Task]] },
   { key: 'description', label: 'Description', w: 220, filter: 'text' },
-  { key: 'swimlane', label: 'Swimlane', w: 120, filter: 'text' },
-  { key: 'subswimlane', label: 'Sub-swimlane', w: 120, filter: 'text' },
-  { key: 'owner', label: 'Owner', w: 120, filter: 'text' },
+  { key: 'ref', label: 'Ref', w: 80, filter: 'text' },
+  { key: 'status', label: 'RAG', w: 125, filter: () => STATUSES.map(v => [v, v]) },
   { key: 'start', label: 'Start', w: 135, filter: 'text' },
   { key: 'end', label: 'End', w: 135, filter: 'text' },
-  { key: 'status', label: 'RAG', w: 125, filter: () => STATUSES.map(v => [v, v]) },
-  { key: 'shape', label: 'Shape', w: 100, filter: opts(SHAPES) },
+  { key: 'top_level', label: 'Top level', w: 90, title: 'Under change control', filter: () => [['yes', 'Yes']] },
   { key: 'parent', label: 'Rolls up to', w: 170, filter: 'text' },
+  { key: 'type', label: 'Type', w: 130, title: 'A single date (shape) or a date range (bar)', filter: () => [['milestone', T.Milestone], ['task', T.Task]] },
+  { key: 'swimlane', label: 'Swimlane', w: 120, filter: 'text' },
+  { key: 'owner', label: 'Owner', w: 120, filter: 'text' },
   { key: 'deps', label: 'Depends on', w: 190, filter: 'text' },
   { key: 'gitlab_url', label: 'GitLab URL', w: 200, filter: 'text' },
   { key: 'use_case_url', label: 'Use case URL', w: 200, filter: 'text' },
-  { key: 'top_level', label: 'Top level', w: 90, title: 'Under change control', filter: () => [['yes', 'Yes']] },
+  { key: 'subswimlane', label: 'Sub-swimlane', w: 120, filter: 'text' },
+  { key: 'id', label: 'ID', w: 64, title: 'Primary key — assigned automatically, never changes', filter: 'text' },
+  { key: 'shape', label: 'Shape', w: 100, filter: opts(SHAPES) },
   { key: 'actions', label: '', w: 40, fixed: true },
 ];
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
 const QUICK_COLS = {
-  sel: {}, id: { w: 56 }, ref: { w: 70 }, title: { w: 180 }, type: { w: 120 }, owner: { w: 130 }, status: { w: 205, wkey: 'status.compact' }, start: { w: 130 }, end: { w: 130 },
-  actions: { w: 90, wkey: 'actions.quick' },
+  sel: {}, title: { w: 180 }, ref: { w: 70 }, status: { w: 205, wkey: 'status.compact' }, start: { w: 130 }, end: { w: 130 },
+  type: { w: 120 }, owner: { w: 130 }, id: { w: 56 }, actions: { w: 90, wkey: 'actions.quick' },
 };
 
 const grid = makeTable({
   table: 'editor-table',
   store: 'milestone-tracker.grid',
   mode: 'quick',
-  fill: 'title', // the title takes any spare width
   cols: () => (grid.mode === 'quick'
     ? Object.entries(QUICK_COLS).map(([k, o]) => ({ ...GRID_COLS.find(c => c.key === k), ...o }))
     : GRID_COLS),
@@ -2821,6 +3017,7 @@ function renderEditor(highlight = [], keepOrder = false) {
       <span class="chip" title="${escAttr(byId.get(d)?.title)}">${escAttr(itemLabel(byId.get(d)))}<button data-rmdep="${i}" data-dep="${d}" title="Remove dependency">×</button></span>`).join('');
     const dup = refCount.get(m.ref) > 1;
     const late = isLate(m);
+    const clash = clashOf(m);
 
     const quick = grid.mode === 'quick';
     // A milestone's two date cells are one date: editing either moves the milestone.
@@ -2839,7 +3036,8 @@ function renderEditor(highlight = [], keepOrder = false) {
       use_case_url: `<input data-i="${i}" data-k="use_case_url" type="url" value="${escAttr(m.use_case_url)}" placeholder="https://…" />`,
       top_level: `<input data-i="${i}" data-k="top_level" type="checkbox" ${m.top_level === 'yes' ? 'checked' : ''} ${task ? `disabled title="Only ${escAttr(T.milestones)} can be top level"` : 'title="Under change control"'} />`,
       start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}"${dateTitle} />`,
-      end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}"${late ? ` class="late" title="${escAttr(lateText(m))}"` : dateTitle} />`,
+      end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}"${late || clash ? ` class="${late ? 'late' : 'clash'}" title="${escAttr([
+        late && lateText(m), clash && `Flagged: ends ${daysText(clash.gap)} after ${fullLabel(clash.p)}, which it rolls up to`].filter(Boolean).join(' · '))}"` : dateTitle} />`,
       status: quick ? `<div class="rag-pick sm compact">${ragButtons(m.status, `data-i="${i}"`)}</div>`
         : `<select data-i="${i}" data-k="status" class="status-sel" style="color:${pal(m.status).dark}">${statusOptions(m.status)}</select>`,
       shape: `<select data-i="${i}" data-k="shape" ${task ? `disabled title="${escAttr(T.Tasks)} are drawn as bars"` : ''}>${optionList(SHAPES, m.shape)}</select>`,
@@ -2886,7 +3084,7 @@ function syncEditorToState(skip) {
 }
 
 async function applyTableChange(m, changes, msg) {
-  const res = await guardTopLevel(() => updateItem(m, changes));
+  const res = await guardChange(() => updateItem(m, changes));
   if (!res) { // cancelled: rebuild the row so its cells show the saved values again
     const tr = document.querySelector(`#editor-body tr[data-id="${m.id}"]`);
     if (tr) delete tr.dataset.cols;
@@ -2984,7 +3182,7 @@ function onEditorClick(e) {
     syncEditorToState();
     const m = state.items[+del.dataset.del];
     const snap = snapshotData();
-    guardTopLevel(() => removeItem(m.id) ?? true).then(ok => {
+    guardChange(() => removeItem(m.id) ?? true).then(ok => {
       refreshEditor();
       if (!ok) return;
       offerUndo(snap, `Deleted ${fullLabel(m)}`);
@@ -3074,7 +3272,7 @@ async function applyBulk() {
   if (bulkField === 'shift') {
     const n = Math.round(+v);
     if (!n) return flashStatus('Enter a number of days to move by, e.g. 7 or -3', false);
-    const ok = await guardTopLevel(() => {
+    const ok = await guardChange(() => {
       for (const m of items) shiftItem(m, n);
       cascadeShift(items.map(m => m.id), n);
       enforceConstraints();
@@ -3091,7 +3289,7 @@ async function applyBulk() {
   if (bulkField === 'swimlane' && !v) return flashStatus('Enter a swimlane', false);
 
   let done = 0, skipped = 0;
-  const ok = await guardTopLevel(() => {
+  const ok = await guardChange(() => {
     done = skipped = 0;
     for (const m of items) {
       if (bulkField === 'parent' && v === m.id) { skipped++; continue; } // can't roll up to itself
@@ -3114,7 +3312,7 @@ async function bulkDelete() {
   if (!items.length) return;
   const what = count(items.length, T.item, T.items);
   const snap = snapshotData();
-  if (!await guardTopLevel(() => { for (const m of items) removeItem(m.id); return true; })) return;
+  if (!await guardChange(() => { for (const m of items) removeItem(m.id); return true; })) return;
   gridSel.clear();
   refreshEditor();
   offerUndo(snap, `Deleted ${what}`);
@@ -3301,6 +3499,7 @@ function renderQuick() {
   const task = d.type === 'task';
   const n = reportsFor(m.id).length;
   const deps = dependentCount(m.id);
+  const rollsTo = m.parent && itemById(m.parent);
   document.getElementById('quick').innerHTML = `
     <form class="q-form" novalidate>
     <div class="q-head">
@@ -3324,6 +3523,7 @@ function renderQuick() {
     </div>
     ${itemLinks(m).length ? `<div class="q-links">${itemLinks(m).map(([k, u]) => `<span>${k}: ${linkOut(u)}</span>`).join('')}</div>` : ''}
     ${isTopLevel(m) ? `<p class="q-note q-tl">⚠ Top level ${escAttr(T.milestone)} — under change control. Saving a new date asks for confirmation.</p>` : ''}
+    ${rollsTo ? `<p class="q-note">Rolls up to ${escAttr(fullLabel(rollsTo))} (${fmtNice(rollsTo.end)}). Ending after it asks whether to move it or flag the clash.</p>` : ''}
     ${deps ? `<p class="q-note">Moving the ${task ? 'end ' : ''}date moves ${deps} dependent ${escAttr(deps > 1 ? T.items : T.item)} by the same amount.</p>` : ''}
     <p class="q-msg">${escAttr(quickMsg)}</p>
     <div class="q-save">
@@ -3423,7 +3623,7 @@ async function onQuickDateSubmit(e) {
   let res = { moved: [] };
   if (changes.type !== m.type || changes.end !== m.end || changes.start !== m.start) {
     const typeChanged = changes.type !== m.type;
-    res = await guardTopLevel(() => updateItem(m, changes));
+    res = await guardChange(() => updateItem(m, changes));
     if (!res) return; // the panel stays open with the change in it
     if (res.error) {
       quickMsg = res.error;
@@ -4090,7 +4290,7 @@ const RPT_COLS = [
 // With the preview open the list keeps to what identifies a report; the pane shows the rest.
 const PREVIEW_HIDDEN = ['cadence', 'exec_summary'];
 const rptTable = makeTable({
-  table: 'reports-table', store: 'milestone-tracker.reports-grid', onChange: () => renderReports(), fill: 'item_id',
+  table: 'reports-table', store: 'milestone-tracker.reports-grid', onChange: () => renderReports(),
   cols: () => (rptPreview ? RPT_COLS.filter(c => !PREVIEW_HIDDEN.includes(c.key)) : RPT_COLS),
 });
 let rptSearch = ''; // free-text search across every report field, from the toolbar
@@ -5039,7 +5239,7 @@ async function applyImport() {
   const snap = snapshotData();
   const itemOf = new Map();
   let added = 0, updated = 0, dropped = 0;
-  const ok = await guardTopLevel(() => {
+  const ok = await guardChange(() => {
     itemOf.clear();
     added = updated = dropped = 0;
     for (const m of plan.deletes) removeItem(m.id);
