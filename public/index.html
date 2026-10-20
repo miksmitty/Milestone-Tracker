@@ -391,8 +391,7 @@
         <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#7c3aed"/></svg> Rolls up to</span>
         <span class="legend-item" id="legend-baseline" hidden><i class="bar bar-base"></i> Baseline</span>
         <span class="legend-item"><i class="late-dot"></i> Overdue</span>
-        <span class="legend-item"><i class="usecase-dot"></i> Use case linked</span>
-        <span class="legend-item"><i class="tl-ring"></i> Top level (change control)</span>
+        <span class="legend-item"><i class="tl-ring"></i> <span data-term="Top">Top level milestone</span></span>
         <span class="legend-item"><i class="clash-flag"></i> Roll-up clash (flagged)</span>
       </span>
     </div>
@@ -404,7 +403,7 @@
       <div class="toolbar-group">
         <div class="mode-seg" role="radiogroup" aria-label="Columns shown">
           <label title="Just RAG and dates — the things that change week to week"><input type="radio" name="grid-mode" value="quick" /><span>Quick update</span></label>
-          <label title="Every field, including title, lanes, links and shape"><input type="radio" name="grid-mode" value="full" /><span>All fields</span></label>
+          <label title="Every field, including title, lanes and links"><input type="radio" name="grid-mode" value="full" /><span>All fields</span></label>
         </div>
         <button id="btn-add" class="btn btn-primary">+ Add <span data-term="item">item</span></button>
         <span id="grid-count" class="grid-count"></span>
@@ -433,11 +432,11 @@
         <tbody id="editor-body"></tbody>
       </table>
     </div>
-    <p class="hint"><b>Quick update</b> shows the fields that change most — ref, title, type, owner, RAG and dates: click a RAG to change it, or edit any cell. Switch to <b>All fields</b> for lanes, links, shape and the rest.
+    <p class="hint"><b>Quick update</b> shows the fields that change most — ref, title, type, owner, RAG and dates: click a RAG to change it, or edit any cell. Switch to <b>All fields</b> for lanes, links and the rest.
       Tick the boxes on the left (shift-click for a range, or the header box for everything shown) to change a field on many rows at once, move their dates, or delete them.
-      Click a column header to sort, use the filter row to narrow the list, and drag a header edge to resize (double-click to reset). <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
+      Columns work like a spreadsheet's: use the <b>▾</b> on a heading to sort or filter by ticking values, drag a heading to move the column, and drag a heading's edge to resize it (double-click to fit). Click headings to select columns (⌘/Ctrl or shift for several) — resizing one then sizes them all, and right-click offers autofit, distribute evenly and fit to window. <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
       Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.
-      <b>Type</b> says whether something is a <b data-term="milestone">milestone</b> (one date, drawn as a shape: changing either date moves it) or a <b data-term="task">task</b> (a start and end, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to one date.
+      <b>Type</b> says whether something is a <b>top level <span data-term="milestone">milestone</span></b> (a milestone under change control, drawn as a ringed diamond), a <b data-term="milestone">milestone</b> (one date, drawn as a diamond: changing either date moves it) or a <b data-term="task">task</b> (a start and end, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to one date.
       Changing an end date shifts everything that depends on it by the same amount.</p>
   </main>
 
@@ -473,7 +472,7 @@
     </div>
     <div id="rp-due" class="rp-due" hidden></div>
     <p id="rp-due-hint" class="hint" hidden><b>Due</b> lists what still needs a report this period, by owner: anything that has started or already has reports, until it reaches a done status. Each follows the cadence of its latest report (weekly if it has none), and a report whose period reaches into the current one covers it. <b>Periods missed</b> counts the periods since its last report.</p>
-    <p id="rp-hint" class="hint">Select a report to read it in the preview, and use <b>↑</b> <b>↓</b> to move through the list. Click into the preview to edit the report. Sort, filter and resize columns as on the Items tab. To report on something, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
+    <p id="rp-hint" class="hint">Select a report to read it in the preview, and use <b>↑</b> <b>↓</b> to move through the list. Click into the preview to edit the report. Sort, filter, move and resize columns as on the Items tab. To report on something, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
       Reports are stored in <code>reports.csv</code>, one row per report, linked to what it covers by its ID.</p>
   </main>
   </div>
@@ -502,14 +501,12 @@
         <label id="ed-start">Start<input name="start" type="date" /></label>
         <label><span id="ed-end-label">End</span><input name="end" type="date" /></label>
         <label>RAG<select name="status"></select></label>
-        <label>Shape<select name="shape"></select></label>
         <label>Rolls up to<select name="parent"></select></label>
-        <label class="span3 check-row"><input type="checkbox" name="top_level" /><span>Top level <span data-term="milestone">milestone</span> — under change control, so any change that moves it asks for confirmation</span></label>
         <div class="span3 field"><span class="field-label">Depends on</span><div id="ed-deps" class="deps"></div></div>
         <label class="span3">GitLab URL<input name="gitlab_url" type="url" placeholder="https://gitlab.example.com/group/project" /></label>
         <label class="span3">Use case URL<input name="use_case_url" type="url" placeholder="https://…" /></label>
       </div>
-      <p class="dlg-hint">A <span data-term="milestone">milestone</span> has one date and is drawn as a shape; a <span data-term="task">task</span> has a start and end and is drawn as a bar. Change the type to switch between them. Moving the end date shifts anything that depends on it.</p>
+      <p class="dlg-hint">A <span data-term="milestone">milestone</span> has one date and is drawn as a diamond; a top level one is also under change control (any change that moves it asks for confirmation) and wears a ring. A <span data-term="task">task</span> has a start and end and is drawn as a bar. Change the type to switch between them. Moving the end date shifts anything that depends on it.</p>
       <p id="ed-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
@@ -593,7 +590,7 @@
         <fieldset class="span3 pg-terms">
           <legend>What does this workspace call things?</legend>
           <label>Everything<input name="item_term" list="term-item" placeholder="Item" /><small>generic name</small></label>
-          <label>A single date<input name="milestone_term" list="term-milestone" placeholder="Milestone" /><small>drawn as a shape</small></label>
+          <label>A single date<input name="milestone_term" list="term-milestone" placeholder="Milestone" /><small>drawn as a diamond</small></label>
           <label>A date range<input name="task_term" list="term-task" placeholder="Task" /><small>drawn as a bar</small></label>
           <p id="pg-term-preview" class="pg-term-preview"></p>
         </fieldset>

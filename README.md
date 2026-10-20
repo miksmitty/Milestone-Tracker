@@ -170,17 +170,16 @@ Items and reports carry a `workspace_id`. Ids stay unique across all workspaces,
 Items live in [milestones.csv](milestones.csv) with columns:
 
 ```
-id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,shape,parent,depends_on,baseline_start,baseline_end
+id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url
 ```
 
 - **workspace_id**: the workspace the item belongs to (`id` in workspaces.csv)
 
 - **id**: the **primary key** — a positive integer assigned automatically, unique, never changed and never reused. `parent` and `depends_on` reference ids, so they map directly onto a foreign key / join table when the data moves to a database
 - **ref**: your own human-facing reference, e.g. `4.1`, `5.6` (shown on the chart; duplicates are flagged; "Sort by ref" orders 4.2 before 4.10)
-- **type**: `milestone` (one date, drawn as a shape) or `task` (a start and end date, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to its end date. Files without a type column still load: a start before the end makes a task, otherwise a milestone
+- **type**: `top` (a top level milestone: one date, under change control — anything that would move, delete or retype it asks for confirmation first — drawn as a diamond in a ring), `milestone` (one date, drawn as a diamond) or `task` (a start and end date, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to its end date. Files without a type column still load: a start before the end makes a task, otherwise a milestone. Older files with a `top_level` column (yes/no) and a `shape` column still load: top level milestones become `top`, and shape is ignored
 - **start / end**: `YYYY-MM-DD`. A milestone's start and end are always the same, and **changing either one moves the milestone**. A task's dates are inclusive, so its bar runs to the end of its end date, and a one-day task can start and end on the same day
 - **rag**: one of the workspace's RAG options (by default `Green` | `Amber` | `Red` | `Complete` | `Not Started`). Matching ignores case; a status that isn't in the list is kept and shown in grey. Files with the older `status` column still load
-- **shape**: `diamond` | `circle` | `square` | `triangle` (milestones only)
 - **swimlane / subswimlane**: free text — each distinct value becomes a lane / nested sub-lane
 - **parent**: id of the milestone this item rolls up to (the milestone can't fall before it finishes)
 - **depends_on**: `;`-separated ids this item depends on (finish-to-start)
@@ -191,7 +190,7 @@ Changing an item's end date in the **Items** screen shifts everything downstream
 RAG and dates change far more often than anything else, so they are the quickest to update:
 
 - **Gantt chart**: drag an item to move it, or drag either end of a task's bar to change its start or end (see **Gantt chart** below). Or click (or right-click) an item to open the quick update panel, which opens beside it. Change its RAG, switch it between milestone and task, or change its dates, then **Save** (or Enter) — nothing changes until you do, and **Cancel** / Esc throws the changes away. Switching the type back and forth keeps both dates, and moving a milestone's date keeps the task's length if you switch back. Clicking away with unsaved changes gives the panel a nudge instead of losing them. The panel says how many dependent items will move. From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
-- **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. The current RAG shows as a pill and the others as dots (hover for the name): click one to set it, or edit any cell. An end date in red means the item is overdue. Switch to **All fields** for lanes, links, shape and so on.
+- **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. The current RAG shows as a pill and the others as dots (hover for the name): click one to set it, or edit any cell. An end date in red means the item is overdue. Switch to **All fields** for lanes, links and so on.
 - The quick update panel on the chart also has a **Type** switch.
 
 ### Importing
@@ -240,7 +239,7 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 
 - Swimlanes with alternating backgrounds and colour accents
 - Swimlanes with nested sub-swimlanes
-- Milestones drawn as RAG-coloured shapes, tasks as bars, with title, dates and owner; overlapping items stack automatically
+- Milestones drawn as RAG-coloured diamonds (top level ones ringed), tasks as bars, with title, dates and owner; overlapping items stack automatically
 - Each task shows its duration in days after its title (e.g. **24d**, counting start and end day)
 - Each milestone with tasks rolling up to it shows its **% complete**: the share of those tasks' total duration that is at a complete RAG (a status named or described as Complete / Done). Tasks rolling up through other milestones count too, and the hover card shows the days and tasks behind it
 - Dependency arrows and dashed roll-up arrows, with rounded corners and the vertical run just before what they lead to. **View → Dependency lines** shows them always, only for the item under the pointer, or not at all

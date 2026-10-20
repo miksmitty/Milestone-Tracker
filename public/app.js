@@ -1,5 +1,6 @@
 /* Tracker frontend — CSV-backed editor + SVG gantt.
- * Every item has a type: a milestone has a single date (start = end, drawn as a shape);
+ * Every item has a type: a milestone has a single date (start = end, drawn as a diamond; a top
+ * level milestone is one under change control, drawn as a diamond in a ring);
  * a task runs from start to end inclusive (drawn as a bar). Moving either date of a
  * milestone moves the milestone; changing the type is how an item gets a date range. Tasks can roll up to a milestone, and any
  * item can depend on others (finish-to-start) — date changes cascade downstream.
@@ -78,7 +79,6 @@ const gradId = (st) => `grad-${STATUSES.includes(st) ? STATUSES.indexOf(st) : 'x
 // Options for a status select, keeping a value that isn't in the list so it can't be lost.
 const statusOptions = (selected, names = STATUSES) =>
   optionList(selected && !names.includes(selected) ? [...names, selected] : names, selected);
-const SHAPES = ['diamond', 'circle', 'square', 'triangle'];
 // The chart's own colours, light and dark; G is the set in use (see applyTheme).
 const GANTT_THEMES = {
   light: {
@@ -97,7 +97,7 @@ const GANTT_THEMES = {
   },
 };
 let G = GANTT_THEMES.light;
-const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'shape', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url', 'top_level'];
+const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url'];
 const MS_DAY = 86400000;
 
 const state = {
@@ -109,7 +109,7 @@ const state = {
   workspaceId: '',        // the workspace being viewed
   otherItems: [],       // items of every other workspace, kept so saves write the whole file
   otherReports: [],
-  items: [],            // {id, workspace_id, ref, title, type, description, swimlane, subswimlane, owner, start, end, status, shape, parent, deps[]}
+  items: [],            // {id, workspace_id, ref, title, type, description, swimlane, subswimlane, owner, start, end, status, parent, deps[]}
   lastId: 0,            // highest id ever issued this session, so ids are never reused
   reports: [],          // {id, workspace_id, item_id, cadence, period_start, period_end, status, exec_summary, achievements, next_steps, get_to_green, author, created, updated}
   lastReportId: 0,
@@ -126,7 +126,8 @@ const state = {
   userZoomed: false, // once the user touches zoom, stop auto-fitting on resize
 };
 
-const TYPES = ['milestone', 'task'];
+// A top level milestone is a milestone under change control: one date, like any milestone.
+const TYPES = ['top', 'milestone', 'task'];
 const isTask = (m) => m.type === 'task';
 
 /* ---- workspace terminology ---- */
@@ -147,11 +148,21 @@ function makeTerms(p) {
     t[key.toLowerCase()] = v.toLowerCase();
     t[key.toLowerCase() + 's'] = plural(v).toLowerCase();
   }
+  t.Top = `Top level ${t.milestone}`;
+  t.Tops = `Top level ${t.milestones}`;
+  t.top = `top level ${t.milestone}`;
+  t.tops = `top level ${t.milestones}`;
   return t;
 }
 let T = makeTerms();
-const typeName = (m) => (isTask(m) ? T.Task : T.Milestone);
-const typeOptions = (selected) => TYPES.map(t => `<option value="${t}" ${t === selected ? 'selected' : ''}>${escAttr(t === 'task' ? T.Task : T.Milestone)}</option>`).join('');
+const typeLabel = (t) => (t === 'task' ? T.Task : t === 'top' ? T.Top : T.Milestone);
+const typeName = (m) => typeLabel(m.type);
+const typeOptions = (selected) => TYPES.map(t => `<option value="${t}" ${t === selected ? 'selected' : ''}>${escAttr(typeLabel(t))}</option>`).join('');
+// Reads a type as stored in milestones.csv: top level, milestone or task (blank → undefined).
+const fileType = (v) => {
+  const t = String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  return t.startsWith('top') ? 'top' : t.startsWith('t') ? 'task' : t.startsWith('m') ? 'milestone' : undefined;
+};
 const withArticle = (w) => `${/^[aeiou]/i.test(w) ? 'an' : 'a'} ${w}`;
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const itemLabel = (m) => m.ref || `#${m.id}`;
@@ -207,7 +218,7 @@ function toCSV(items) {
   const lines = [COLUMNS.join(',')];
   for (const m of items) {
     lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
-      m.status, m.shape, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url, m.top_level].map(csvEscape).join(','));
+      m.status, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -226,14 +237,13 @@ const HEADER_ALIASES = {
   start: ['start', 'startdate'],
   end: ['end', 'enddate', 'date'],
   status: ['rag', 'status'],
-  shape: ['shape'],
   parent: ['parent', 'rollsupto', 'rollup'],
   deps: ['dependson', 'dependencies', 'deps'],
   baseline_start: ['baselinestart'],
   baseline_end: ['baselineend'],
   gitlab_url: ['gitlaburl', 'gitlab'],
   use_case_url: ['usecaseurl', 'usecase'],
-  top_level: ['toplevel'],
+  top_level: ['toplevel'], // earlier files flagged top level milestones in their own column
 };
 
 function rowsToItems(rows) {
@@ -249,9 +259,9 @@ function rowsToItems(rows) {
     if (!end) end = start;
     if (end < start) end = start;
     // Files without a type column: a date range is a task, a single date a milestone.
-    const t = get(r, 'type').toLowerCase();
-    const type = t.startsWith('t') ? 'task' : t.startsWith('m') ? 'milestone' : start < end ? 'task' : 'milestone';
-    if (type === 'milestone') start = end;
+    let type = fileType(get(r, 'type')) || (start < end ? 'task' : 'milestone');
+    if (type === 'milestone' && readYes(get(r, 'top_level'))) type = 'top';
+    if (type !== 'task') start = end;
     return {
       type,
       id: get(r, 'id'),
@@ -264,14 +274,12 @@ function rowsToItems(rows) {
       owner: get(r, 'owner'),
       start, end,
       status: get(r, 'status'), // normalised once the workspace is known
-      shape: normaliseShape(get(r, 'shape')),
       parent: get(r, 'parent'),
       deps: get(r, 'deps').split(/[;|\s]+/).filter(Boolean),
       baseline_start: get(r, 'baseline_start'),
       baseline_end: get(r, 'baseline_end'),
       gitlab_url: get(r, 'gitlab_url'),
       use_case_url: get(r, 'use_case_url'),
-      top_level: readYes(get(r, 'top_level')),
     };
   });
 
@@ -332,10 +340,6 @@ function rowsToStatuses(rows) {
 function statusesToCSV(statuses) {
   return [STATUS_COLUMNS.join(','), ...statuses.map(s => STATUS_COLUMNS.map(k =>
     csvEscape(typeof s[k] === 'boolean' ? (s[k] ? 'yes' : '') : s[k])).join(','))].join('\n') + '\n';
-}
-function normaliseShape(v) {
-  const s = (v ?? '').trim().toLowerCase();
-  return SHAPES.includes(s) ? s : 'diamond';
 }
 
 /* ================= data load/save ================= */
@@ -672,7 +676,7 @@ const versionsNow = () => Object.fromEntries(FILE_NAMES.map(f => [f, synced[f]?.
 // change back (and saves it), which is then just another change for everyone else to receive.
 const FIELD_NAMES = {
   status: 'RAG', start: 'Start', end: 'End', ref: 'Ref', deps: 'Depends on', parent: 'Rolls up to', subswimlane: 'Sub-swimlane',
-  baseline_start: 'Baseline start', baseline_end: 'Baseline end', gitlab_url: 'GitLab URL', use_case_url: 'Use case URL', top_level: 'Top level',
+  baseline_start: 'Baseline start', baseline_end: 'Baseline end', gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
   exec_summary: 'Executive summary', next_steps: 'Next steps', get_to_green: 'Get to green plan', period_end: 'Period ending',
   week_ending: 'Week ending', lead: 'Area lead', author: 'Author', number: 'Program number', rows: 'RAG options',
   item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task',
@@ -1128,7 +1132,7 @@ function movedMessage(m, moved) {
 // knock-on), delete it or take it out of change control first lists what changes and asks.
 
 const readYes = (v) => (/^(y|yes|true|1|x|✓)$/i.test(String(v ?? '').trim()) ? 'yes' : '');
-const isTopLevel = (m) => !!m && !isTask(m) && m.top_level === 'yes';
+const isTopLevel = (m) => m?.type === 'top';
 
 // How each top level milestone in `before` ([{ m, start, end }]) has been changed since.
 function topLevelHits(before) {
@@ -1330,8 +1334,8 @@ function removeItem(id) {
 
 /* ================= gantt rendering ================= */
 
-const LANE_COL_W = 130;
-const SUB_COL_W = 130;
+const MIN_LANE_COL_W = 130;
+const MIN_SUB_COL_W = 130;
 const PAD_RIGHT = 30;
 const QUARTER_H = 26;
 const MONTH_H = 24;
@@ -1382,9 +1386,12 @@ function rowMetrics() {
   };
 }
 
-// Label column is wider when any item uses a sub-swimlane.
+// Label columns grow to fit the longest swimlane and sub-swimlane names, so none is cut short.
 const hasSubLanes = () => state.items.some(m => m.subswimlane);
-const labelWidth = () => (hasSubLanes() ? LANE_COL_W + SUB_COL_W : 170);
+const widest = (names, size, weight) => Math.max(0, ...[...new Set(names)].filter(Boolean).map(n => textW(n, size, weight)));
+const laneColWidth = () => Math.ceil(Math.max(hasSubLanes() ? MIN_LANE_COL_W : 170, widest(state.items.map(m => m.swimlane), 14, 700) + 40));
+const subColWidth = () => Math.ceil(Math.max(MIN_SUB_COL_W, widest(state.items.map(m => m.subswimlane), 12, 600) + 24));
+const labelWidth = () => laneColWidth() + (hasSubLanes() ? subColWidth() : 0);
 
 function svgEl(tag, attrs, text) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -1394,7 +1401,6 @@ function svgEl(tag, attrs, text) {
 }
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-const MAX_LABEL_W = 220; // longer task titles are cut with … on the chart (the hover card shows them in full); milestone titles never are
 const REF_GAP = 5;
 const measureCtx = document.createElement('canvas').getContext('2d');
 
@@ -1441,6 +1447,7 @@ const halo = () => ({ 'paint-order': 'stroke', stroke: G.bg, 'stroke-width': 3, 
 function layoutLanes(items, xOf, rm, minX, maxX) {
   // Group by swimlane → sub-swimlane (first-appearance order), then pack each sub-lane into rows.
   const lanes = [], laneMap = new Map();
+  lanes.maxRight = 0; // rightmost label edge, so the chart can widen to show it whole
   for (const m of items) {
     let lane = laneMap.get(m.swimlane);
     if (!lane) {
@@ -1479,7 +1486,7 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
       for (const m of sub.items) {
         if (m._task !== band) { band = m._task; bandStart = rowEnds.length; }
         const x1 = xOf(m._s), x2 = xOf(m._e);
-        m._meta = rm.detail ? truncate(metaText(m), MAX_LABEL_W, 10.5) : '';
+        m._meta = rm.detail ? metaText(m) : '';
         const metaW = m._meta ? textW(m._meta, 10.5) : 0;
         let left, right;
         const inBar = m._task && fitLabel(m, Infinity, 12);
@@ -1491,7 +1498,7 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
           right = Math.max(x2, x1 + metaW);
         } else {
           // label beside the item: to the right, or to the left if it would run off the chart
-          const out = fitLabel(m, m._task ? MAX_LABEL_W : Infinity, 12.5);
+          const out = fitLabel(m, Infinity, 12.5);
           const labelW = Math.max(out.w, metaW);
           const itemL = m._task ? x1 : x1 - rm.shapeS - 3;
           const itemR = m._task ? x2 : x1 + rm.shapeS + 3;
@@ -1506,6 +1513,7 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
         }
         let r = oneEach ? -1 : rowEnds.findIndex((end, i) => i >= bandStart && left - 10 > end);
         if (r < 0) { r = rowEnds.length; rowEnds.push(right); } else rowEnds[r] = right;
+        lanes.maxRight = Math.max(lanes.maxRight, right);
         m._row = r;
       }
       sub.rows = Math.max(1, rowEnds.length);
@@ -1516,18 +1524,10 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
   return lanes;
 }
 
-function drawShape(parent, shape, cx, cy, status, s) {
+// Every milestone is a diamond (a top level one also wears a ring, drawn by the caller).
+function drawShape(parent, cx, cy, status, s) {
   const c = pal(status);
-  let el;
-  if (shape === 'diamond') {
-    el = svgEl('path', { d: `M ${cx} ${cy - s - 2} L ${cx + s + 2} ${cy} L ${cx} ${cy + s + 2} L ${cx - s - 2} ${cy} Z` });
-  } else if (shape === 'triangle') {
-    el = svgEl('path', { d: `M ${cx} ${cy - s - 2} L ${cx + s + 1} ${cy + s} L ${cx - s - 1} ${cy + s} Z` });
-  } else if (shape === 'circle') {
-    el = svgEl('circle', { cx, cy, r: s + 0.5 });
-  } else {
-    el = svgEl('rect', { x: cx - s, y: cy - s, width: s * 2, height: s * 2, rx: 2.5 });
-  }
+  const el = svgEl('path', { d: `M ${cx} ${cy - s - 2} L ${cx + s + 2} ${cy} L ${cx} ${cy + s + 2} L ${cx - s - 2} ${cy} Z` });
   el.setAttribute('fill', `url(#${gradId(status)})`);
   el.setAttribute('stroke', c.dark);
   el.setAttribute('stroke-width', '1.4');
@@ -1579,6 +1579,7 @@ function renderGantt() {
   if (!state.rangeStart) return; // data not loaded yet
 
   const LABEL_W = labelWidth();
+  const LANE_COL_W = laneColWidth();
   const subCol = hasSubLanes();
   const rm = rowMetrics();
 
@@ -1599,8 +1600,9 @@ function renderGantt() {
   const xOf = (d) => Math.min(LABEL_W + chartW, Math.max(LABEL_W, rawX(d)));
 
   const headerH = (state.showQuarters ? QUARTER_H : 0) + (state.showMonths ? MONTH_H : 0);
-  const width = LABEL_W + chartW + PAD_RIGHT;
-  const lanes = layoutLanes(items, xOf, rm, LABEL_W, width);
+  const lanes = layoutLanes(items, xOf, rm, LABEL_W, LABEL_W + chartW + PAD_RIGHT);
+  // names are never cut short: a label near the end widens the chart rather than running off it
+  const width = Math.ceil(Math.max(LABEL_W + chartW + PAD_RIGHT, lanes.maxRight + 8));
   const bodyH = lanes.reduce((a, l) => a + l.h, 0) || 120;
   const height = headerH + bodyH + 8;
 
@@ -1673,7 +1675,7 @@ function renderGantt() {
       fill: 'none', stroke: G.muted, 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
     }));
     const nameY = lane.collapsed ? y + lane.h / 2 + 1 : y + lane.h / 2 + 5;
-    toggle.appendChild(svgEl('text', { x: 26, y: nameY, 'font-size': 14, 'font-weight': 700, fill: G.text }, truncate(lane.name, laneColW - 34, 14, 700)));
+    toggle.appendChild(svgEl('text', { x: 26, y: nameY, 'font-size': 14, 'font-weight': 700, fill: G.text }, lane.name));
     if (lane.collapsed) toggle.appendChild(svgEl('text', { x: 26, y: nameY + 13, 'font-size': 10.5, fill: G.muted }, `${lane.count} ${lane.count === 1 ? T.item : T.items} folded`));
     col.appendChild(toggle);
 
@@ -1688,7 +1690,7 @@ function renderGantt() {
         if (sub.name) {
           col.appendChild(svgEl('text', {
             x: LANE_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: G.sub,
-          }, truncate(sub.name, SUB_COL_W - 20, 12, 600)));
+          }, sub.name));
         }
       }
       sy += sub.h;
@@ -1797,7 +1799,7 @@ function renderGantt() {
       // a folded swimlane: every item on one row, small and unlabelled (the hover card still works)
       if (m._task) {
         g.appendChild(svgEl('rect', { x: x1, y: cy - 3.5, width: Math.max(2, x2 - x1), height: 7, rx: 3.5, fill: `url(#${gradId(m.status)})`, stroke: c.dark, 'stroke-width': 0.8, 'fill-opacity': 0.9 }));
-      } else drawShape(g, m.shape, x1, cy, m.status, 4.5);
+      } else drawShape(g, x1, cy, m.status, 4.5);
       svg.appendChild(g);
       continue;
     }
@@ -1831,7 +1833,7 @@ function renderGantt() {
         x1, y1: cy + rm.shapeS + 3, x2: x1, y2: m._sub._y + m._sub.h - 4, 'pointer-events': 'none',
         stroke: G.strong, 'stroke-width': 1, 'stroke-dasharray': '2 3',
       }));
-      drawShape(g, m.shape, x1, cy, m.status, rm.shapeS);
+      drawShape(g, x1, cy, m.status, rm.shapeS);
       // a top level milestone (under change control) wears a ring
       if (isTopLevel(m)) g.appendChild(svgEl('circle', { cx: x1, cy, r: rm.shapeS + 5, fill: 'none', stroke: G.text, 'stroke-width': 1.4, 'pointer-events': 'none', class: 'gantt-tl' }));
     }
@@ -2174,7 +2176,7 @@ function ganttMatches(m) {
   const f = ganttFilter, q = f.q.trim().toLowerCase();
   return (!f.lane || m.swimlane === f.lane)
     && (!f.owner || m.owner === f.owner)
-    && (!f.type || (f.type === 'task') === isTask(m))
+    && (!f.type || (f.type === 'task' ? isTask(m) : f.type === 'top' ? isTopLevel(m) : !isTask(m)))
     && (!f.rag.length || f.rag.includes(m.status))
     && (!f.late || isLate(m) || isLateStart(m))
     && (!q || [m.ref, m.title, m.description, m.owner, m.swimlane, m.subswimlane].join(' ').toLowerCase().includes(q));
@@ -2248,7 +2250,7 @@ function renderGanttFilters() {
   };
   fill('gf-lane', 'All swimlanes', distinct('swimlane'), f.lane);
   fill('gf-owner', 'All owners', distinct('owner'), f.owner);
-  const types = [['', 'All'], ['milestone', T.Milestones], ['task', T.Tasks]];
+  const types = [['', 'All'], ['top', 'Top level'], ['milestone', T.Milestones], ['task', T.Tasks]];
   document.getElementById('gf-type').innerHTML = types.map(([v, label]) =>
     `<button type="button" data-type="${v}" aria-pressed="${f.type === v}">${escAttr(label)}</button>`).join('');
   f.rag = f.rag.filter(st => STATUSES.includes(st));
@@ -2262,7 +2264,7 @@ function renderGanttFilters() {
   const chips = [
     f.lane && ['lane', 'Swimlane', f.lane],
     f.owner && ['owner', 'Owner', f.owner],
-    f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : T.Milestones],
+    f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : f.type === 'top' ? T.Tops : T.Milestones],
     f.rag.length && ['rag', 'RAG', f.rag.join(', ')],
     f.late && ['late', 'Show', 'Overdue or late starting'],
   ].filter(Boolean);
@@ -2440,7 +2442,7 @@ let editing = null; // item being edited; null when adding a new one
 let editOpened = null; // its values when the dialog opened
 let edDeps = [];
 
-const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent',
+const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'parent',
   'gitlab_url', 'use_case_url'];
 const URL_FIELDS = { gitlab_url: 'GitLab URL', use_case_url: 'Use case URL' };
 
@@ -2462,7 +2464,7 @@ function openEditDialog(m) {
   const today = fmtISO(new Date());
   const v = m || {
     ref: '', title: '', description: '', swimlane: last?.swimlane || 'General', subswimlane: '', owner: '', gitlab_url: '', use_case_url: '',
-    type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
+    type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, parent: '', deps: [],
   };
   f.type.innerHTML = typeOptions(v.type);
   f.status.innerHTML = statusOptions(v.status);
@@ -2472,7 +2474,6 @@ function openEditDialog(m) {
     parents.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('');
   f.swimlane.innerHTML = laneOptions(v.swimlane);
   for (const k of EDIT_FIELDS) f[k].value = v[k] ?? '';
-  f.top_level.checked = v.top_level === 'yes';
   f.swimlane.dataset.prev = f.swimlane.value;
   closeNewLane(f);
   edDeps = [...v.deps];
@@ -2530,10 +2531,8 @@ function updateEdType() {
   const f = document.getElementById('edit-form').elements;
   const task = f.type.value === 'task';
   const badge = document.getElementById('ed-type');
-  badge.textContent = task ? T.Task : T.Milestone;
-  badge.className = 'type-badge ' + (task ? 'task' : 'ms');
-  f.shape.disabled = task;
-  f.top_level.disabled = task;
+  badge.textContent = typeLabel(f.type.value);
+  badge.className = 'type-badge ' + (task ? 'task' : f.type.value === 'top' ? 'ms tl' : 'ms');
   document.getElementById('ed-start').classList.toggle('invisible', !task);
   document.getElementById('ed-end-label').textContent = task ? 'End' : 'Date';
   if (!task) f.start.value = f.end.value;
@@ -2545,7 +2544,6 @@ async function submitEditDialog(e) {
   const err = document.getElementById('ed-error');
   const changes = {};
   for (const k of EDIT_FIELDS) changes[k] = f[k].value.trim();
-  changes.top_level = f.top_level.checked ? 'yes' : '';
   changes.deps = edDeps;
   if (!f.newlane.hidden) changes.swimlane = f.newlane.value.trim();
   if (!changes.swimlane) { (f.newlane.hidden ? f.swimlane : f.newlane).focus(); return (err.textContent = 'Name the new swimlane.'); }
@@ -2656,58 +2654,84 @@ function refreshDatalists() {
   setDatalist('people-list', [...allItems().map(m => m.owner), ...state.workspaces.flatMap(p => [p.owner, p.lead])].sort());
 }
 
-/* ---- sortable, filterable tables with draggable column widths ---- */
-// Shared by the Items grid and the Reports list. A column's `filter` is 'text' (contains) or a
-// function returning [[value, label]] options (exact match). Sort order, widths and the view mode
-// are a per-browser convenience (storage may be unavailable) and never change the CSV order.
+/* ---- spreadsheet-style tables: sort, filter, move and size columns ---- */
+// Shared by the Items grid and the Reports list, and they behave like Excel:
+// - click a heading to select the column (⌘/Ctrl-click to add one, shift-click for a range);
+// - drag a heading to move the column — or all the selected ones — somewhere else;
+// - drag a heading's edge to resize; every selected column takes the same width. Double-click
+//   the edge to fit the contents;
+// - the ▾ button on a heading sorts by the column and filters it to the values ticked in its list;
+// - right-click a heading for autofit, distribute evenly, fit to window and the resets.
+// A column's `vals(row)` gives its value (or values) for the filter list (default row[key]) and
+// `show(v)` how one reads there; `kind` ('date', 'number', 'status') words the sort and orders the
+// list, or `order(a, b)` does. `fixed` columns (tick boxes, row buttons) stay put and don't sort.
+// Sort, widths, column order and the view mode are a per-browser convenience (storage may be
+// unavailable) and never change the CSV order. Filters last until the page is reloaded.
 
-function makeTable({ table, store, cols, onChange, mode }) {
-  const t = { table, store, cols, onChange, mode, sort: { key: null, dir: 1 }, filters: {}, widths: {} };
+function makeTable({ table, store, cols, rows, onChange, mode }) {
+  const t = { table, store, baseCols: cols, rows, onChange, mode, sort: { key: null, dir: 1 }, filters: {}, widths: {}, order: {}, colSel: new Set(), anchor: null };
   try {
     const saved = JSON.parse(localStorage.getItem(store) || '{}');
-    for (const k of ['sort', 'widths', 'mode']) if (saved[k]) t[k] = saved[k];
+    for (const k of ['sort', 'widths', 'mode', 'order']) if (saved[k]) t[k] = saved[k];
   } catch { /* ignore */ }
+  t.cols = () => orderedCols(t);
   return t;
 }
 function saveTablePrefs(t) {
-  try { localStorage.setItem(t.store, JSON.stringify({ sort: t.sort, widths: t.widths, mode: t.mode })); } catch { /* ignore */ }
+  try { localStorage.setItem(t.store, JSON.stringify({ sort: t.sort, widths: t.widths, mode: t.mode, order: t.order })); } catch { /* ignore */ }
 }
 const tableEl = (t) => document.getElementById(t.table);
-const colWidth = (t, c) => t.widths[c.wkey || c.key] ?? c.w;
+const widthKey = (c) => c.wkey || c.key;
+const colWidth = (t, c) => t.widths[widthKey(c)] ?? c.w;
+const colLabel = (c) => (typeof c.label === 'function' ? c.label() : c.label);
+const orderKey = (t) => t.mode || 'all'; // each view mode keeps its own column order
 
-function filterOptions(c, value) {
-  return '<option value="">All</option>' + c.filter().map(([v, label]) =>
-    `<option value="${escAttr(v)}" ${v === value ? 'selected' : ''}>${escAttr(label)}</option>`).join('');
+// The columns in the order the user has arranged them. Fixed columns at either end stay there.
+function orderedCols(t) {
+  const base = t.baseCols();
+  const order = t.order[orderKey(t)];
+  if (!order) return base;
+  let a = 0, b = base.length;
+  while (a < b && base[a].fixed) a++;
+  while (b > a && base[b - 1].fixed) b--;
+  const rank = (c) => { const i = order.indexOf(c.key); return i < 0 ? order.length + base.indexOf(c) : i; };
+  return [...base.slice(0, a), ...base.slice(a, b).sort((x, y) => rank(x) - rank(y)), ...base.slice(b)];
 }
+const movableKeys = (t) => t.cols().filter(c => !c.fixed).map(c => c.key);
+
+const FILTER_CARET = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5h6L6 8z" fill="currentColor"/></svg>';
+const FILTER_FUNNEL = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 2h9L7 6.2V10L5 9V6.2z" fill="currentColor"/></svg>';
 
 function renderTableHead(t) {
+  closeTablePop();
   const cols = t.cols();
   tableEl(t).querySelector('colgroup').innerHTML = cols.map(c => `<col data-key="${c.key}">`).join('');
-  const filterCell = (c) => {
-    if (!c.filter) return '<th></th>';
-    const v = t.filters[c.key] || '';
-    const ctl = c.filter === 'text'
-      ? `<input data-filter="${c.key}" placeholder="Filter…" value="${escAttr(v)}" />`
-      : `<select data-filter="${c.key}">${filterOptions(c, v)}</select>`;
-    return `<th class="filter-cell">${ctl}</th>`;
-  };
   tableEl(t).querySelector('thead').innerHTML = `
     <tr>${cols.map(c => c.fixed ? `<th${c.head ? ` class="col-${c.key}"` : ''}>${c.head ? c.head() : ''}</th>` : `
-      <th data-sort="${c.key}" class="sortable" title="${escAttr(c.title || 'Click to sort')}">
-        <span>${escAttr(typeof c.label === 'function' ? c.label() : c.label)}</span><span class="sort-ind"></span>
+      <th data-col="${c.key}" title="${escAttr(c.title ? `${c.title} · ` : '')}Click to select · drag to move · right-click for sizing">
+        <span class="th-label">${escAttr(colLabel(c))}</span><span class="sort-ind"></span>
+        <button type="button" class="th-menu" data-colmenu="${c.key}" aria-label="Sort and filter ${escAttr(colLabel(c))}"></button>
         <span class="col-resizer" data-resize="${c.key}" title="Drag to resize · double-click to fit the contents"></span>
-      </th>`).join('')}</tr>
-    <tr class="filter-row">${cols.map(filterCell).join('')}</tr>`;
+      </th>`).join('')}</tr>`;
   applyTableWidths(t);
-  updateSortIndicators(t);
+  updateHeadState(t);
 }
 
-// Option lists that depend on the data (e.g. items with reports) are refreshed on every render.
-function refreshSelectFilters(t) {
-  for (const c of t.cols()) {
-    const el = typeof c.filter === 'function' && tableEl(t).querySelector(`select[data-filter="${c.key}"]`);
-    if (el) el.innerHTML = filterOptions(c, t.filters[c.key] || '');
-  }
+// Sort arrows, filter buttons and the column selection, without redrawing the heading.
+function updateHeadState(t) {
+  const tbl = tableEl(t);
+  for (const k of t.colSel) if (!t.cols().some(c => c.key === k)) t.colSel.delete(k);
+  tbl.querySelectorAll('thead th[data-col]').forEach(th => {
+    const k = th.dataset.col, sorted = t.sort.key === k, filtered = !!t.filters[k];
+    th.classList.toggle('sorted', sorted);
+    th.classList.toggle('filtered', filtered);
+    th.classList.toggle('colsel', t.colSel.has(k));
+    th.querySelector('.sort-ind').textContent = sorted ? (t.sort.dir > 0 ? '▲' : '▼') : '';
+    const b = th.querySelector('.th-menu');
+    b.innerHTML = filtered ? FILTER_FUNNEL : FILTER_CARET;
+    b.title = filtered ? 'Filtered · click to sort or change the filter' : 'Sort and filter';
+  });
+  tbl.querySelectorAll('col').forEach(col => col.classList.toggle('colsel', t.colSel.has(col.dataset.key)));
 }
 
 // Like a spreadsheet: every column is exactly its width, and the table is as wide as its columns
@@ -2717,7 +2741,8 @@ function applyTableWidths(t) {
   let total = 0;
   for (const c of t.cols()) {
     const w = colWidth(t, c);
-    tableEl(t).querySelector(`col[data-key="${c.key}"]`).style.width = w + 'px';
+    const col = tableEl(t).querySelector(`col[data-key="${c.key}"]`);
+    if (col) col.style.width = w + 'px';
     total += w;
   }
   tableEl(t).style.width = total + 'px';
@@ -2731,8 +2756,8 @@ function fitColumn(t, c) {
   const pad = (el) => { const cs = getComputedStyle(el); return parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth); };
   const measure = (text, el) => { measureCtx.font = getComputedStyle(el).font; return measureCtx.measureText(text).width; };
   const th = tbl.querySelector(`thead tr:first-child th:nth-child(${i + 1})`);
-  const label = th?.querySelector('span');
-  let w = label ? label.scrollWidth + pad(th) + 16 : 0; // as shown (capitals, spacing), plus room for the sort arrow
+  const label = th?.querySelector('.th-label');
+  let w = label ? label.scrollWidth + pad(th) + 36 : 0; // as shown (capitals, spacing), plus the sort arrow and ▾ button
   for (const td of tbl.querySelectorAll(`tbody tr > td:nth-child(${i + 1})`)) {
     if (td.colSpan > 1) continue;
     const el = td.children.length === 1 ? td.firstElementChild : null;
@@ -2756,33 +2781,59 @@ function fitColumn(t, c) {
 }
 
 // While a column is being resized, its width shows beside the pointer.
-function showWidthTip(e, w) {
+function showWidthTip(e, w, n = 1) {
   let tip = document.getElementById('col-width-tip');
   if (!tip) {
     tip = document.createElement('div');
     tip.id = 'col-width-tip';
     document.body.appendChild(tip);
   }
-  tip.textContent = `Width: ${w} pixels`;
+  tip.textContent = `Width: ${w} pixels${n > 1 ? ` (${n} columns)` : ''}`;
   tip.style.left = `${e.clientX + 12}px`;
   tip.style.top = `${e.clientY + 14}px`;
   tip.hidden = false;
 }
 const hideWidthTip = () => { const tip = document.getElementById('col-width-tip'); if (tip) tip.hidden = true; };
 
-function updateSortIndicators(t) {
-  tableEl(t).querySelectorAll('thead [data-sort]').forEach(th => {
-    const on = th.dataset.sort === t.sort.key;
-    th.classList.toggle('sorted', on);
-    th.querySelector('.sort-ind').textContent = on ? (t.sort.dir > 0 ? '▲' : '▼') : '';
-  });
+/* sizing: the selected columns (or the one under the pointer) */
+const sizingTargets = (t, key) => (t.colSel.has(key) && t.colSel.size > 1
+  ? t.cols().filter(c => t.colSel.has(c.key)) : t.cols().filter(c => c.key === key));
+function setWidths(t, list) {
+  for (const [c, w] of list) t.widths[widthKey(c)] = Math.max(MIN_COL_W, Math.round(w));
+  applyTableWidths(t);
+  saveTablePrefs(t);
+}
+const autofitCols = (t, cols) => setWidths(t, cols.map(c => [c, fitColumn(t, c)]));
+// Share the columns' combined width out equally.
+function distributeCols(t, cols) {
+  const total = cols.reduce((s, c) => s + colWidth(t, c), 0);
+  const each = Math.floor(total / cols.length);
+  setWidths(t, cols.map((c, i) => [c, i === cols.length - 1 ? total - each * (cols.length - 1) : each]));
+}
+// Stretch or squeeze every column in proportion so the table just fills the space it's in.
+function fitColsToWindow(t) {
+  const avail = tableEl(t).closest('.table-wrap').clientWidth;
+  const cols = t.cols(), flex = cols.filter(c => !c.fixed);
+  const fixedW = cols.filter(c => c.fixed).reduce((s, c) => s + colWidth(t, c), 0);
+  const cur = flex.reduce((s, c) => s + colWidth(t, c), 0);
+  const room = Math.max(flex.length * MIN_COL_W, avail - fixedW);
+  const ws = flex.map(c => Math.max(MIN_COL_W, Math.floor(colWidth(t, c) * room / cur)));
+  ws[ws.length - 1] += Math.max(0, room - ws.reduce((s, w) => s + w, 0));
+  setWidths(t, flex.map((c, i) => [c, ws[i]]));
+}
+function resetWidths(t) {
+  for (const c of t.cols()) delete t.widths[widthKey(c)];
+  applyTableWidths(t);
+  saveTablePrefs(t);
 }
 
-function clearTableFilters(t) {
-  t.filters = {};
-  tableEl(t).querySelectorAll('thead [data-filter]').forEach(el => { el.value = ''; });
+/* sorting */
+function setSort(t, key, dir) {
+  t.sort = key ? { key, dir } : { key: null, dir: 1 };
+  saveTablePrefs(t);
+  updateHeadState(t);
+  t.onChange();
 }
-
 // Rows: sort by the chosen column (blanks last either way); `tie` keeps the default order.
 function sortRows(t, rows, valueOf, tie) {
   const { key, dir } = t.sort;
@@ -2797,104 +2848,371 @@ function sortRows(t, rows, valueOf, tie) {
     return c * dir || tie(a, b);
   });
 }
+function sortWords(c) {
+  switch (c.kind) {
+    case 'date': return ['Sort oldest to newest', 'Sort newest to oldest'];
+    case 'number': return ['Sort smallest to largest', 'Sort largest to smallest'];
+    case 'status': return ['Sort in RAG order', 'Sort in reverse RAG order'];
+    default: return ['Sort A to Z', 'Sort Z to A'];
+  }
+}
+
+/* filtering: each filtered column keeps the list of values still ticked */
+const tableCol = (t, key) => t.baseCols().find(c => c.key === key);
+function colVals(c, row) {
+  const v = c.vals ? c.vals(row) : row[c.key];
+  const list = (Array.isArray(v) ? v : [v]).map(x => String(x ?? '').trim());
+  return list.length ? list : [''];
+}
+const showVal = (c, v) => (v === '' ? (c.blank || '(Blanks)') : c.show ? c.show(v) : v);
+function passesFilters(t, row, except) {
+  for (const [k, allowed] of Object.entries(t.filters)) {
+    const c = k !== except && tableCol(t, k);
+    if (c && !colVals(c, row).some(v => allowed.includes(v))) return false;
+  }
+  return true;
+}
+// The single value a column is filtered to, if that's what it is (e.g. the Reports item filter).
+const filterValue = (t, key) => (t.filters[key]?.length === 1 ? t.filters[key][0] : '');
+function choiceCmp(c) {
+  const byLabel = (a, b) => String(showVal(c, a)).localeCompare(String(showVal(c, b)), undefined, { numeric: true, sensitivity: 'base' });
+  const cmp = c.order || (c.kind === 'status' ? (a, b) => STATUSES.indexOf(a) - STATUSES.indexOf(b)
+    : c.kind === 'number' ? (a, b) => a - b
+    : c.kind === 'date' ? (a, b) => a.localeCompare(b) : byLabel);
+  return (a, b) => (a === '') - (b === '') || cmp(a, b) || byLabel(a, b);
+}
+// Values in the list are those in the rows the other columns' filters let through, as in Excel.
+function filterChoices(t, c) {
+  const seen = new Set();
+  for (const r of t.rows()) if (passesFilters(t, r, c.key)) for (const v of colVals(c, r)) seen.add(v);
+  return [...seen].sort(choiceCmp(c));
+}
+function clearTableFilters(t) {
+  t.filters = {};
+  if (tableEl(t).querySelector('thead th')) updateHeadState(t);
+}
+
+/* the ▾ menu and right-click menu share one pop-up */
+let tablePop = null; // { t, c, choices, checked, q }
+function closeTablePop() {
+  document.getElementById('tbl-pop')?.remove();
+  tablePop = null;
+}
+function placePop(el, x, y) {
+  document.body.appendChild(el);
+  const r = el.getBoundingClientRect();
+  el.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  el.style.top = `${Math.max(8, y + r.height > innerHeight - 8 ? innerHeight - r.height - 8 : y)}px`;
+}
+function newPop(cls) {
+  closeTablePop();
+  const el = document.createElement('div');
+  el.id = 'tbl-pop';
+  el.className = `tbl-pop ${cls}`;
+  el.addEventListener('pointerdown', e => e.stopPropagation());
+  return el;
+}
+function sortItems(t, c) {
+  const [up, down] = sortWords(c);
+  const on = t.sort.key === c.key;
+  return `<button type="button" class="tp-item${on && t.sort.dir > 0 ? ' on' : ''}" data-tp="asc"><span class="tp-ic">↑</span>${up}</button>
+    <button type="button" class="tp-item${on && t.sort.dir < 0 ? ' on' : ''}" data-tp="desc"><span class="tp-ic">↓</span>${down}</button>
+    ${on ? '<button type="button" class="tp-item" data-tp="unsort"><span class="tp-ic"></span>Clear sort</button>' : ''}`;
+}
+
+function openFilterPop(t, key, anchor) {
+  const c = tableCol(t, key);
+  const choices = filterChoices(t, c);
+  const allowed = t.filters[key];
+  const el = newPop('tp-filter');
+  tablePop = { t, c, el, choices, checked: new Set(allowed ? choices.filter(v => allowed.includes(v)) : choices), q: '' };
+  el.innerHTML = `${sortItems(t, c)}
+    <hr />
+    <button type="button" class="tp-item" data-tp="clear" ${allowed ? '' : 'disabled'}><span class="tp-ic">${FILTER_FUNNEL}</span>Clear filter from “${escAttr(colLabel(c))}”</button>
+    <input type="search" class="tp-search" placeholder="Search" aria-label="Search the values" />
+    <div class="tp-list" role="group"></div>
+    <div class="tp-foot"><button type="button" class="btn btn-sm btn-ghost" data-tp="cancel">Cancel</button><button type="button" class="btn btn-sm btn-primary" data-tp="ok">OK</button></div>`;
+  wirePop(el);
+  const r = anchor.getBoundingClientRect();
+  renderPopList();
+  placePop(el, r.left - 4, r.bottom + 4);
+  el.querySelector('.tp-search').focus({ preventScroll: true });
+}
+const popShown = () => {
+  const q = tablePop.q.trim().toLowerCase();
+  return q ? tablePop.choices.filter(v => String(showVal(tablePop.c, v)).toLowerCase().includes(q)) : tablePop.choices;
+};
+function renderPopList() {
+  const { el, c, checked, q } = tablePop;
+  const shown = popShown();
+  const on = shown.filter(v => checked.has(v)).length;
+  el.querySelector('.tp-list').innerHTML = shown.length ? `
+    <label class="tp-all"><input type="checkbox" data-tp-all ${on === shown.length ? 'checked' : ''} />${q.trim() ? '(Select all search results)' : '(Select all)'}</label>
+    ${shown.map((v, i) => `<label title="${escAttr(showVal(c, v))}"><input type="checkbox" data-tp-i="${i}" ${checked.has(v) ? 'checked' : ''} /><span${v === '' ? ' class="tp-blank"' : ''}>${escAttr(showVal(c, v))}</span></label>`).join('')}`
+    : '<p class="tp-none">No matches</p>';
+  const all = el.querySelector('[data-tp-all]');
+  if (all) all.indeterminate = on > 0 && on < shown.length;
+  el.querySelector('[data-tp="ok"]').disabled = !on;
+}
+function applyPopFilter() {
+  const { t, c, choices, checked } = tablePop;
+  const keep = (tablePop.q.trim() ? popShown() : choices).filter(v => checked.has(v));
+  if (!keep.length) return;
+  if (keep.length === choices.length) delete t.filters[c.key]; else t.filters[c.key] = keep;
+  closeTablePop();
+  updateHeadState(t);
+  t.onChange();
+}
+
+function openColMenu(t, key, x, y) {
+  const c = tableCol(t, key);
+  const sel = sizingTargets(t, key);
+  const n = sel.length;
+  const el = newPop('tp-menu');
+  el.innerHTML = `${sortItems(t, c)}
+    <button type="button" class="tp-item" data-tp="filter"><span class="tp-ic">${FILTER_FUNNEL}</span>Filter…</button>
+    <hr />
+    <button type="button" class="tp-item" data-tp="autofit"><span class="tp-ic">↔</span>Autofit ${n > 1 ? `${n} columns` : 'column width'}</button>
+    <button type="button" class="tp-item" data-tp="distribute"><span class="tp-ic">⇹</span>Distribute ${n > 1 ? `${n} columns` : 'all columns'} evenly</button>
+    <button type="button" class="tp-item" data-tp="fitwin"><span class="tp-ic">⇔</span>Fit all columns to window</button>
+    <button type="button" class="tp-item" data-tp="resetw"><span class="tp-ic"></span>Reset column widths</button>
+    <hr />
+    <button type="button" class="tp-item" data-tp="reseto" ${t.order[orderKey(t)] ? '' : 'disabled'}><span class="tp-ic"></span>Reset column order</button>`;
+  tablePop = { t, c, menu: true, sel };
+  wirePop(el);
+  placePop(el, x, y);
+}
+
+function wirePop(el) {
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tp]');
+    if (!b || b.disabled || !tablePop) return;
+    const { t, c } = tablePop;
+    const act = b.dataset.tp;
+    if (act === 'ok') return applyPopFilter();
+    if (act === 'filter') {
+      const btn = tableEl(t).querySelector(`[data-colmenu="${c.key}"]`);
+      return openFilterPop(t, c.key, btn);
+    }
+    const sel = tablePop.sel;
+    closeTablePop();
+    if (act === 'asc') setSort(t, c.key, 1);
+    else if (act === 'desc') setSort(t, c.key, -1);
+    else if (act === 'unsort') setSort(t, null);
+    else if (act === 'clear') { delete t.filters[c.key]; updateHeadState(t); t.onChange(); }
+    else if (act === 'autofit') autofitCols(t, sel);
+    else if (act === 'distribute') distributeCols(t, sel.length > 1 ? sel : t.cols().filter(x => !x.fixed));
+    else if (act === 'fitwin') fitColsToWindow(t);
+    else if (act === 'resetw') resetWidths(t);
+    else if (act === 'reseto') { delete t.order[orderKey(t)]; saveTablePrefs(t); renderTableHead(t); t.onChange(); }
+  });
+  el.addEventListener('input', (e) => {
+    if (!e.target.matches('.tp-search')) return;
+    tablePop.q = e.target.value;
+    renderPopList();
+  });
+  el.addEventListener('change', (e) => {
+    if (!tablePop?.choices) return;
+    const shown = popShown();
+    if (e.target.matches('[data-tp-all]')) for (const v of shown) e.target.checked ? tablePop.checked.add(v) : tablePop.checked.delete(v);
+    else if (e.target.dataset.tpI != null) {
+      const v = shown[+e.target.dataset.tpI];
+      e.target.checked ? tablePop.checked.add(v) : tablePop.checked.delete(v);
+    }
+    renderPopList();
+  });
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); closeTablePop(); }
+    else if (e.key === 'Enter' && tablePop?.choices && !e.target.matches('button')) { e.preventDefault(); applyPopFilter(); }
+  });
+}
+
+/* column selection, like clicking Excel's column letters */
+function selectCol(t, key, e) {
+  const keys = movableKeys(t);
+  if (e.shiftKey && t.anchor && keys.includes(t.anchor)) {
+    const [a, b] = [keys.indexOf(t.anchor), keys.indexOf(key)].sort((x, y) => x - y);
+    if (!(e.metaKey || e.ctrlKey)) t.colSel.clear();
+    keys.slice(a, b + 1).forEach(k => t.colSel.add(k));
+  } else if (e.metaKey || e.ctrlKey) {
+    t.colSel.has(key) ? t.colSel.delete(key) : t.colSel.add(key);
+    t.anchor = key;
+  } else {
+    t.colSel = new Set([key]);
+    t.anchor = key;
+  }
+  updateHeadState(t);
+}
+function clearColSel(t) {
+  if (!t.colSel.size) return;
+  t.colSel.clear();
+  updateHeadState(t);
+}
+
+/* moving columns: drag a heading; a line shows where it will go */
+function startColMove(t, e, th) {
+  const key = th.dataset.col, x0 = e.clientX;
+  const wrap = tableEl(t).closest('.table-wrap');
+  let drag = null;
+  const begin = () => {
+    if (!t.colSel.has(key)) { t.colSel = new Set([key]); t.anchor = key; updateHeadState(t); }
+    const moving = movableKeys(t).filter(k => t.colSel.has(k));
+    const ghost = document.createElement('div');
+    ghost.className = 'col-drag-ghost';
+    ghost.textContent = moving.map(k => colLabel(tableCol(t, k))).join(', ');
+    const mark = document.createElement('div');
+    mark.className = 'col-drop-mark';
+    document.body.append(ghost, mark);
+    document.body.classList.add('col-moving');
+    return { moving, ghost, mark, gap: null };
+  };
+  const move = (ev) => {
+    if (!drag && Math.abs(ev.clientX - x0) < 5) return;
+    drag ||= begin();
+    const wr = wrap.getBoundingClientRect();
+    if (ev.clientX > wr.right - 30) wrap.scrollLeft += 18;
+    else if (ev.clientX < wr.left + 30) wrap.scrollLeft -= 18;
+    drag.ghost.style.left = `${ev.clientX + 10}px`;
+    drag.ghost.style.top = `${ev.clientY + 12}px`;
+    const ths = movableKeys(t).map(k => tableEl(t).querySelector(`thead th[data-col="${k}"]`)?.getBoundingClientRect()).filter(Boolean);
+    if (!ths.length) return;
+    drag.gap = ths.filter(r => r.left + r.width / 2 < ev.clientX).length;
+    const x = drag.gap < ths.length ? ths[drag.gap].left : ths.at(-1).right;
+    const top = ths[0].top;
+    drag.mark.style.left = `${Math.max(wr.left, Math.min(wr.right, x)) - 1}px`;
+    drag.mark.style.top = `${top}px`;
+    drag.mark.style.height = `${Math.min(wr.bottom, tableEl(t).getBoundingClientRect().bottom) - top}px`;
+  };
+  const up = (ev) => {
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    removeEventListener('pointercancel', up);
+    if (!drag) return ev.type === 'pointerup' && selectCol(t, key, ev);
+    drag.ghost.remove();
+    drag.mark.remove();
+    document.body.classList.remove('col-moving');
+    if (ev.type !== 'pointerup' || drag.gap == null) return;
+    const keys = movableKeys(t);
+    const before = keys.slice(drag.gap).find(k => !drag.moving.includes(k)) ?? null;
+    const rest = keys.filter(k => !drag.moving.includes(k));
+    rest.splice(before == null ? rest.length : rest.indexOf(before), 0, ...drag.moving);
+    if (rest.join() === keys.join()) return;
+    t.order[orderKey(t)] = rest;
+    saveTablePrefs(t);
+    renderTableHead(t);
+    t.onChange();
+  };
+  // On the window, so a redraw of the heading mid-drag (e.g. a live update) can't strand it.
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+  addEventListener('pointercancel', up);
+}
+
+function startColResize(t, e, handle) {
+  e.preventDefault();
+  const key = handle.dataset.resize;
+  const targets = sizingTargets(t, key);
+  const startX = e.clientX, startW = colWidth(t, t.cols().find(c => c.key === key));
+  // The columns change; the ones to their right move along with the edge.
+  document.body.classList.add('col-resizing');
+  handle.closest('th').classList.add('resizing');
+  showWidthTip(e, startW, targets.length);
+  const move = (ev) => {
+    const w = Math.max(MIN_COL_W, Math.round(startW + ev.clientX - startX));
+    for (const c of targets) t.widths[widthKey(c)] = w;
+    applyTableWidths(t);
+    showWidthTip(ev, w, targets.length);
+  };
+  const up = () => {
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    removeEventListener('pointercancel', up);
+    document.body.classList.remove('col-resizing');
+    tableEl(t).querySelector('th.resizing')?.classList.remove('resizing');
+    hideWidthTip();
+    saveTablePrefs(t);
+  };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+  addEventListener('pointercancel', up);
+}
 
 function wireTable(t) {
   const head = tableEl(t).querySelector('thead');
-  head.addEventListener('click', (e) => {
-    if (e.target.closest('.col-resizer, [data-filter]')) return;
-    const th = e.target.closest('[data-sort]');
-    if (!th) return;
-    const key = th.dataset.sort;
-    // cycle: ascending → descending → off
-    if (t.sort.key !== key) t.sort = { key, dir: 1 };
-    else if (t.sort.dir > 0) t.sort.dir = -1;
-    else t.sort = { key: null, dir: 1 };
-    saveTablePrefs(t);
-    updateSortIndicators(t);
-    t.onChange();
-  });
-  head.addEventListener('input', (e) => {
-    const key = e.target.dataset.filter;
-    if (!key) return;
-    const v = e.target.value.trim();
-    if (v) t.filters[key] = v; else delete t.filters[key];
-    t.onChange();
-  });
   head.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
     const handle = e.target.closest('[data-resize]');
-    if (!handle) return;
+    if (handle) return startColResize(t, e, handle);
+    const th = e.target.closest('th[data-col]');
+    if (!th || e.target.closest('[data-colmenu]')) return;
     e.preventDefault();
-    const cols = t.cols();
-    const c = cols.find(x => x.key === handle.dataset.resize);
-    const startX = e.clientX, startW = colWidth(t, c);
-    // Only this column changes; the ones to its right move along with its edge.
-    handle.setPointerCapture(e.pointerId);
-    document.body.classList.add('col-resizing');
-    handle.closest('th').classList.add('resizing');
-    showWidthTip(e, startW);
-    const move = (ev) => {
-      const w = Math.max(MIN_COL_W, Math.round(startW + ev.clientX - startX));
-      t.widths[c.wkey || c.key] = w;
-      applyTableWidths(t);
-      showWidthTip(ev, w);
-    };
-    const up = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', up);
-      handle.removeEventListener('pointercancel', up);
-      document.body.classList.remove('col-resizing');
-      handle.closest('th')?.classList.remove('resizing');
-      hideWidthTip();
-      saveTablePrefs(t);
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', up);
-    handle.addEventListener('pointercancel', up);
+    closeTablePop();
+    startColMove(t, e, th);
+  });
+  head.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-colmenu]');
+    if (!b) return;
+    if (tablePop?.choices && tablePop.t === t && tablePop.c.key === b.dataset.colmenu) return closeTablePop();
+    openFilterPop(t, b.dataset.colmenu, b);
+  });
+  head.addEventListener('contextmenu', (e) => {
+    const th = e.target.closest('th[data-col]');
+    if (!th) return;
+    e.preventDefault();
+    if (!t.colSel.has(th.dataset.col)) { t.colSel = new Set([th.dataset.col]); t.anchor = th.dataset.col; updateHeadState(t); }
+    openColMenu(t, th.dataset.col, e.clientX, e.clientY);
   });
   head.addEventListener('dblclick', (e) => {
     const handle = e.target.closest('[data-resize]');
-    if (!handle) return;
-    const c = t.cols().find(x => x.key === handle.dataset.resize);
-    t.widths[c.wkey || c.key] = fitColumn(t, c);
-    applyTableWidths(t);
-    saveTablePrefs(t);
+    if (handle) autofitCols(t, sizingTargets(t, handle.dataset.resize));
   });
+  // Clicking anywhere else lets go of the selected columns and closes the menu.
+  document.addEventListener('pointerdown', (e) => {
+    if (tablePop && !e.target.closest('#tbl-pop, [data-colmenu]')) closeTablePop();
+    if (!head.contains(e.target)) clearColSel(t);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (tablePop) closeTablePop(); else clearColSel(t);
+  });
+  tableEl(t).closest('.table-wrap').addEventListener('scroll', () => { if (tablePop?.t === t) closeTablePop(); });
 }
 
 /* ---- items grid ---- */
 
-const opts = (values) => () => values.map(v => [v, v]);
+// How an item reads in a filter list; one that's gone shows its number.
+const itemShow = (id) => { const m = itemById(id); return m ? fullLabel(m) : `#${id}`; };
+const byItemRef = (a, b) => { const ma = itemById(a), mb = itemById(b); return ma && mb ? cmpRef(ma, mb) : !ma - !mb; };
 const GRID_COLS = [
   { key: 'sel', label: '', w: 36, fixed: true, head: () => `<input type="checkbox" id="grid-sel-all" title="Select all shown" />` },
-  { key: 'title', label: 'Title', w: 200, filter: 'text' },
-  { key: 'description', label: 'Description', w: 220, filter: 'text' },
-  { key: 'ref', label: 'Ref', w: 80, filter: 'text' },
-  { key: 'status', label: 'RAG', w: 125, filter: () => STATUSES.map(v => [v, v]) },
-  { key: 'start', label: 'Start', w: 135, filter: 'text' },
-  { key: 'end', label: 'End', w: 135, filter: 'text' },
-  { key: 'top_level', label: 'Top level', w: 90, title: 'Under change control', filter: () => [['yes', 'Yes']] },
-  { key: 'parent', label: 'Rolls up to', w: 170, filter: 'text' },
-  { key: 'type', label: 'Type', w: 130, title: 'A single date (shape) or a date range (bar)', filter: () => [['milestone', T.Milestone], ['task', T.Task]] },
-  { key: 'swimlane', label: 'Swimlane', w: 120, filter: 'text' },
-  { key: 'owner', label: 'Owner', w: 120, filter: 'text' },
-  { key: 'deps', label: 'Depends on', w: 190, filter: 'text' },
-  { key: 'gitlab_url', label: 'GitLab URL', w: 200, filter: 'text' },
-  { key: 'use_case_url', label: 'Use case URL', w: 200, filter: 'text' },
-  { key: 'subswimlane', label: 'Sub-swimlane', w: 120, filter: 'text' },
-  { key: 'id', label: 'ID', w: 64, title: 'Primary key — assigned automatically, never changes', filter: 'text' },
-  { key: 'shape', label: 'Shape', w: 100, filter: opts(SHAPES) },
+  { key: 'title', label: 'Title', w: 200 },
+  { key: 'description', label: 'Description', w: 220 },
+  { key: 'ref', label: 'Ref', w: 80 },
+  { key: 'status', label: 'RAG', w: 125, kind: 'status' },
+  { key: 'start', label: 'Start', w: 135, kind: 'date', show: fmtNice },
+  { key: 'end', label: 'End', w: 135, kind: 'date', show: fmtNice },
+  { key: 'parent', label: 'Rolls up to', w: 170, show: itemShow, order: byItemRef, blank: '(None)' },
+  { key: 'type', label: 'Type', w: 170, title: 'A single date (diamond; top level ones are under change control and ringed) or a date range (bar)', show: typeLabel },
+  { key: 'swimlane', label: 'Swimlane', w: 120 },
+  { key: 'owner', label: 'Owner', w: 120 },
+  { key: 'deps', label: 'Depends on', w: 190, show: itemShow, order: byItemRef, blank: '(None)' },
+  { key: 'gitlab_url', label: 'GitLab URL', w: 200 },
+  { key: 'use_case_url', label: 'Use case URL', w: 200 },
+  { key: 'subswimlane', label: 'Sub-swimlane', w: 120 },
+  { key: 'id', label: 'ID', w: 64, title: 'Primary key — assigned automatically, never changes', kind: 'number' },
   { key: 'actions', label: '', w: 40, fixed: true },
 ];
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
 const QUICK_COLS = {
   sel: {}, title: { w: 180 }, ref: { w: 70 }, status: { w: 205, wkey: 'status.compact' }, start: { w: 130 }, end: { w: 130 },
-  type: { w: 120 }, owner: { w: 130 }, id: { w: 56 }, actions: { w: 90, wkey: 'actions.quick' },
+  type: { w: 160 }, owner: { w: 130 }, id: { w: 56 }, actions: { w: 90, wkey: 'actions.quick' },
 };
 
 const grid = makeTable({
   table: 'editor-table',
   store: 'milestone-tracker.grid',
   mode: 'quick',
+  rows: () => state.items,
   cols: () => (grid.mode === 'quick'
     ? Object.entries(QUICK_COLS).map(([k, o]) => ({ ...GRID_COLS.find(c => c.key === k), ...o }))
     : GRID_COLS),
@@ -2919,15 +3237,6 @@ function gridValue(m, key, byId) {
   }
 }
 
-function matchesFilter(m, key, f, byId) {
-  if (!f) return true;
-  const col = GRID_COLS.find(c => c.key === key);
-  if (col.filter !== 'text') return m[key] === f;
-  let text = String(gridValue(m, key, byId));
-  if ((key === 'start' || key === 'end') && m[key]) text += ' ' + fmtNice(m[key]);
-  return text.toLowerCase().includes(f.toLowerCase());
-}
-
 // Rows to show: [{ m, i }] where i is the item's index in state.items.
 // While editing (keepOrder) the rows stay where they are, like a spreadsheet: an edited row
 // doesn't jump to its new sort position or vanish from a filter, and new items go at the bottom.
@@ -2944,7 +3253,7 @@ function gridRows(keepOrder) {
     const byId = new Map(state.items.map(m => [m.id, m]));
     rows = sortRows(grid, state.items
       .map((m, i) => ({ m, i }))
-      .filter(({ m }) => Object.entries(grid.filters).every(([k, f]) => matchesFilter(m, k, f, byId))),
+      .filter(({ m }) => passesFilters(grid, m)),
     (r, key) => gridValue(r.m, key, byId), (a, b) => a.i - b.i);
   }
   gridOrder = rows.map(r => r.m.id);
@@ -3034,13 +3343,11 @@ function renderEditor(highlight = [], keepOrder = false) {
       owner: `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
       gitlab_url: `<input data-i="${i}" data-k="gitlab_url" type="url" value="${escAttr(m.gitlab_url)}" placeholder="https://…" />`,
       use_case_url: `<input data-i="${i}" data-k="use_case_url" type="url" value="${escAttr(m.use_case_url)}" placeholder="https://…" />`,
-      top_level: `<input data-i="${i}" data-k="top_level" type="checkbox" ${m.top_level === 'yes' ? 'checked' : ''} ${task ? `disabled title="Only ${escAttr(T.milestones)} can be top level"` : 'title="Under change control"'} />`,
       start: `<input data-i="${i}" data-k="start" type="date" value="${escAttr(m.start)}"${dateTitle} />`,
       end: `<input data-i="${i}" data-k="end" type="date" value="${escAttr(m.end)}"${late || clash ? ` class="${late ? 'late' : 'clash'}" title="${escAttr([
         late && lateText(m), clash && `Flagged: ends ${daysText(clash.gap)} after ${fullLabel(clash.p)}, which it rolls up to`].filter(Boolean).join(' · '))}"` : dateTitle} />`,
       status: quick ? `<div class="rag-pick sm compact">${ragButtons(m.status, `data-i="${i}"`)}</div>`
         : `<select data-i="${i}" data-k="status" class="status-sel" style="color:${pal(m.status).dark}">${statusOptions(m.status)}</select>`,
-      shape: `<select data-i="${i}" data-k="shape" ${task ? `disabled title="${escAttr(T.Tasks)} are drawn as bars"` : ''}>${optionList(SHAPES, m.shape)}</select>`,
       parent: `<select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select>`,
       deps: `<div class="deps">${chips}<select data-adddep="${i}" class="add-dep"><option value="">+ add</option>${depOpts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select></div>`,
       actions: quick ? `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this ${escAttr(T.item)}">Report…</button>`
@@ -3056,6 +3363,7 @@ function renderEditor(highlight = [], keepOrder = false) {
     body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">${state.items.length ? `No ${escAttr(T.items)} match the filters.` : `No ${escAttr(T.items)} in this workspace yet. Use <b>+ Add ${escAttr(T.item)}</b> to create one.`}</td></tr>`;
   }
 
+  updateHeadState(grid);
   const filtered = Object.keys(grid.filters).length > 0;
   document.getElementById('grid-count').textContent = filtered
     ? `Showing ${rows.length} of ${state.items.length}`
@@ -3121,19 +3429,12 @@ function onEditorChange(e) {
 
   if (k === 'type') {
     syncEditorToState(t);
-    return applyTableChange(m, { type: t.value }, `${itemLabel(m)} is now ${withArticle(t.value === 'task' ? T.task : T.milestone)}`);
+    return applyTableChange(m, { type: t.value }, `${itemLabel(m)} is now ${withArticle(typeLabel(t.value).toLowerCase())}`);
   }
 
   if (k === 'parent') {
     syncEditorToState(t);
     return applyTableChange(m, { parent: t.value });
-  }
-
-  if (k === 'top_level') {
-    syncEditorToState(t);
-    const on = t.checked;
-    return applyTableChange(m, { top_level: on ? 'yes' : '' },
-      `${itemLabel(m)} is ${on ? 'now' : 'no longer'} a top level ${T.milestone}`);
   }
 
   if (k === 'start' || k === 'end') {
@@ -3200,7 +3501,7 @@ let bulkField = 'status';
 
 const BULK_FIELDS = () => [
   ['status', 'RAG'], ['owner', 'Owner'], ['swimlane', 'Swimlane'], ['subswimlane', 'Sub-swimlane'],
-  ['type', 'Type'], ['shape', 'Shape'], ['parent', 'Rolls up to'], ['shift', 'Dates — move by'],
+  ['type', 'Type'], ['parent', 'Rolls up to'], ['shift', 'Dates — move by'],
 ];
 const selectedItems = () => state.items.filter(m => gridSel.has(m.id));
 
@@ -3234,7 +3535,6 @@ function bulkValueControl() {
     case 'swimlane': return '<span>to</span><input id="bulk-input" list="lane-list" placeholder="Swimlane" />';
     case 'subswimlane': return `<span>to</span>${lanes('sublane-list')}`;
     case 'type': return `<span>to</span><select id="bulk-input">${typeOptions('milestone')}</select>`;
-    case 'shape': return `<span>to</span><select id="bulk-input">${optionList(SHAPES)}</select>`;
     case 'parent': return `<span>to</span><select id="bulk-input"><option value="">— none —</option>${state.items.filter(m => !isTask(m)).sort(cmpRef)
       .map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select>`;
     case 'shift': return '<input id="bulk-input" type="number" step="1" value="7" /><span>days (negative for earlier)</span>';
@@ -3503,7 +3803,7 @@ function renderQuick() {
   document.getElementById('quick').innerHTML = `
     <form class="q-form" novalidate>
     <div class="q-head">
-      <span class="type-badge ${task ? 'task' : 'ms'}">${escAttr(task ? T.Task : T.Milestone)}</span>
+      <span class="type-badge ${task ? 'task' : isTopLevel(m) ? 'ms tl' : 'ms'}">${escAttr(typeName(m))}</span>
       <span class="q-title">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>
       <button type="button" class="dlg-close" data-act="cancel" title="Close without saving (Esc)">✕</button>
     </div>
@@ -3513,7 +3813,7 @@ function renderQuick() {
       <div>
         <div class="q-label">Type</div>
         <div class="q-type" role="group" aria-label="Type">${TYPES.map(t => `
-          <button type="button" data-type="${t}" aria-pressed="${t === d.type}" title="${t === 'task' ? 'A date range, drawn as a bar' : 'A single date, drawn as a shape'}">${escAttr(t === 'task' ? T.Task : T.Milestone)}</button>`).join('')}</div>
+          <button type="button" data-type="${t}" aria-pressed="${t === d.type}" title="${t === 'task' ? 'A date range, drawn as a bar' : t === 'top' ? 'A single date under change control, drawn as a ringed diamond' : 'A single date, drawn as a diamond'}">${escAttr(typeLabel(t))}</button>`).join('')}</div>
       </div>
       <div class="q-dates">
         ${task
@@ -4266,31 +4566,23 @@ function rerenderCurrentView() {
 
 const itemName = (id) => { const m = itemById(id); return m ? fullLabel(m) : `Deleted ${T.item} #${id}`; };
 
-// The item filter lists everything that has reports (plus a filtered-on item without any), in ref order.
-function reportItemOptions() {
-  const ids = new Set(state.reports.map(r => r.item_id));
-  if (rptTable.filters.item_id) ids.add(rptTable.filters.item_id);
-  return [...ids]
-    .sort((a, b) => { const ma = itemById(a), mb = itemById(b); return ma && mb ? cmpRef(ma, mb) : !ma - !mb; })
-    .map(id => [id, itemName(id)]);
-}
-
-// `text` is what a text filter searches; `sort` is the value the column sorts by.
+// `sort` is the value the column sorts by; `vals` what its filter list offers (a time by its day).
+const stampDay = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : fmtISO(d); };
 const RPT_COLS = [
-  { key: 'period_end', label: 'Period ending', w: 150, filter: 'text', text: r => `${r.period_end} ${fmtNice(r.period_end)} ${periodText(r)}` },
-  { key: 'item_id', label: () => T.Item, w: 230, filter: reportItemOptions, sort: r => itemById(r.item_id) || null },
-  { key: 'cadence', label: 'Cadence', w: 115, filter: opts(CADENCES), sort: r => CADENCES.indexOf(r.cadence) },
-  { key: 'status', label: 'RAG', w: 120, filter: () => STATUSES.map(v => [v, v]) },
-  { key: 'exec_summary', label: 'Exec summary', w: 420, filter: 'text', text: r => `${r.exec_summary} ${r.get_to_green ? 'get to green' : ''}` },
-  { key: 'author', label: 'Author', w: 130, filter: 'text' },
-  { key: 'created', label: 'Created', w: 120, filter: 'text', text: r => fmtStamp(r.created) },
-  { key: 'updated', label: 'Last updated', w: 120, filter: 'text', text: r => fmtStamp(r.updated) },
+  { key: 'period_end', label: 'Period ending', w: 150, kind: 'date', show: fmtNice },
+  { key: 'item_id', label: () => T.Item, w: 230, sort: r => itemById(r.item_id) || null, show: itemName, order: byItemRef },
+  { key: 'cadence', label: 'Cadence', w: 115, sort: r => CADENCES.indexOf(r.cadence), order: (a, b) => CADENCES.indexOf(a) - CADENCES.indexOf(b) },
+  { key: 'status', label: 'RAG', w: 120, kind: 'status' },
+  { key: 'exec_summary', label: 'Exec summary', w: 420, vals: r => mdToText(r.exec_summary) },
+  { key: 'author', label: 'Author', w: 130 },
+  { key: 'created', label: 'Created', w: 120, kind: 'date', vals: r => stampDay(r.created), show: fmtNice },
+  { key: 'updated', label: 'Last updated', w: 120, kind: 'date', vals: r => stampDay(r.updated), show: fmtNice },
 ];
 
 // With the preview open the list keeps to what identifies a report; the pane shows the rest.
 const PREVIEW_HIDDEN = ['cadence', 'exec_summary'];
 const rptTable = makeTable({
-  table: 'reports-table', store: 'milestone-tracker.reports-grid', onChange: () => renderReports(),
+  table: 'reports-table', store: 'milestone-tracker.reports-grid', onChange: () => renderReports(), rows: () => state.reports,
   cols: () => (rptPreview ? RPT_COLS.filter(c => !PREVIEW_HIDDEN.includes(c.key)) : RPT_COLS),
 });
 let rptSearch = ''; // free-text search across every report field, from the toolbar
@@ -4302,7 +4594,7 @@ function clearReportFilters() {
 
 function showReportsFor(itemId) {
   clearReportFilters();
-  rptTable.filters.item_id = itemId;
+  rptTable.filters.item_id = [itemId];
   switchView('reports');
 }
 
@@ -4314,11 +4606,7 @@ const reportDefaultOrder = (a, b) => b.period_end.localeCompare(a.period_end)
 function filteredReports() {
   const q = rptSearch.trim().toLowerCase();
   const rows = state.reports.filter(r =>
-    Object.entries(rptTable.filters).every(([k, f]) => {
-      const c = RPT_COLS.find(x => x.key === k);
-      if (c.filter !== 'text') return r[k] === f;
-      return (c.text ? c.text(r) : r[k]).toLowerCase().includes(f.toLowerCase());
-    })
+    passesFilters(rptTable, r)
     && (!q || [itemName(r.item_id), r.exec_summary, r.achievements, r.next_steps, r.get_to_green, r.author].join(' ').toLowerCase().includes(q)));
   const valueOf = (r, key) => {
     const c = RPT_COLS.find(x => x.key === key);
@@ -4432,7 +4720,7 @@ function renderReports() {
     document.getElementById('btn-rp-orphans').hidden = true;
     return renderDue();
   }
-  refreshSelectFilters(rptTable);
+  updateHeadState(rptTable); // filters can be set from elsewhere, e.g. "All reports on this item"
   const qEl = document.getElementById('rpf-q');
   if (document.activeElement !== qEl) qEl.value = rptSearch; // don't disturb the caret while typing
 
@@ -4549,7 +4837,7 @@ function renderPane(focusKey) {
   const item = `
     <div class="pane-item">
       <div class="pane-item-title">${m ? `${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted ${escAttr(T.item)} #${escAttr(r.item_id)}</i>`}</div>
-      ${rptTable.filters.item_id === r.item_id || n < 2 ? ''
+      ${filterValue(rptTable, 'item_id') === r.item_id || n < 2 ? ''
         : `<button type="button" class="link-btn" data-pane="item">All ${n} reports on this ${escAttr(T.item)}</button>`}
     </div>`;
   const edited = r.updated !== r.created ? `<small>Last edited ${fmtStamp(r.updated)}</small>` : '';
@@ -4761,7 +5049,7 @@ function onPaneClick(e) {
     const r = selectedReport();
     if (!leavePaneEdit()) return;
     clearReportFilters();
-    rptTable.filters.item_id = r.item_id;
+    rptTable.filters.item_id = [r.item_id];
     renderTableHead(rptTable);
     return renderReports();
   }
@@ -4878,7 +5166,7 @@ function wireReports() {
 
   document.getElementById('btn-reports-csv').onclick = downloadReportsCSV;
   document.getElementById('btn-new-report').onclick = () => {
-    if (leavePaneEdit()) openReportDialog({ itemId: rptTable.filters.item_id || '' });
+    if (leavePaneEdit()) openReportDialog({ itemId: filterValue(rptTable, 'item_id') });
   };
   // With the preview open a click selects the report and a double-click edits it there;
   // without it, a click opens the report form.
@@ -4914,7 +5202,7 @@ function itemsExportCSV(items) {
   const lines = [EXPORT_COLUMNS.join(',')];
   for (const m of items) {
     lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
-      m.status, m.shape, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url, m.top_level].map(csvEscape).join(','));
+      m.status, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
 }
@@ -4956,13 +5244,13 @@ function downloadReportsCSV() {
 // added, updated, deleted or skipped before anything is saved. Blank cells leave an existing
 // item's value alone. Links (rolls up to, depends on) name an item by its ref.
 
-const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'shape', 'parent', 'deps',
+const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'parent', 'deps',
   'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url', 'top_level', 'id'];
 const IMPORT_DATES = ['start', 'end', 'baseline_start', 'baseline_end'];
 const importFieldLabel = (k) => ({
-  ref: 'Ref', title: 'Title', type: `Type (${T.milestone} or ${T.task})`, description: 'Description', swimlane: 'Swimlane',
+  ref: 'Ref', title: 'Title', type: `Type (${T.top}, ${T.milestone} or ${T.task})`, description: 'Description', swimlane: 'Swimlane',
   subswimlane: 'Sub-swimlane', owner: 'Owner', start: 'Start date', end: `End date / ${T.milestone} date`, status: 'RAG',
-  shape: 'Shape', parent: 'Rolls up to (ref)', deps: 'Depends on (refs)',
+  parent: 'Rolls up to (ref)', deps: 'Depends on (refs)',
   baseline_start: 'Baseline start', baseline_end: `Baseline end / ${T.milestone} baseline date`, gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
   top_level: `Top level ${T.milestone} (yes or no)`, id: 'ID (used to match links)',
 }[k]);
@@ -4980,7 +5268,6 @@ const IMPORT_ALIASES = {
   end: ['end', 'enddate', 'date', 'due', 'duedate', 'finish', 'finishdate', 'deadline', 'target', 'targetdate', 'to', 'plannedend',
     'plannedfinish', 'forecastend', 'forecastfinish', 'completiondate', 'milestonedate', 'deliverydate'],
   status: ['rag', 'status', 'ragstatus', 'health', 'rating'],
-  shape: ['shape'],
   parent: ['parent', 'parentref', 'parentid', 'rollsupto', 'rollup'],
   deps: ['dependson', 'dependencies', 'dependency', 'deps', 'predecessors', 'predecessor'],
   baseline_start: ['baselinestart', 'baselinestartdate', 'baselinebegin'],
@@ -5076,6 +5363,7 @@ const localDateOrder = () => (/^en-(us|ph)|^(fil|es-us)/i.test(navigator.languag
 function readType(v) {
   const s = v.trim().toLowerCase();
   if (!s) return '';
+  if ([T.top, T.tops].some(w => w.toLowerCase() === s) || /^top ?level( milestones?)?$|^(key|major) milestones?$/.test(s)) return 'top';
   if ([T.task, T.tasks].some(w => w.toLowerCase() === s) || /^(no|n|false)$/.test(s)) return 'task';
   if ([T.milestone, T.milestones].some(w => w.toLowerCase() === s) || /^(yes|y|true)$/.test(s)) return 'milestone';
   if (/^(t|tasks?|bars?|activit(y|ies)|phases?|work ?packages?|ranges?|summary( task)?)$/.test(s)) return 'task';
@@ -5123,7 +5411,6 @@ function planImport() {
 
     for (const k of ['ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner']) if (cell(k)) f[k] = cell(k);
     for (const k in URL_FIELDS) if (cell(k)) f[k] = withScheme(cell(k));
-    if (cell('top_level')) f.top_level = readYes(cell('top_level'));
     if (row.action === 'add' && !f.title) { row.action = 'skip'; row.notes.push('No title'); }
 
     // Dates
@@ -5135,12 +5422,14 @@ function planImport() {
       dates[k] = d || '';
     }
     let type = has('type') ? readType(cell('type')) : '';
-    if (type === null) { row.notes.push(`Type “${cell('type')}” isn't ${withArticle(T.milestone)} or ${withArticle(T.task)}; worked out from the dates`); type = ''; }
+    if (type === null) { row.notes.push(`Type “${cell('type')}” isn't ${withArticle(T.top)}, ${withArticle(T.milestone)} or ${withArticle(T.task)}; worked out from the dates`); type = ''; }
     // Only one date: a new item is a milestone on it, an existing one keeps its type.
     let { start, end } = dates;
     if (start && end && end < start) { [start, end] = [end, start]; row.notes.push('The end date was before the start date, so they were swapped'); }
     if (!type) type = start && end ? (start < end ? 'task' : 'milestone') : t ? t.type : 'milestone';
-    if (type === 'milestone') start = end = end || start || t?.end || '';
+    // A top level column (yes or no) marks a milestone as under change control, or takes it out.
+    if (cell('top_level') && type !== 'task' && !(cell('type') && type === 'top')) type = readYes(cell('top_level')) ? 'top' : 'milestone';
+    if (type !== 'task') start = end = end || start || t?.end || '';
     else {
       start ||= t?.start || end;
       end ||= t?.end || start;
@@ -5161,7 +5450,7 @@ function planImport() {
     }
     if (base.baseline_start || base.baseline_end) {
       let bs = base.baseline_start, be = base.baseline_end;
-      if (type === 'milestone') bs = be = be || bs;
+      if (type !== 'task') bs = be = be || bs;
       else {
         if (bs && be && be < bs) { [bs, be] = [be, bs]; row.notes.push('The baseline end was before the baseline start, so they were swapped'); }
         bs ||= t?.baseline_start || be;
@@ -5181,11 +5470,6 @@ function planImport() {
       }
     } else if (!t) f.status = DEFAULT_STATUS;
     if (!t && !f.swimlane) f.swimlane = 'General';
-    const shape = cell('shape');
-    if (shape) {
-      f.shape = normaliseShape(shape);
-      if (f.shape !== shape.toLowerCase()) row.notes.push(`Shape “${shape}” isn't known; using ${f.shape}`);
-    }
     if (has('parent') && cell('parent')) row.links = { ...row.links, parent: cell('parent') };
     if (has('deps') && cell('deps')) row.links = { ...row.links, deps: readLinks(cell('deps')) };
     row.fileId = cell('id');
@@ -5249,7 +5533,7 @@ async function applyImport() {
       if (!m) {
         m = {
           id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: '', description: '', swimlane: 'General',
-          subswimlane: '', owner: '', start: '', end: '', status: DEFAULT_STATUS, shape: 'diamond', parent: '', deps: [],
+          subswimlane: '', owner: '', start: '', end: '', status: DEFAULT_STATUS, parent: '', deps: [],
         };
         state.items.push(m);
         added++;
@@ -6769,7 +7053,7 @@ function readHash() {
   const q = new URLSearchParams(m[3] || '');
   const filter = {};
   for (const k of ['q', 'lane', 'owner']) if (q.has(k)) filter[k] = q.get(k);
-  if (['milestone', 'task'].includes(q.get('type'))) filter.type = q.get('type');
+  if (TYPES.includes(q.get('type'))) filter.type = q.get('type');
   if (q.get('rag')) filter.rag = q.get('rag').split(',').filter(Boolean);
   if (q.get('late') === '1') filter.late = true;
   return { ws: m[1] ? decodeURIComponent(m[1]) : '', view: m[2], filter: m[2] === 'gantt' && Object.keys(filter).length ? filter : null, item: q.get('item') || '' };
@@ -7164,7 +7448,6 @@ async function loadConfig() {
 
 (async function init() {
   const f = document.getElementById('edit-form').elements;
-  f.shape.innerHTML = optionList(SHAPES);
   document.getElementById('row-slider').value = state.rowH;
   const prefs = loadAppPrefs();
   setNavCollapsed(!!prefs.navCollapsed);

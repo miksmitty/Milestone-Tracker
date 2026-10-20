@@ -334,11 +334,65 @@ tr.shifted td { animation: shifted 2.5s ease-out; }
 
 /* ---------- tables: sort, filter, resize (items grid + reports list) ---------- */
 #editor-table th, #reports-table th { position: relative; white-space: nowrap; }
-th.sortable > span:first-child { display: inline-block; max-width: calc(100% - 14px); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
-th.sortable { cursor: pointer; user-select: none; }
-th.sortable:hover { color: var(--text); }
-th.sorted { color: var(--accent); }
+/* headings work like a spreadsheet's: click selects the column, drag moves it, ▾ sorts and filters */
+th[data-col] { cursor: default; user-select: none; padding-right: 30px !important; }
+th[data-col] .th-label { display: inline-block; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+th[data-col]:hover { color: var(--text); }
+th.sorted, th.filtered { color: var(--accent); }
 .sort-ind { margin-left: 4px; font-size: 9px; }
+.th-menu {
+  position: absolute; right: 7px; top: 50%; transform: translateY(-50%); width: 19px; height: 19px; padding: 0;
+  display: grid; place-items: center; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--panel); color: var(--muted); cursor: pointer;
+}
+.th-menu svg { width: 11px; height: 11px; }
+.th-menu:hover { color: var(--text); border-color: var(--faint-2); }
+th.filtered .th-menu { color: var(--accent); border-color: var(--tint-border); background: var(--tint); }
+th.colsel { background: var(--tint) !important; color: var(--accent); box-shadow: inset 0 -2px var(--accent); }
+col.colsel { background: var(--tint-2); }
+body.col-moving, body.col-moving * { cursor: grabbing !important; user-select: none; }
+.col-drag-ghost {
+  position: fixed; z-index: 210; pointer-events: none; padding: 5px 10px; border-radius: 6px; max-width: 260px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600;
+  background: var(--panel); color: var(--text); border: 1px solid var(--accent); box-shadow: 0 6px 18px rgba(0,0,0,.18); opacity: .95;
+}
+.col-drop-mark { position: fixed; z-index: 205; width: 3px; background: var(--accent); pointer-events: none; border-radius: 2px; }
+/* sort & filter pop-up and the right-click menu */
+.tbl-pop {
+  position: fixed; z-index: 220; display: flex; flex-direction: column; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(28,28,28,.2); font-size: 13px; color: var(--text);
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+}
+.tbl-pop.tp-filter { width: 270px; }
+.tbl-pop.tp-menu { min-width: 230px; }
+.tbl-pop hr { border: 0; border-top: 1px solid var(--line); margin: 5px 2px; }
+.tp-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 8px;
+  border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.tp-item:hover:not(:disabled) { background: var(--hover); }
+.tp-item:disabled { color: var(--faint); cursor: default; }
+.tp-item.on { color: var(--accent); font-weight: 600; }
+.tp-ic { width: 16px; display: inline-grid; place-items: center; color: var(--muted); flex: none; }
+.tp-ic svg { width: 12px; height: 12px; }
+.tp-search {
+  margin: 4px 2px 6px; border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px;
+  font: inherit; font-size: 13px; background: var(--panel); color: var(--text);
+}
+.tp-search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(230,0,0,.12); }
+.tp-list {
+  max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 7px; margin: 0 2px; padding: 4px 0;
+  background: var(--panel-2);
+}
+.tp-list label { display: flex; align-items: center; gap: 7px; padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+.tp-list label span { overflow: hidden; text-overflow: ellipsis; }
+.tp-list label:hover { background: var(--hover); }
+.tp-list input { accent-color: var(--accent); margin: 0; flex: none; }
+.tp-list .tp-all { font-weight: 600; border-bottom: 1px solid var(--line); margin-bottom: 2px; padding-bottom: 5px; }
+.tp-blank { color: var(--muted); font-style: italic; }
+.tp-none { padding: 8px; color: var(--muted); }
+.tp-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 2px 2px; }
 /* 10px grab area centred on the column border; the border lights up on hover and while dragging */
 .col-resizer { position: absolute; top: 0; right: -5px; bottom: 0; width: 10px; cursor: col-resize; z-index: 2; }
 .col-resizer:hover, th.resizing .col-resizer { background: linear-gradient(to right, transparent 4px, var(--accent) 4px, var(--accent) 6px, transparent 6px); }
@@ -351,12 +405,6 @@ th.sorted { color: var(--accent); }
   background: #1c1c1c; color: #fff; font-size: 11.5px; font-weight: 600; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,.2);
 }
 body.col-resizing { cursor: col-resize; user-select: none; }
-:is(#editor-table, #reports-table) .filter-row th { padding: 4px 6px 8px; text-transform: none; letter-spacing: 0; }
-:is(#editor-table, #reports-table) .filter-row :is(input, select) {
-  width: 100%; border: 1px solid var(--border); border-radius: 7px; background: var(--panel);
-  padding: 5px 7px; font-size: 12.5px; font-weight: 400; font-family: inherit; color: var(--text);
-}
-:is(#editor-table, #reports-table) .filter-row input::placeholder { color: var(--faint); }
 .grid-count { font-size: 12.5px; color: var(--muted); }
 
 /* ---------- items: row selection + bulk actions ---------- */
@@ -687,6 +735,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 #editor-table select.type-sel { font-weight: 600; }
 #editor-table select.type-milestone { color: var(--ms); }
 #editor-table select.type-task { color: var(--info); }
+#editor-table select.type-top { color: var(--accent); }
 #editor-table input.late { color: var(--accent); font-weight: 600; }
 /* one-click RAG in the Items grid: the current status as a pill, the others as dots */
 .rag-pick.compact { flex-wrap: nowrap; align-items: center; }
