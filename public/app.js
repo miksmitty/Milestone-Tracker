@@ -5995,6 +5995,7 @@ function openWorkspaceDialog(p) {
   showPgTab('details');
   document.getElementById('pg-heading').textContent = p ? `Edit ${p.name}` : 'New workspace';
   document.getElementById('pg-submit').textContent = p ? 'Save' : 'Create workspace';
+  document.getElementById('pg-history').hidden = !p;
   const del = document.getElementById('pg-delete');
   del.hidden = !p;
   del.disabled = state.workspaces.length < 2;
@@ -6249,6 +6250,31 @@ async function submitWorkspaceDialog(e) {
   await Promise.all(saves);
 }
 
+// Start a workspace's Date history and What changed afresh (see clearHistory in server.js).
+async function clearWorkspaceHistory() {
+  const p = pgEditing;
+  if (!p) return;
+  if (!confirm(`Clear the history of ${p.name}?\n\nIts Date history is emptied and starts again from its ${T.items}’ dates now, and What changed will compare from today. Nothing else changes, and other workspaces keep their history.\n\nThis can’t be undone.`)) return;
+  flushSave();
+  await saveQueue; // so what's on screen is what the history starts from
+  let out;
+  try {
+    const res = await fetch(`api/clear-history?workspace=${encodeURIComponent(p.id)}`, { method: 'POST' });
+    out = await res.json();
+    if (!out.ok) throw new Error(out.error || `the server returned ${res.status}`);
+  } catch (err) {
+    return (document.getElementById('pg-error').textContent = `Couldn’t clear the history (${err.message}). Restart node server.js if the app was updated.`);
+  }
+  chHistory = null;
+  chCache.clear();
+  dlRows = [];
+  dlItem = '';
+  document.getElementById('workspace-dialog').close();
+  rerenderCurrentView();
+  if (isShown('dates')) renderDates();
+  showToast(`History cleared for ${p.name}: ${count(out.removed, 'date log row', 'date log rows')} removed, ${count(out.copies, 'daily copy', 'daily copies')} reset`);
+}
+
 async function deleteWorkspace() {
   const p = pgEditing;
   if (!p || state.workspaces.length < 2) return;
@@ -6307,6 +6333,7 @@ function wireWorkspaces() {
   document.getElementById('pg-cancel').onclick = () => dlg.close();
   document.getElementById('pg-close').onclick = () => dlg.close();
   document.getElementById('pg-delete').onclick = deleteWorkspace;
+  document.getElementById('pg-clear-history').onclick = clearWorkspaceHistory;
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 

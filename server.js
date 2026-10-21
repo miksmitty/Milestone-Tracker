@@ -123,7 +123,8 @@ function serveHistory(pathname, res) {
 // Every change to an item's dates is appended to date-changes.csv, the audit log. The server
 // compares each save of milestones.csv with the file it replaces, so no way of changing a date in
 // the app can skip it, and it compares the file with what it last saw, so edits made to the CSV
-// outside the app are logged too. The log is only ever appended to: nothing in the app rewrites it.
+// outside the app are logged too. The log is only ever appended to, except when a workspace's
+// history is cleared (see clearHistory).
 const AUDIT_FILE = path.join(DATA_DIR, 'date-changes.csv');
 const AUDIT_COLUMNS = ['id', 'at', 'by', 'workspace_id', 'item_id', 'ref', 'title', 'field', 'from', 'to', 'days', 'action', 'via', 'note'];
 const DATE_FIELDS = ['start', 'end', 'baseline_start', 'baseline_end'];
@@ -248,6 +249,75 @@ function auditSave(req, oldText, newText) {
     meta: { by: changedBy(req), via: header('x-change-via'), note: header('x-change-note') },
   }));
   auditKnown = after;
+}
+
+// Clearing a workspace's history — the one time the log is rewritten. For a workspace that's
+// starting afresh (its demo or test data deleted), so what's gone stops showing in Date history
+// and What changed. Its rows leave the date log, which then starts again from its items' dates
+// now (as "Logging started"), and in every daily copy of the items, reports and updates its rows
+// are replaced with today's, so comparing with an earlier day shows no change before today.
+// Other workspaces are untouched. It runs in the items file's save queue, so no save can
+// interleave with it.
+const wsCol = (header) => header.findIndex(h => ['workspace_id', 'program_id', 'programme_id'].includes(h.trim().toLowerCase()));
+function clearHistory(workspaceId, req) {
+  const ds = DATASETS['/api/milestones'];
+  const nowText = decodeCSV(readDataset(ds) || Buffer.from(ds.header));
+  // 1. the date log
+  let removed = 0;
+  let log = '';
+  try { log = decodeCSV(fs.readFileSync(AUDIT_FILE)); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  if (log) {
+    const [header, ...rows] = parseCSV(log);
+    const col = header.indexOf('workspace_id');
+    const keep = rows.filter(r => r[col] !== workspaceId);
+    removed = rows.length - keep.length;
+    fs.writeFileSync(AUDIT_FILE + '.tmp', serialize([header, ...keep]), 'utf8');
+    fs.renameSync(AUDIT_FILE + '.tmp', AUDIT_FILE);
+  }
+  const mine = new Map([...itemsFrom(nowText)].filter(([, m]) => m.workspace_id === workspaceId));
+  appendAudit(dateChanges(new Map(), mine, {
+    added: ACTIONS.started, changed: ACTIONS.started,
+    meta: { by: changedBy(req), via: 'History cleared', note: 'The dates each item had when the workspace’s history was cleared' },
+  }));
+  for (const [id, m] of mine) auditKnown.set(id, m);
+  // 2. the daily copies
+  let copies = 0;
+  let names = [];
+  try { names = fs.readdirSync(BACKUP_DIR); } catch { /* no backups yet */ }
+  for (const file of HISTORY_FILES) {
+    const cur = parseCSV(decodeCSV(readDataset(DATASETS['/api/' + file]) || Buffer.from('')));
+    const [curHeader = [], ...curRows] = cur;
+    const curCol = wsCol(curHeader);
+    const today = curCol < 0 ? [] : curRows.filter(r => r[curCol] === workspaceId);
+    for (const n of names.filter(n => new RegExp(`^${file}\\.\\d{4}-\\d{2}-\\d{2}\\.csv$`).test(n))) {
+      const target = path.join(BACKUP_DIR, n);
+      const [header = [], ...rows] = parseCSV(decodeCSV(fs.readFileSync(target)));
+      const col = wsCol(header);
+      if (col < 0) continue;
+      // today's rows, in this copy's columns (an older copy may have fewer, or older names)
+      const map = header.map(h => curHeader.findIndex(c => c.trim().toLowerCase() === h.trim().toLowerCase()));
+      const fresh = today.map(r => map.map((i, j) => (j === col ? workspaceId : i < 0 ? '' : r[i] ?? '')));
+      const next = [header, ...rows.filter(r => r[col] !== workspaceId), ...fresh];
+      fs.writeFileSync(target + '.tmp', serialize(next), 'utf8');
+      fs.renameSync(target + '.tmp', target);
+      copies++;
+    }
+  }
+  return { removed, copies };
+}
+function serveClearHistory(req, res) {
+  const workspaceId = new URL(req.url, 'http://x').searchParams.get('workspace') || '';
+  if (!/^\d+$/.test(workspaceId)) return sendJSON(res, 400, { ok: false, error: 'which workspace?' });
+  const ds = DATASETS['/api/milestones'];
+  ds.queue = (ds.queue || Promise.resolve()).then(() => new Promise((next) => {
+    ds.busy = true;
+    try { sendJSON(res, 200, { ok: true, ...clearHistory(workspaceId, req) }); } catch (err) {
+      console.error(`Couldn't clear the history: ${err.message}`);
+      sendJSON(res, 500, { ok: false, error: err.message });
+    }
+    ds.busy = false;
+    next();
+  }));
 }
 
 function serveAudit(res) {
@@ -451,6 +521,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname.endsWith('/api/events')) return serveEvents(req, res);
   if (req.method === 'GET' && pathname.endsWith('/api/versions')) return sendJSON(res, 200, currentVersions());
   if (req.method === 'POST' && pathname.endsWith('/api/ids')) return serveIds(req, res);
+  if (req.method === 'POST' && pathname.endsWith('/api/clear-history')) return serveClearHistory(req, res);
   const ds = datasetFor(pathname);
   if (ds) {
     if (req.method === 'GET') {

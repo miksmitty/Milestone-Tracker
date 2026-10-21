@@ -262,7 +262,7 @@
         <tbody id="dl-body"></tbody>
       </table>
     </div>
-    <p class="hint">Every change to a start, end or baseline date is logged here, newest first: who made it, when, from what to what, and how. <b>Knock-on</b> means the dates moved because something they depend on moved. Changes made to <code>milestones.csv</code> outside the app are logged when the app next reads or saves it. The log is kept in <code>date-changes.csv</code>, which the app only ever adds to.</p>
+    <p class="hint">Every change to a start, end or baseline date is logged here, newest first: who made it, when, from what to what, and how. <b>Knock-on</b> means the dates moved because something they depend on moved. Changes made to <code>milestones.csv</code> outside the app are logged when the app next reads or saves it. The log is kept in <code>date-changes.csv</code>, which the app only ever adds to. To start afresh after deleting demo or test data, use <b>Clear history…</b> in Workspace settings.</p>
   </main>
 
   <!-- ============ WORKSPACES VIEW ============ -->
@@ -632,6 +632,10 @@
           <label>A date range<input name="task_term" list="term-task" placeholder="Task" /><small>drawn as a bar</small></label>
           <p id="pg-term-preview" class="pg-term-preview"></p>
         </fieldset>
+        <div id="pg-history" class="span3 pg-history">
+          <div><strong class="pg-history-title">Start the history afresh</strong><span>After deleting demo or test data: clears this workspace’s <b>Date history</b> and makes <b>What changed</b> compare from today, so nothing that’s gone still shows. It can’t be undone.</span></div>
+          <button type="button" id="pg-clear-history" class="btn btn-danger btn-sm">Clear history…</button>
+        </div>
       </div>
       <div id="pg-panel-rag" class="pg-rag" role="tabpanel" hidden>
         <p class="pg-rag-intro">The RAG statuses this workspace uses, in order. They set the colours on the Gantt chart and in its key, the RAG buttons, filters and report form.</p>

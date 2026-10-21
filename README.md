@@ -132,11 +132,15 @@ Every change to an item's dates is logged: its start and end, and its baseline. 
 
 Search by item, person or note, pick a person (once logins are recorded), and tick **Baseline** or **Starting dates** to include those. **Date history** in an item's quick update panel or edit dialog shows just that item. **Download CSV** saves the changes shown.
 
-The log is kept by the server, not the browser: each time milestones.csv is saved it's compared with the file it replaces, so no way of changing a date can skip the log. Edits made to milestones.csv outside the app (in a spreadsheet, say) are noticed and logged, without a name, the next time the app reads or saves the file, or when the server starts. The log lives in [date-changes.csv](date-changes.csv), one row per date field changed, and is only ever added to — nothing in the app edits or deletes it:
+The log is kept by the server, not the browser: each time milestones.csv is saved it's compared with the file it replaces, so no way of changing a date can skip the log. Edits made to milestones.csv outside the app (in a spreadsheet, say) are noticed and logged, without a name, the next time the app reads or saves the file, or when the server starts. The log lives in [date-changes.csv](date-changes.csv), one row per date field changed, and is only ever added to — the one exception is **Clear history** (below), which empties one workspace's part of it:
 
 ```
 id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 ```
+
+#### Starting the history afresh
+
+Deleting items (demo or test data, say) leaves them in the history on purpose: Date history keeps their changes and deletion, and What changed lists them as removed. To start a workspace's history again, use **Workspace settings → Clear history…** (it asks first, and can't be undone). It's the one thing that rewrites the log: the workspace's rows are taken out of date-changes.csv, which then starts again from its items' dates now (*Logging started*, via *History cleared*), and in every daily copy in `backups/` the workspace's items, reports and updates are replaced with today's, so What changed shows no change before today. Other workspaces keep their history. Log ids carry on from where they were, so none is reused.
 
 ### Risks, issues & dependencies
 
