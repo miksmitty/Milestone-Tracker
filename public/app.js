@@ -86,30 +86,32 @@ const GANTT_THEMES = {
     text: '#262626', textTop: '#1c1c1c', sub: '#5a5d5c', muted: '#7a7870', accent: '#e60000', today: '#1c1c1c',
     weekend: '#1c1c1c', weekendOpacity: 0.035, shadow: '#1c1c1c', shadowOpacity: 0.3, baseline: '#a8a69c',
     links: { dep: '#0f8b8d', roll: '#7c3aed' }, // connector colours stay clear of the RAG palette
-    laneAccents: ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'],
+    streamAccents: ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'],
   },
   dark: {
     bg: '#1f1f1d', alt: '#252523', line: '#34342f', strong: '#45443e', tick: '#5d5c55', tierTop: '#2c2c29', tierBottom: '#262624',
     text: '#ecebe4', textTop: '#f4f3ee', sub: '#b3b1a6', muted: '#9a988d', accent: '#ff5a5a', today: '#f4f3ee',
     weekend: '#ffffff', weekendOpacity: 0.03, shadow: '#000000', shadowOpacity: 0.5, baseline: '#8e8d83',
     links: { dep: '#2bb5b0', roll: '#a78bfa' },
-    laneAccents: ['#ff5a5a', '#cccabc', '#8e8d83', '#d0705c', '#5b9bd5', '#cfbd9b', '#7a7870'],
+    streamAccents: ['#ff5a5a', '#cccabc', '#8e8d83', '#d0705c', '#5b9bd5', '#cfbd9b', '#7a7870'],
   },
 };
 let G = GANTT_THEMES.light;
-const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'rag', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url'];
+const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'stream', 'substream', 'owner', 'start', 'end', 'rag', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url'];
 const MS_DAY = 86400000;
 
 const state = {
   statuses: [],         // RAG options: {workspace_id, position, name, color, description, get_to_green, is_default}
   workspaces: [],       // {id, number, name, code, description, owner, lead, start, end, status, trend, item_term, milestone_term, task_term, created, updated}
-  updates: [],          // weekly updates, every workspace: {id, workspace_id, swimlane ('' for the whole program), week_ending, status, summary, author, created, updated}
-  lanes: [],            // swimlane details, every workspace: {workspace_id, name, lead, trend}
+  updates: [],          // weekly updates, every workspace: {id, workspace_id, stream ('' for the whole program), week_ending, status, summary, author, created, updated}
+  streams: [],            // stream details, every workspace: {workspace_id, name, lead, trend}
+  raid: [],             // risks, issues and dependencies, every workspace: {id, workspace_id, kind, ref, title, …, links: ['item:12', 'stream:Design']}
+  raidNotes: [],        // their notes, only ever added to: {id, workspace_id, raid_id, at, by, text}
   lastWorkspaceId: 0,
   workspaceId: '',        // the workspace being viewed
   otherItems: [],       // items of every other workspace, kept so saves write the whole file
   otherReports: [],
-  items: [],            // {id, workspace_id, ref, title, type, description, swimlane, subswimlane, owner, start, end, status, parent, deps[]}
+  items: [],            // {id, workspace_id, ref, title, type, description, stream, substream, owner, start, end, status, parent, deps[]}
   lastId: 0,            // highest id ever issued this session, so ids are never reused
   reports: [],          // {id, workspace_id, item_id, cadence, period_start, period_end, status, exec_summary, achievements, next_steps, get_to_green, author, created, updated}
   lastReportId: 0,
@@ -217,7 +219,7 @@ function csvEscape(v) {
 function toCSV(items) {
   const lines = [COLUMNS.join(',')];
   for (const m of items) {
-    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
+    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.stream, m.substream, m.owner, m.start, m.end,
       m.status, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
@@ -231,8 +233,8 @@ const HEADER_ALIASES = {
   title: ['title', 'name'],
   type: ['type', 'kind', 'itemtype'],
   description: ['description', 'desc'],
-  swimlane: ['swimlane', 'lane'],
-  subswimlane: ['subswimlane', 'sublane'],
+  stream: ['stream'],
+  substream: ['substream'],
   owner: ['owner'],
   start: ['start', 'startdate'],
   end: ['end', 'enddate', 'date'],
@@ -269,8 +271,8 @@ function rowsToItems(rows) {
       ref: get(r, 'ref'),
       title: get(r, 'title'),
       description: get(r, 'description'),
-      swimlane: get(r, 'swimlane') || 'General',
-      subswimlane: get(r, 'subswimlane'),
+      stream: get(r, 'stream') || 'General',
+      substream: get(r, 'substream'),
       owner: get(r, 'owner'),
       start, end,
       status: get(r, 'status'), // normalised once the workspace is known
@@ -356,7 +358,7 @@ async function loadData() {
     synced[file] = { version: r.headers.get('X-Version'), text };
     return text;
   }));
-  const [workspaces, statuses, items, reports, updates, lanes] = texts;
+  const [workspaces, statuses, items, reports, updates, streams, raid, raidNotes] = texts;
   state.workspaces = rowsToWorkspaces(parseAny(workspaces));
   state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
@@ -365,7 +367,9 @@ async function loadData() {
   const allItems = rowsToItems(parseAny(items));
   const allReports = rowsToReports(parseAny(reports), allItems);
   state.updates = rowsToUpdates(parseAny(updates));
-  state.lanes = rowsToLanes(parseAny(lanes));
+  state.streams = rowsToStreams(parseAny(streams));
+  state.raid = rowsToRaid(parseAny(raid));
+  state.raidNotes = rowsToRaidNotes(parseAny(raidNotes));
   dataLoaded = true;
   if (created) await saveWorkspaces();
   state.items = allItems;
@@ -381,6 +385,7 @@ async function loadData() {
 function selectWorkspace(id) {
   const items = [...state.otherItems, ...state.items];
   const reports = [...state.otherReports, ...state.reports];
+  if (id !== state.workspaceId && raidFilter.link) Object.assign(raidFilter, { link: '', status: 'open' }); // it links into the last workspace
   state.workspaceId = id;
   state.items = items.filter(m => m.workspace_id === id);
   state.otherItems = items.filter(m => m.workspace_id !== id);
@@ -433,7 +438,9 @@ const saveReports = (msg) => saveCSV('reports', msg);
 const saveStatuses = (msg) => saveCSV('statuses', msg);
 const saveWorkspaces = (msg) => saveCSV('workspaces', msg);
 const saveUpdates = (msg) => saveCSV('updates', msg);
-const saveLanes = (msg) => saveCSV('swimlanes', msg);
+const saveStreams = (msg) => saveCSV('streams', msg);
+const saveRaid = (msg) => saveCSV('raid', msg);
+const saveRaidNotes = (msg) => saveCSV('raid-notes', msg);
 
 /* ---- working together ---- */
 // Several people can have the app open at once. Each file is held with the version it was read
@@ -470,11 +477,21 @@ const FILES = {
   updates: {
     parse: (t) => rowsToUpdates(parseAny(t)), all: () => state.updates, set: (l) => { state.updates = l; },
     csv: () => updatesToCSV(state.updates), key: (u) => u.id, quiet: ['updated'],
-    name: (u) => `Weekly update for ${[workspaceById(u.workspace_id)?.name, u.swimlane].filter(Boolean).join(' · ')}, w/e ${fmtShort(u.week_ending)}`,
+    name: (u) => `Weekly update for ${[workspaceById(u.workspace_id)?.name, u.stream].filter(Boolean).join(' · ')}, w/e ${fmtShort(u.week_ending)}`,
   },
-  swimlanes: {
-    parse: (t) => rowsToLanes(parseAny(t)), all: () => state.lanes, set: (l) => { state.lanes = l; },
-    csv: () => lanesToCSV(state.lanes), key: (l) => `${l.workspace_id}\u0000${l.name}`, name: (l) => `Swimlane ${l.name}`,
+  streams: {
+    parse: (t) => rowsToStreams(parseAny(t)), all: () => state.streams, set: (l) => { state.streams = l; },
+    csv: () => streamsToCSV(state.streams), key: (l) => `${l.workspace_id}\u0000${l.name}`, name: (l) => `Stream ${l.name}`,
+  },
+  raid: {
+    parse: (t) => rowsToRaid(parseAny(t)), all: () => state.raid, set: (l) => { state.raid = l; },
+    csv: () => raidToCSV(state.raid), key: (r) => r.id, quiet: ['updated'],
+    name: (r) => `${RAID_KINDS[r.kind]?.one || 'Entry'} ${r.ref || `#${r.id}`} ${r.title}`.trim(),
+  },
+  'raid-notes': {
+    parse: (t) => rowsToRaidNotes(parseAny(t)), all: () => state.raidNotes, set: (l) => { state.raidNotes = l; },
+    csv: () => raidNotesToCSV(state.raidNotes), key: (n) => n.id,
+    name: (n) => `Note on ${state.raid.find(r => r.id === n.raid_id)?.ref || 'an entry'}, ${fmtStamp(n.at)}`,
   },
 };
 const FILE_NAMES = Object.keys(FILES); // in the order they depend on each other
@@ -599,6 +616,7 @@ function saveCSV(file, msg, headers = {}) {
         }
         if (!out.ok) throw new Error(out.conflict ? 'others kept changing it at the same time' : out.error || 'server error');
         synced[file] = { version: out.version, text: body };
+        if (out.text) { mergeFile(file, out.text, out.version); afterMerge(); } // the server added to it (signed notes)
         break;
       }
       flashStatus([msg, conflicts.length ? 'Saved, with others’ changes' : 'Saved ✓'].filter(Boolean).join(' · '), true);
@@ -675,10 +693,11 @@ const versionsNow = () => Object.fromEntries(FILE_NAMES.map(f => [f, synced[f]?.
 // What was changed both here and by someone else. Theirs is showing; "Use mine" puts this person's
 // change back (and saves it), which is then just another change for everyone else to receive.
 const FIELD_NAMES = {
-  status: 'RAG', start: 'Start', end: 'End', ref: 'Ref', deps: 'Depends on', parent: 'Rolls up to', subswimlane: 'Sub-swimlane',
+  status: 'RAG', start: 'Start', end: 'End', ref: 'Ref', deps: 'Depends on', parent: 'Rolls up to', substream: 'Sub-stream',
   baseline_start: 'Baseline start', baseline_end: 'Baseline end', gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
   exec_summary: 'Executive summary', next_steps: 'Next steps', get_to_green: 'Get to green plan', period_end: 'Period ending',
   week_ending: 'Week ending', lead: 'Area lead', author: 'Author', number: 'Program number', rows: 'RAG options',
+  likelihood: 'Likelihood', impact: 'Impact', priority: 'Priority', dep_type: 'Dependency type', dep_priorities: 'Dependency priorities', dep_types: 'Dependency types', text: 'Note', due: 'Due', party: 'Other party', response: 'Response', links: 'Linked to', kind: 'Type',
   item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task',
 };
 const fieldName = (k) => FIELD_NAMES[k] || k[0].toUpperCase() + k.slice(1).replace(/_/g, ' ');
@@ -760,7 +779,7 @@ function wireConflicts() {
 // import, a block is fetched so the rest come straight from hand. Ids still in hand when the page
 // closes are never used, so a burst can leave a gap in the numbers. If the server can't be reached,
 // the next number after the highest seen is used.
-const idPool = { workspaces: [], milestones: [], reports: [], updates: [] };
+const idPool = { workspaces: [], milestones: [], reports: [], updates: [], raid: [], 'raid-notes': [] };
 const idLastTaken = {};
 function takeId(file, fallback) {
   const burst = Date.now() - (idLastTaken[file] || 0) < 2000;
@@ -807,15 +826,15 @@ function flashStatus(msg, ok, sticky) {
 // to take back). Undo puts the snapshot back and saves what it changes.
 
 const undoStack = []; // [{ label, snap }], newest last
-const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'lanes'];
-const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', lanes: 'swimlanes' };
+const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes'];
+const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes' };
 
 function snapshotData() {
   syncEditorToState();
   return {
     items: JSON.stringify(allItems()), reports: JSON.stringify(allReports()), updates: JSON.stringify(state.updates),
-    workspaces: JSON.stringify(state.workspaces), statuses: JSON.stringify(state.statuses), lanes: JSON.stringify(state.lanes),
-    workspaceId: state.workspaceId,
+    workspaces: JSON.stringify(state.workspaces), statuses: JSON.stringify(state.statuses), streams: JSON.stringify(state.streams),
+    raid: JSON.stringify(state.raid), raidNotes: JSON.stringify(state.raidNotes), workspaceId: state.workspaceId,
   };
 }
 
@@ -860,7 +879,9 @@ async function undoLast() {
   state.workspaces = back.workspaces;
   state.statuses = back.statuses;
   state.updates = back.updates;
-  state.lanes = back.lanes;
+  state.streams = back.streams;
+  state.raid = back.raid;
+  state.raidNotes = back.raidNotes;
   state.items = []; state.reports = [];
   state.otherItems = back.items;
   state.otherReports = back.reports;
@@ -874,7 +895,7 @@ async function undoLast() {
   showToast(`Undone: ${u.label}${kept ? ' · anything changed again since was left as it is' : ''}`);
   knockOn.clear();
   directEdits.clear();
-  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, lanes: saveLanes };
+  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes };
   await Promise.all(changed.map(k => save[k]('Undone')));
 }
 
@@ -1334,7 +1355,7 @@ function removeItem(id) {
 
 /* ================= gantt rendering ================= */
 
-const MIN_LANE_COL_W = 130;
+const MIN_STREAM_COL_W = 130;
 const MIN_SUB_COL_W = 130;
 const PAD_RIGHT = 30;
 const QUARTER_H = 26;
@@ -1386,12 +1407,12 @@ function rowMetrics() {
   };
 }
 
-// Label columns grow to fit the longest swimlane and sub-swimlane names, so none is cut short.
-const hasSubLanes = () => state.items.some(m => m.subswimlane);
+// Label columns grow to fit the longest stream and sub-stream names, so none is cut short.
+const hasSubStreams = () => state.items.some(m => m.substream);
 const widest = (names, size, weight) => Math.max(0, ...[...new Set(names)].filter(Boolean).map(n => textW(n, size, weight)));
-const laneColWidth = () => Math.ceil(Math.max(hasSubLanes() ? MIN_LANE_COL_W : 170, widest(state.items.map(m => m.swimlane), 14, 700) + 40));
-const subColWidth = () => Math.ceil(Math.max(MIN_SUB_COL_W, widest(state.items.map(m => m.subswimlane), 12, 600) + 24));
-const labelWidth = () => laneColWidth() + (hasSubLanes() ? subColWidth() : 0);
+const streamColWidth = () => Math.ceil(Math.max(hasSubStreams() ? MIN_STREAM_COL_W : 170, widest(state.items.map(m => m.stream), 14, 700) + 40));
+const subColWidth = () => Math.ceil(Math.max(MIN_SUB_COL_W, widest(state.items.map(m => m.substream), 12, 600) + 24));
+const labelWidth = () => streamColWidth() + (hasSubStreams() ? subColWidth() : 0);
 
 function svgEl(tag, attrs, text) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -1444,41 +1465,41 @@ function titleText(attrs, m, refFill, tagFill) {
 // Outside labels get an outline in the background colour so they stay readable over gridlines and arrows.
 const halo = () => ({ 'paint-order': 'stroke', stroke: G.bg, 'stroke-width': 3, 'stroke-linejoin': 'round' });
 
-function layoutLanes(items, xOf, rm, minX, maxX) {
-  // Group by swimlane → sub-swimlane (first-appearance order), then pack each sub-lane into rows.
-  const lanes = [], laneMap = new Map();
-  lanes.maxRight = 0; // rightmost label edge, so the chart can widen to show it whole
+function layoutStreams(items, xOf, rm, minX, maxX) {
+  // Group by stream → sub-stream (first-appearance order), then pack each sub-stream into rows.
+  const streams = [], streamMap = new Map();
+  streams.maxRight = 0; // rightmost label edge, so the chart can widen to show it whole
   for (const m of items) {
-    let lane = laneMap.get(m.swimlane);
-    if (!lane) {
-      lane = { name: m.swimlane, subs: [], subMap: new Map() };
-      laneMap.set(m.swimlane, lane);
-      lanes.push(lane);
+    let stream = streamMap.get(m.stream);
+    if (!stream) {
+      stream = { name: m.stream, subs: [], subMap: new Map() };
+      streamMap.set(m.stream, stream);
+      streams.push(stream);
     }
-    let sub = lane.subMap.get(m.subswimlane);
+    let sub = stream.subMap.get(m.substream);
     if (!sub) {
-      sub = { name: m.subswimlane, items: [] };
-      lane.subMap.set(m.subswimlane, sub);
-      lane.subs.push(sub);
+      sub = { name: m.substream, items: [] };
+      stream.subMap.set(m.substream, sub);
+      stream.subs.push(sub);
     }
     sub.items.push(m);
   }
-  sortLanes(lanes);
+  sortStreams(streams);
   const oneEach = ganttSort.rows !== 'packed';
-  const folded = collapsedLanes();
-  for (const lane of lanes) {
-    if (folded.has(lane.name)) {
-      // folded: one summary row for the whole swimlane
-      const all = lane.subs.flatMap(sub => sub.items);
+  const folded = collapsedStreams();
+  for (const stream of streams) {
+    if (folded.has(stream.name)) {
+      // folded: one summary row for the whole stream
+      const all = stream.subs.flatMap(sub => sub.items);
       for (const m of all) m._row = 0;
-      lane.collapsed = true;
-      lane.count = all.length;
-      lane.subs = [{ name: '', items: all, rows: 1, collapsed: true, h: Math.max(44, rm.h + rm.pad * 2) }];
-      lane.h = lane.subs[0].h;
+      stream.collapsed = true;
+      stream.count = all.length;
+      stream.subs = [{ name: '', items: all, rows: 1, collapsed: true, h: Math.max(44, rm.h + rm.pad * 2) }];
+      stream.h = stream.subs[0].h;
       continue;
     }
-    for (const sub of lane.subs) {
-      // Milestones take the top rows of their sub-lane and the tasks that roll up to them sit
+    for (const sub of stream.subs) {
+      // Milestones take the top rows of their sub-stream and the tasks that roll up to them sit
       // below, so each band is packed on its own.
       sub.items.sort((a, b) => a._task - b._task || (oneEach ? ganttItemOrder(a, b) : a._s - b._s || a._e - b._e));
       const rowEnds = [];
@@ -1513,15 +1534,15 @@ function layoutLanes(items, xOf, rm, minX, maxX) {
         }
         let r = oneEach ? -1 : rowEnds.findIndex((end, i) => i >= bandStart && left - 10 > end);
         if (r < 0) { r = rowEnds.length; rowEnds.push(right); } else rowEnds[r] = right;
-        lanes.maxRight = Math.max(lanes.maxRight, right);
+        streams.maxRight = Math.max(streams.maxRight, right);
         m._row = r;
       }
       sub.rows = Math.max(1, rowEnds.length);
       sub.h = sub.rows * rm.h + rm.pad * 2;
     }
-    lane.h = lane.subs.reduce((a, s) => a + s.h, 0);
+    stream.h = stream.subs.reduce((a, s) => a + s.h, 0);
   }
-  return lanes;
+  return streams;
 }
 
 // Every milestone is a diamond (a top level one also wears a ring, drawn by the caller).
@@ -1579,8 +1600,8 @@ function renderGantt() {
   if (!state.rangeStart) return; // data not loaded yet
 
   const LABEL_W = labelWidth();
-  const LANE_COL_W = laneColWidth();
-  const subCol = hasSubLanes();
+  const STREAM_COL_W = streamColWidth();
+  const subCol = hasSubStreams();
   const rm = rowMetrics();
 
   const items = state.items
@@ -1600,10 +1621,10 @@ function renderGantt() {
   const xOf = (d) => Math.min(LABEL_W + chartW, Math.max(LABEL_W, rawX(d)));
 
   const headerH = (state.showQuarters ? QUARTER_H : 0) + (state.showMonths ? MONTH_H : 0);
-  const lanes = layoutLanes(items, xOf, rm, LABEL_W, LABEL_W + chartW + PAD_RIGHT);
+  const streams = layoutStreams(items, xOf, rm, LABEL_W, LABEL_W + chartW + PAD_RIGHT);
   // names are never cut short: a label near the end widens the chart rather than running off it
-  const width = Math.ceil(Math.max(LABEL_W + chartW + PAD_RIGHT, lanes.maxRight + 8));
-  const bodyH = lanes.reduce((a, l) => a + l.h, 0) || 120;
+  const width = Math.ceil(Math.max(LABEL_W + chartW + PAD_RIGHT, streams.maxRight + 8));
+  const bodyH = streams.reduce((a, l) => a + l.h, 0) || 120;
   const height = headerH + bodyH + 8;
 
   const svg = svgEl('svg', {
@@ -1649,7 +1670,7 @@ function renderGantt() {
   svg.appendChild(svgEl('rect', { x: 0, y: 0, width, height, fill: G.bg }));
 
   // Label column and timescale header are separate layers, pinned while the chart scrolls
-  // (see syncGanttSticky) so swimlane names and dates stay in view, as in MS Project.
+  // (see syncGanttSticky) so stream names and dates stay in view, as in MS Project.
   const col = svgEl('g', { class: 'gantt-col' });
   const head = svgEl('g', { class: 'gantt-head' });
   const corner = svgEl('g', { class: 'gantt-corner' });
@@ -1658,49 +1679,49 @@ function renderGantt() {
   corner.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: headerH, stroke: G.strong, 'stroke-width': 1 }));
   if (headerH) corner.appendChild(svgEl('line', { x1: 0, y1: headerH, x2: LABEL_W, y2: headerH, stroke: G.strong, 'stroke-width': 1 }));
 
-  // lane backgrounds (alternating) + lane / sub-lane labels
+  // stream backgrounds (alternating) + stream / sub-stream labels
   let y = headerH;
-  lanes.forEach((lane, i) => {
-    if (i % 2 === 1) svg.appendChild(svgEl('rect', { x: 0, y, width, height: lane.h, fill: G.alt }));
-    col.appendChild(svgEl('rect', { x: 0, y, width: LABEL_W, height: lane.h, fill: i % 2 ? G.alt : G.bg }));
-    const accent = G.laneAccents[i % G.laneAccents.length];
-    col.appendChild(svgEl('rect', { x: 0, y: y + 4, width: 4, height: lane.h - 8, rx: 2, fill: accent }));
-    const laneColW = subCol ? LANE_COL_W : LABEL_W;
-    // click the swimlane's name to fold it into one summary row (and back)
-    const toggle = svgEl('g', { class: 'lane-toggle', 'data-lane': lane.name, role: 'button', tabindex: 0,
-      'aria-expanded': String(!lane.collapsed), 'aria-label': `${lane.collapsed ? 'Expand' : 'Collapse'} ${lane.name}` });
-    toggle.appendChild(svgEl('rect', { x: 4, y, width: laneColW - 4, height: lane.h, fill: 'transparent' }));
+  streams.forEach((stream, i) => {
+    if (i % 2 === 1) svg.appendChild(svgEl('rect', { x: 0, y, width, height: stream.h, fill: G.alt }));
+    col.appendChild(svgEl('rect', { x: 0, y, width: LABEL_W, height: stream.h, fill: i % 2 ? G.alt : G.bg }));
+    const accent = G.streamAccents[i % G.streamAccents.length];
+    col.appendChild(svgEl('rect', { x: 0, y: y + 4, width: 4, height: stream.h - 8, rx: 2, fill: accent }));
+    const streamColW = subCol ? STREAM_COL_W : LABEL_W;
+    // click the stream's name to fold it into one summary row (and back)
+    const toggle = svgEl('g', { class: 'stream-toggle', 'data-stream': stream.name, role: 'button', tabindex: 0,
+      'aria-expanded': String(!stream.collapsed), 'aria-label': `${stream.collapsed ? 'Expand' : 'Collapse'} ${stream.name}` });
+    toggle.appendChild(svgEl('rect', { x: 4, y, width: streamColW - 4, height: stream.h, fill: 'transparent' }));
     toggle.appendChild(svgEl('path', {
-      d: lane.collapsed ? `M 14 ${y + lane.h / 2 - 4} l 4.5 4 l -4.5 4` : `M 12 ${y + lane.h / 2 - 2} l 4 4.5 l 4 -4.5`,
+      d: stream.collapsed ? `M 14 ${y + stream.h / 2 - 4} l 4.5 4 l -4.5 4` : `M 12 ${y + stream.h / 2 - 2} l 4 4.5 l 4 -4.5`,
       fill: 'none', stroke: G.muted, 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
     }));
-    const nameY = lane.collapsed ? y + lane.h / 2 + 1 : y + lane.h / 2 + 5;
-    toggle.appendChild(svgEl('text', { x: 26, y: nameY, 'font-size': 14, 'font-weight': 700, fill: G.text }, lane.name));
-    if (lane.collapsed) toggle.appendChild(svgEl('text', { x: 26, y: nameY + 13, 'font-size': 10.5, fill: G.muted }, `${lane.count} ${lane.count === 1 ? T.item : T.items} folded`));
+    const nameY = stream.collapsed ? y + stream.h / 2 + 1 : y + stream.h / 2 + 5;
+    toggle.appendChild(svgEl('text', { x: 26, y: nameY, 'font-size': 14, 'font-weight': 700, fill: G.text }, stream.name));
+    if (stream.collapsed) toggle.appendChild(svgEl('text', { x: 26, y: nameY + 13, 'font-size': 10.5, fill: G.muted }, `${stream.count} ${stream.count === 1 ? T.item : T.items} folded`));
     col.appendChild(toggle);
 
     let sy = y;
-    lane.subs.forEach((sub, j) => {
+    stream.subs.forEach((sub, j) => {
       sub._y = sy;
       if (subCol) {
         if (j > 0) {
-          svg.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: width, y2: sy, stroke: G.line, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
-          col.appendChild(svgEl('line', { x1: LANE_COL_W, y1: sy, x2: LABEL_W, y2: sy, stroke: G.line, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+          svg.appendChild(svgEl('line', { x1: STREAM_COL_W, y1: sy, x2: width, y2: sy, stroke: G.line, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+          col.appendChild(svgEl('line', { x1: STREAM_COL_W, y1: sy, x2: LABEL_W, y2: sy, stroke: G.line, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
         }
         if (sub.name) {
           col.appendChild(svgEl('text', {
-            x: LANE_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: G.sub,
+            x: STREAM_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: G.sub,
           }, sub.name));
         }
       }
       sy += sub.h;
     });
     if (subCol) {
-      col.appendChild(svgEl('line', { x1: LANE_COL_W, y1: y, x2: LANE_COL_W, y2: y + lane.h, stroke: G.line, 'stroke-width': 1 }));
+      col.appendChild(svgEl('line', { x1: STREAM_COL_W, y1: y, x2: STREAM_COL_W, y2: y + stream.h, stroke: G.line, 'stroke-width': 1 }));
     }
-    svg.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: width, y2: y + lane.h, stroke: G.line, 'stroke-width': 1 }));
-    col.appendChild(svgEl('line', { x1: 0, y1: y + lane.h, x2: LABEL_W, y2: y + lane.h, stroke: G.line, 'stroke-width': 1 }));
-    y += lane.h;
+    svg.appendChild(svgEl('line', { x1: 0, y1: y + stream.h, x2: width, y2: y + stream.h, stroke: G.line, 'stroke-width': 1 }));
+    col.appendChild(svgEl('line', { x1: 0, y1: y + stream.h, x2: LABEL_W, y2: y + stream.h, stroke: G.line, 'stroke-width': 1 }));
+    y += stream.h;
   });
 
   // vertical separator between labels and chart
@@ -1763,8 +1784,8 @@ function renderGantt() {
 
   // ---- positions ----
   const pos = new Map();
-  for (const lane of lanes) {
-    for (const sub of lane.subs) {
+  for (const stream of streams) {
+    for (const sub of stream.subs) {
       for (const m of sub.items) {
         m._cy = sub.collapsed ? sub._y + sub.h / 2 : sub._y + rm.pad + m._row * rm.h + rm.h / 2 - rm.offset;
         m._sub = sub;
@@ -1780,7 +1801,7 @@ function renderGantt() {
 
   // ---- dependency + roll-up connectors (under the items) ----
   if (state.linkMode !== 'none') {
-    const shown = (id) => pos.has(id) && !items.find(x => x.id === id)._collapsed; // folded swimlanes draw no links
+    const shown = (id) => pos.has(id) && !items.find(x => x.id === id)._collapsed; // folded streams draw no links
     for (const m of items) {
       if (m._collapsed) continue;
       const b = pos.get(m.id);
@@ -1796,7 +1817,7 @@ function renderGantt() {
     const g = svgEl('g', { 'data-id': m.id, class: 'gantt-item' });
 
     if (m._collapsed) {
-      // a folded swimlane: every item on one row, small and unlabelled (the hover card still works)
+      // a folded stream: every item on one row, small and unlabelled (the hover card still works)
       if (m._task) {
         g.appendChild(svgEl('rect', { x: x1, y: cy - 3.5, width: Math.max(2, x2 - x1), height: 7, rx: 3.5, fill: `url(#${gradId(m.status)})`, stroke: c.dark, 'stroke-width': 0.8, 'fill-opacity': 0.9 }));
       } else drawShape(g, x1, cy, m.status, 4.5);
@@ -1828,7 +1849,7 @@ function renderGantt() {
         if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: G.muted, ...halo() }, m._meta));
       }
     } else {
-      // stem down to sub-lane bottom for readability
+      // stem down to sub-stream bottom for readability
       g.appendChild(svgEl('line', {
         x1, y1: cy + rm.shapeS + 3, x2: x1, y2: m._sub._y + m._sub.h - 4, 'pointer-events': 'none',
         stroke: G.strong, 'stroke-width': 1, 'stroke-dasharray': '2 3',
@@ -2056,18 +2077,18 @@ async function onDragEnd() {
 }
 
 /* ---- keyboard on the chart ---- */
-// Tab into the chart, then the arrow keys move between items (← → along a swimlane, ↑ ↓ to the
+// Tab into the chart, then the arrow keys move between items (← → along a stream, ↑ ↓ to the
 // row above or below), Enter opens the quick update panel and Esc lets go.
 
 function ganttKeyNav(e) {
-  if (e.target.closest('.lane-toggle') && (e.key === 'Enter' || e.key === ' ')) {
+  if (e.target.closest('.stream-toggle') && (e.key === 'Enter' || e.key === ' ')) {
     e.preventDefault();
-    return toggleLane(e.target.closest('.lane-toggle').dataset.lane);
+    return toggleStream(e.target.closest('.stream-toggle').dataset.stream);
   }
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape', ' '].includes(e.key)) return;
   const gs = [...document.querySelectorAll('#gantt-container .gantt-item')];
   if (!gs.length) return;
-  const at = (g) => { const r = g.getBoundingClientRect(); return { g, x: r.left, y: r.top + r.height / 2, lane: itemById(g.dataset.id)?.swimlane }; };
+  const at = (g) => { const r = g.getBoundingClientRect(); return { g, x: r.left, y: r.top + r.height / 2, stream: itemById(g.dataset.id)?.stream }; };
   const all = gs.map(at);
   const cur = all.find(a => a.g.dataset.id === kbId);
   if (e.key === 'Escape') { if (kbId) { setKbItem(null); e.preventDefault(); } return; }
@@ -2082,8 +2103,8 @@ function ganttKeyNav(e) {
   let next;
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
     const dir = e.key === 'ArrowRight' ? 1 : -1;
-    const lane = all.filter(a => a.lane === cur.lane && a !== cur && Math.sign(a.x - cur.x || a.y - cur.y) === dir);
-    next = lane.sort((a, b) => dir * (a.x - b.x) || Math.abs(a.y - cur.y) - Math.abs(b.y - cur.y))[0];
+    const stream = all.filter(a => a.stream === cur.stream && a !== cur && Math.sign(a.x - cur.x || a.y - cur.y) === dir);
+    next = stream.sort((a, b) => dir * (a.x - b.x) || Math.abs(a.y - cur.y) - Math.abs(b.y - cur.y))[0];
   } else {
     const dir = e.key === 'ArrowDown' ? 1 : -1;
     const rows = all.filter(a => (a.y - cur.y) * dir > 4);
@@ -2162,50 +2183,50 @@ function syncGanttSticky() {
 
 /* ================= gantt filters + sort ================= */
 // Filters narrow what the chart draws (and what Auto fits the range to); they reset when the
-// workspace changes. Sort sets the order of swimlanes and, optionally, of items within them:
+// workspace changes. Sort sets the order of streams and, optionally, of items within them:
 // "packed" fits several items to a row by date, the other orders give each item its own row.
 // The sort is a per-browser preference.
 
-const ganttFilter = { q: '', lane: '', owner: '', type: '', rag: [], late: false };
-const GANTT_SORT_DEFAULT = { lanes: 'name', rows: 'packed', dir: 1 }; // swimlanes A–Z, items packed by date
+const ganttFilter = { q: '', stream: '', owner: '', type: '', rag: [], late: false };
+const GANTT_SORT_DEFAULT = { streams: 'name', rows: 'packed', dir: 1 }; // streams A–Z, items packed by date
 const ganttSort = { ...GANTT_SORT_DEFAULT };
 
-const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.lane || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late);
+const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.stream || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late);
 
 function ganttMatches(m) {
   const f = ganttFilter, q = f.q.trim().toLowerCase();
-  return (!f.lane || m.swimlane === f.lane)
+  return (!f.stream || m.stream === f.stream)
     && (!f.owner || m.owner === f.owner)
     && (!f.type || (f.type === 'task' ? isTask(m) : f.type === 'top' ? isTopLevel(m) : !isTask(m)))
     && (!f.rag.length || f.rag.includes(m.status))
     && (!f.late || isLate(m) || isLateStart(m))
-    && (!q || [m.ref, m.title, m.description, m.owner, m.swimlane, m.subswimlane].join(' ').toLowerCase().includes(q));
+    && (!q || [m.ref, m.title, m.description, m.owner, m.stream, m.substream].join(' ').toLowerCase().includes(q));
 }
 
 function clearGanttFilters() {
-  Object.assign(ganttFilter, { q: '', lane: '', owner: '', type: '', rag: [], late: false });
+  Object.assign(ganttFilter, { q: '', stream: '', owner: '', type: '', rag: [], late: false });
 }
 
-// Folded swimlanes, per workspace (a per-browser preference).
-function collapsedLanes() {
+// Folded streams, per workspace (a per-browser preference).
+function collapsedStreams() {
   return new Set(loadAppPrefs().folded?.[state.workspaceId] || []);
 }
-function toggleLane(name, fold) {
+function toggleStream(name, fold) {
   const all = loadAppPrefs().folded || {};
   const set = new Set(all[state.workspaceId] || []);
   if (fold ?? !set.has(name)) set.add(name); else set.delete(name);
   saveAppPrefs({ folded: { ...all, [state.workspaceId]: [...set] } });
   renderGantt();
 }
-function foldAllLanes(fold) {
+function foldAllStreams(fold) {
   const all = loadAppPrefs().folded || {};
-  saveAppPrefs({ folded: { ...all, [state.workspaceId]: fold ? [...new Set(state.items.map(m => m.swimlane))] : [] } });
+  saveAppPrefs({ folded: { ...all, [state.workspaceId]: fold ? [...new Set(state.items.map(m => m.stream))] : [] } });
   renderGantt();
 }
 
-// Swimlanes and their sub-swimlanes share one order.
-function sortLanes(lanes) {
-  const by = ganttSort.lanes;
+// Streams and their sub-streams share one order.
+function sortStreams(streams) {
+  const by = ganttSort.streams;
   if (by === 'list') return;
   const key = (group) => {
     const ms = group.items || group.subs.flatMap(s => s.items);
@@ -2217,8 +2238,8 @@ function sortLanes(lanes) {
   const cmp = (a, b) => (by === 'name'
     ? (!a.name) - (!b.name) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
     : key(a) - key(b));
-  lanes.sort(cmp);
-  for (const lane of lanes) lane.subs.sort(cmp);
+  streams.sort(cmp);
+  for (const stream of streams) stream.subs.sort(cmp);
 }
 
 // Items one per row: by the chosen field (blanks last), then by date.
@@ -2248,7 +2269,7 @@ function renderGanttFilters() {
     document.getElementById(id).innerHTML = `<option value="">${all}</option>` + values.map(v =>
       `<option value="${escAttr(v)}" ${v === value ? 'selected' : ''}>${escAttr(v)}</option>`).join('');
   };
-  fill('gf-lane', 'All swimlanes', distinct('swimlane'), f.lane);
+  fill('gf-stream', 'All streams', distinct('stream'), f.stream);
   fill('gf-owner', 'All owners', distinct('owner'), f.owner);
   const types = [['', 'All'], ['top', 'Top level'], ['milestone', T.Milestones], ['task', T.Tasks]];
   document.getElementById('gf-type').innerHTML = types.map(([v, label]) =>
@@ -2262,7 +2283,7 @@ function renderGanttFilters() {
   if (document.activeElement !== q) q.value = f.q; // don't disturb the caret while typing
 
   const chips = [
-    f.lane && ['lane', 'Swimlane', f.lane],
+    f.stream && ['stream', 'Stream', f.stream],
     f.owner && ['owner', 'Owner', f.owner],
     f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : f.type === 'top' ? T.Tops : T.Milestones],
     f.rag.length && ['rag', 'RAG', f.rag.join(', ')],
@@ -2281,14 +2302,14 @@ function renderGanttFilters() {
          <button type="button" class="link-btn" data-unfilter="all">Clear all</button>`;
   }
 
-  document.getElementById('gs-lanes').value = ganttSort.lanes;
+  document.getElementById('gs-streams').value = ganttSort.streams;
   document.getElementById('gs-rows').value = ganttSort.rows;
   const packed = ganttSort.rows === 'packed';
   document.querySelectorAll('#gs-dir [data-dir]').forEach(b => {
     b.disabled = packed;
     b.setAttribute('aria-pressed', !packed && +b.dataset.dir === ganttSort.dir);
   });
-  document.getElementById('gs-badge').hidden = ganttSort.lanes === GANTT_SORT_DEFAULT.lanes && packed;
+  document.getElementById('gs-badge').hidden = ganttSort.streams === GANTT_SORT_DEFAULT.streams && packed;
 
   const based = state.items.filter(hasBaseline);
   const moved = based.filter(baselineMoved).length;
@@ -2333,7 +2354,7 @@ function wireGanttFilters() {
   wireMenus();
   const saveSort = () => { saveAppPrefs({ ganttSort: { ...ganttSort } }); renderGantt(); };
   document.getElementById('gf-q').addEventListener('input', (e) => { ganttFilter.q = e.target.value; renderGantt(); });
-  for (const [id, k] of [['gf-lane', 'lane'], ['gf-owner', 'owner']]) {
+  for (const [id, k] of [['gf-stream', 'stream'], ['gf-owner', 'owner']]) {
     document.getElementById(id).addEventListener('change', (e) => { ganttFilter[k] = e.target.value; renderGantt(); });
   }
   document.getElementById('gf-type').addEventListener('click', (e) => {
@@ -2355,7 +2376,7 @@ function wireGanttFilters() {
     else ganttFilter[k] = k === 'rag' ? [] : k === 'late' ? false : '';
     renderGantt();
   });
-  document.getElementById('gs-lanes').addEventListener('change', (e) => { ganttSort.lanes = e.target.value; saveSort(); });
+  document.getElementById('gs-streams').addEventListener('change', (e) => { ganttSort.streams = e.target.value; saveSort(); });
   document.getElementById('gs-rows').addEventListener('change', (e) => { ganttSort.rows = e.target.value; ganttSort.dir = 1; saveSort(); });
   document.getElementById('gs-dir').addEventListener('click', (e) => {
     const b = e.target.closest('[data-dir]');
@@ -2374,7 +2395,7 @@ function showTip(m, e) {
   const when = task
     ? `${fmtShort(m.start)} – ${fmtNice(m.end)} <span class="tip-muted">(${days} days)</span>`
     : fmtNice(m.end);
-  const where = [m.owner, [m.swimlane, m.subswimlane].filter(Boolean).join(' › ')].filter(Boolean).map(escAttr).join(' · ');
+  const where = [m.owner, [m.stream, m.substream].filter(Boolean).join(' › ')].filter(Boolean).map(escAttr).join(' · ');
   const prog = !task && milestoneProgress(m);
   const progress = prog ? `<div class="tip-row"><b>${prog.pct}% complete</b><span class="tip-muted">${prog.doneDays} of ${prog.total} days · ${prog.doneCount} of ${prog.count} ${prog.count === 1 ? T.task : T.tasks} done</span></div>` : '';
   tip.innerHTML = `
@@ -2390,6 +2411,7 @@ function showTip(m, e) {
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
     ${itemLinks(m).map(([k, u]) => `<div class="tip-row tip-muted">${k}: ${escAttr(u.replace(/^https?:\/\/(www\.)?/i, ''))}</div>`).join('')}
     ${lastReportLine(m)}
+    ${raidTipLine(m)}
     <div class="tip-hint">Click to update RAG or dates, or to report</div>`;
   const ids = chainOf(m.id);
   tipAvoid = [...document.querySelectorAll('#gantt-container .gantt-item')].filter(g => ids.has(g.dataset.id)).map(g => g.getBoundingClientRect());
@@ -2442,7 +2464,7 @@ let editing = null; // item being edited; null when adding a new one
 let editOpened = null; // its values when the dialog opened
 let edDeps = [];
 
-const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'parent',
+const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'stream', 'substream', 'owner', 'start', 'end', 'status', 'parent',
   'gitlab_url', 'use_case_url'];
 const URL_FIELDS = { gitlab_url: 'GitLab URL', use_case_url: 'Use case URL' };
 
@@ -2463,7 +2485,7 @@ function openEditDialog(m) {
   const last = state.items.at(-1);
   const today = fmtISO(new Date());
   const v = m || {
-    ref: '', title: '', description: '', swimlane: last?.swimlane || 'General', subswimlane: '', owner: '', gitlab_url: '', use_case_url: '',
+    ref: '', title: '', description: '', stream: last?.stream || 'General', substream: '', owner: '', gitlab_url: '', use_case_url: '',
     type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, parent: '', deps: [],
   };
   f.type.innerHTML = typeOptions(v.type);
@@ -2472,10 +2494,10 @@ function openEditDialog(m) {
   if (v.parent && !parents.some(p => p.id === v.parent)) parents.push(state.items.find(p => p.id === v.parent));
   f.parent.innerHTML = '<option value="">— none —</option>' +
     parents.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('');
-  f.swimlane.innerHTML = laneOptions(v.swimlane);
+  f.stream.innerHTML = streamOptions(v.stream);
   for (const k of EDIT_FIELDS) f[k].value = v[k] ?? '';
-  f.swimlane.dataset.prev = f.swimlane.value;
-  closeNewLane(f);
+  f.stream.dataset.prev = f.stream.value;
+  closeNewStream(f);
   edDeps = [...v.deps];
 
   document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : `New ${T.item}`;
@@ -2487,6 +2509,9 @@ function openEditDialog(m) {
   hist.disabled = !n;
   hist.textContent = `View reports (${n})`;
   document.getElementById('ed-dates').hidden = !m;
+  const raidN = m ? raidLinkedTo(`item:${m.id}`).filter(r => !isClosed(r)).length : 0;
+  document.getElementById('ed-raid').hidden = !m;
+  document.getElementById('ed-raid').textContent = `Risks & issues${raidN ? ` (${raidN})` : ''}`;
   document.getElementById('ed-error').textContent = '';
   refreshDatalists();
   renderEdDeps();
@@ -2495,27 +2520,27 @@ function openEditDialog(m) {
   f.title.focus();
 }
 
-// The workspace's existing swimlanes (A–Z), plus a way to start a new one.
-function laneOptions(current) {
-  const names = [...new Set([...lanesInOrder(), ...state.lanes.filter(l => l.workspace_id === state.workspaceId).map(l => l.name), current])]
+// The workspace's existing streams (A–Z), plus a way to start a new one.
+function streamOptions(current) {
+  const names = [...new Set([...streamsInOrder(), ...state.streams.filter(l => l.workspace_id === state.workspaceId).map(l => l.name), current])]
     .filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   return names.map(n => `<option value="${escAttr(n)}">${escAttr(n)}</option>`).join('') +
-    '<option value="" data-new>+ New swimlane…</option>';
+    '<option value="" data-new>+ New stream…</option>';
 }
-// Choosing "+ New swimlane…" swaps the list for a name box; Esc (or leaving it empty) swaps back.
-function pickEdLane(sel) {
+// Choosing "+ New stream…" swaps the list for a name box; Esc (or leaving it empty) swaps back.
+function pickEdStream(sel) {
   if (!('new' in sel.selectedOptions[0].dataset)) return (sel.dataset.prev = sel.value);
-  const box = sel.form.elements.newlane;
+  const box = sel.form.elements.newstream;
   sel.hidden = true;
   box.hidden = false;
   box.value = '';
   box.focus();
 }
-function closeNewLane(f) {
-  f.newlane.hidden = true;
-  f.newlane.value = '';
-  f.swimlane.hidden = false;
-  f.swimlane.value = f.swimlane.dataset.prev || '';
+function closeNewStream(f) {
+  f.newstream.hidden = true;
+  f.newstream.value = '';
+  f.stream.hidden = false;
+  f.stream.value = f.stream.dataset.prev || '';
 }
 
 function renderEdDeps() {
@@ -2545,8 +2570,8 @@ async function submitEditDialog(e) {
   const changes = {};
   for (const k of EDIT_FIELDS) changes[k] = f[k].value.trim();
   changes.deps = edDeps;
-  if (!f.newlane.hidden) changes.swimlane = f.newlane.value.trim();
-  if (!changes.swimlane) { (f.newlane.hidden ? f.swimlane : f.newlane).focus(); return (err.textContent = 'Name the new swimlane.'); }
+  if (!f.newstream.hidden) changes.stream = f.newstream.value.trim();
+  if (!changes.stream) { (f.newstream.hidden ? f.stream : f.newstream).focus(); return (err.textContent = 'Name the new stream.'); }
 
   if (!changes.title) return (err.textContent = 'Title is required.');
   for (const k in URL_FIELDS) {
@@ -2648,8 +2673,8 @@ function setDatalist(id, values) {
 }
 
 function refreshDatalists() {
-  setDatalist('lane-list', state.items.map(m => m.swimlane));
-  setDatalist('sublane-list', state.items.map(m => m.subswimlane));
+  setDatalist('stream-list', state.items.map(m => m.stream));
+  setDatalist('substream-list', state.items.map(m => m.substream));
   setDatalist('owner-list', state.items.map(m => m.owner));
   setDatalist('people-list', [...allItems().map(m => m.owner), ...state.workspaces.flatMap(p => [p.owner, p.lead])].sort());
 }
@@ -3193,12 +3218,12 @@ const GRID_COLS = [
   { key: 'end', label: 'End', w: 135, kind: 'date', show: fmtNice },
   { key: 'parent', label: 'Rolls up to', w: 170, show: itemShow, order: byItemRef, blank: '(None)' },
   { key: 'type', label: 'Type', w: 170, title: 'A single date (diamond; top level ones are under change control and ringed) or a date range (bar)', show: typeLabel },
-  { key: 'swimlane', label: 'Swimlane', w: 120 },
+  { key: 'stream', label: 'Stream', w: 120 },
   { key: 'owner', label: 'Owner', w: 120 },
   { key: 'deps', label: 'Depends on', w: 190, show: itemShow, order: byItemRef, blank: '(None)' },
   { key: 'gitlab_url', label: 'GitLab URL', w: 200 },
   { key: 'use_case_url', label: 'Use case URL', w: 200 },
-  { key: 'subswimlane', label: 'Sub-swimlane', w: 120 },
+  { key: 'substream', label: 'Sub-stream', w: 120 },
   { key: 'id', label: 'ID', w: 64, title: 'Primary key — assigned automatically, never changes', kind: 'number' },
   { key: 'actions', label: '', w: 40, fixed: true },
 ];
@@ -3338,8 +3363,8 @@ function renderEditor(highlight = [], keepOrder = false) {
       title: `<input data-i="${i}" data-k="title" value="${escAttr(m.title)}" placeholder="Title" ${m.description ? `title="${escAttr(m.description)}"` : ''} />`,
       type: `<select data-i="${i}" data-k="type" class="type-sel type-${m.type}">${typeOptions(m.type)}</select>`,
       description: `<input data-i="${i}" data-k="description" value="${escAttr(m.description)}" placeholder="Description" />`,
-      swimlane: `<input data-i="${i}" data-k="swimlane" value="${escAttr(m.swimlane)}" list="lane-list" placeholder="Swimlane" />`,
-      subswimlane: `<input data-i="${i}" data-k="subswimlane" value="${escAttr(m.subswimlane)}" list="sublane-list" placeholder="Sub-swimlane" />`,
+      stream: `<input data-i="${i}" data-k="stream" value="${escAttr(m.stream)}" list="stream-list" placeholder="Stream" />`,
+      substream: `<input data-i="${i}" data-k="substream" value="${escAttr(m.substream)}" list="substream-list" placeholder="Sub-stream" />`,
       owner: `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
       gitlab_url: `<input data-i="${i}" data-k="gitlab_url" type="url" value="${escAttr(m.gitlab_url)}" placeholder="https://…" />`,
       use_case_url: `<input data-i="${i}" data-k="use_case_url" type="url" value="${escAttr(m.use_case_url)}" placeholder="https://…" />`,
@@ -3500,7 +3525,7 @@ let gridSelAnchor = null;  // last row ticked, where a shift-click range starts
 let bulkField = 'status';
 
 const BULK_FIELDS = () => [
-  ['status', 'RAG'], ['owner', 'Owner'], ['swimlane', 'Swimlane'], ['subswimlane', 'Sub-swimlane'],
+  ['status', 'RAG'], ['owner', 'Owner'], ['stream', 'Stream'], ['substream', 'Sub-stream'],
   ['type', 'Type'], ['parent', 'Rolls up to'], ['shift', 'Dates — move by'],
 ];
 const selectedItems = () => state.items.filter(m => gridSel.has(m.id));
@@ -3528,12 +3553,12 @@ function selectAllShown(on) {
 }
 
 function bulkValueControl() {
-  const lanes = (list) => `<input id="bulk-input" list="${list}" placeholder="Leave blank to clear" />`;
+  const streams = (list) => `<input id="bulk-input" list="${list}" placeholder="Leave blank to clear" />`;
   switch (bulkField) {
     case 'status': return `<span>to</span><select id="bulk-input">${statusOptions(DEFAULT_STATUS)}</select>`;
-    case 'owner': return `<span>to</span>${lanes('owner-list')}`;
-    case 'swimlane': return '<span>to</span><input id="bulk-input" list="lane-list" placeholder="Swimlane" />';
-    case 'subswimlane': return `<span>to</span>${lanes('sublane-list')}`;
+    case 'owner': return `<span>to</span>${streams('owner-list')}`;
+    case 'stream': return '<span>to</span><input id="bulk-input" list="stream-list" placeholder="Stream" />';
+    case 'substream': return `<span>to</span>${streams('substream-list')}`;
     case 'type': return `<span>to</span><select id="bulk-input">${typeOptions('milestone')}</select>`;
     case 'parent': return `<span>to</span><select id="bulk-input"><option value="">— none —</option>${state.items.filter(m => !isTask(m)).sort(cmpRef)
       .map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select>`;
@@ -3586,7 +3611,7 @@ async function applyBulk() {
     offerUndo(snap, `Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}`);
     return scheduleSave(`Moved ${count(items.length, T.item, T.items)} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}${also(moved)}`);
   }
-  if (bulkField === 'swimlane' && !v) return flashStatus('Enter a swimlane', false);
+  if (bulkField === 'stream' && !v) return flashStatus('Enter a stream', false);
 
   let done = 0, skipped = 0;
   const ok = await guardChange(() => {
@@ -4554,12 +4579,14 @@ async function deleteOrphanReports() {
 
 function rerenderCurrentView() {
   updateDueBadge();
+  updateRaidBadge();
   if (isShown('gantt')) renderGantt();
   if (isShown('reports')) renderReports();
   if (isShown('workspaces')) renderWorkspaces();
   if (isShown('overview')) renderOverview();
-  if (isShown('lanes')) renderLaneOverview();
+  if (isShown('streams')) renderStreamOverview();
   if (isShown('changes')) renderChanges();
+  if (isShown('raid')) renderRaid();
 }
 
 /* ---- reports list ---- */
@@ -5201,7 +5228,7 @@ function itemsExportCSV(items) {
   const name = (id) => { const x = byId.get(id); return x?.ref || `#${id}`; };
   const lines = [EXPORT_COLUMNS.join(',')];
   for (const m of items) {
-    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.swimlane, m.subswimlane, m.owner, m.start, m.end,
+    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.stream, m.substream, m.owner, m.start, m.end,
       m.status, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
@@ -5244,12 +5271,12 @@ function downloadReportsCSV() {
 // added, updated, deleted or skipped before anything is saved. Blank cells leave an existing
 // item's value alone. Links (rolls up to, depends on) name an item by its ref.
 
-const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'swimlane', 'subswimlane', 'owner', 'start', 'end', 'status', 'parent', 'deps',
+const IMPORT_FIELDS = ['ref', 'title', 'type', 'description', 'stream', 'substream', 'owner', 'start', 'end', 'status', 'parent', 'deps',
   'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url', 'top_level', 'id'];
 const IMPORT_DATES = ['start', 'end', 'baseline_start', 'baseline_end'];
 const importFieldLabel = (k) => ({
-  ref: 'Ref', title: 'Title', type: `Type (${T.top}, ${T.milestone} or ${T.task})`, description: 'Description', swimlane: 'Swimlane',
-  subswimlane: 'Sub-swimlane', owner: 'Owner', start: 'Start date', end: `End date / ${T.milestone} date`, status: 'RAG',
+  ref: 'Ref', title: 'Title', type: `Type (${T.top}, ${T.milestone} or ${T.task})`, description: 'Description', stream: 'Stream',
+  substream: 'Sub-stream', owner: 'Owner', start: 'Start date', end: `End date / ${T.milestone} date`, status: 'RAG',
   parent: 'Rolls up to (ref)', deps: 'Depends on (refs)',
   baseline_start: 'Baseline start', baseline_end: `Baseline end / ${T.milestone} baseline date`, gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
   top_level: `Top level ${T.milestone} (yes or no)`, id: 'ID (used to match links)',
@@ -5261,8 +5288,8 @@ const IMPORT_ALIASES = {
   title: ['title', 'name', 'milestone', 'milestonename', 'task', 'taskname', 'item', 'itemname', 'summary', 'deliverable', 'activity', 'activityname'],
   type: ['type', 'kind', 'itemtype', 'milestoneortask'],
   description: ['description', 'desc', 'details', 'notes', 'comments', 'comment'],
-  swimlane: ['swimlane', 'lane', 'workstream', 'stream', 'category', 'group', 'area', 'team', 'theme', 'project'],
-  subswimlane: ['subswimlane', 'sublane', 'subworkstream', 'substream', 'subcategory', 'subgroup'],
+  stream: ['stream', 'workstream', 'category', 'group', 'area', 'team', 'theme', 'project'],
+  substream: ['substream', 'subworkstream', 'subcategory', 'subgroup'],
   owner: ['owner', 'assignee', 'assignedto', 'responsible', 'accountable', 'resource', 'resourcenames', 'lead'],
   start: ['start', 'startdate', 'begin', 'begindate', 'from', 'plannedstart', 'forecaststart', 'actualstart'],
   end: ['end', 'enddate', 'date', 'due', 'duedate', 'finish', 'finishdate', 'deadline', 'target', 'targetdate', 'to', 'plannedend',
@@ -5409,7 +5436,7 @@ function planImport() {
     const t = row.target;
     const f = row.fields;
 
-    for (const k of ['ref', 'title', 'description', 'swimlane', 'subswimlane', 'owner']) if (cell(k)) f[k] = cell(k);
+    for (const k of ['ref', 'title', 'description', 'stream', 'substream', 'owner']) if (cell(k)) f[k] = cell(k);
     for (const k in URL_FIELDS) if (cell(k)) f[k] = withScheme(cell(k));
     if (row.action === 'add' && !f.title) { row.action = 'skip'; row.notes.push('No title'); }
 
@@ -5469,7 +5496,7 @@ function planImport() {
         row.notes.push(`RAG “${rag}” isn't one of this workspace's options, so ${t ? 'it stays' : 'it starts at'} ${f.status}`);
       }
     } else if (!t) f.status = DEFAULT_STATUS;
-    if (!t && !f.swimlane) f.swimlane = 'General';
+    if (!t && !f.stream) f.stream = 'General';
     if (has('parent') && cell('parent')) row.links = { ...row.links, parent: cell('parent') };
     if (has('deps') && cell('deps')) row.links = { ...row.links, deps: readLinks(cell('deps')) };
     row.fileId = cell('id');
@@ -5532,8 +5559,8 @@ async function applyImport() {
       let m = r.target;
       if (!m) {
         m = {
-          id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: '', description: '', swimlane: 'General',
-          subswimlane: '', owner: '', start: '', end: '', status: DEFAULT_STATUS, parent: '', deps: [],
+          id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: '', description: '', stream: 'General',
+          substream: '', owner: '', start: '', end: '', status: DEFAULT_STATUS, parent: '', deps: [],
         };
         state.items.push(m);
         added++;
@@ -5649,10 +5676,10 @@ function renderImport() {
   }).join('');
 
   // Preview
-  const shown = ['ref', 'title', 'type', 'start', 'end', 'status', 'owner', 'swimlane'];
+  const shown = ['ref', 'title', 'type', 'start', 'end', 'status', 'owner', 'stream'];
   if (imp.map.some(k => k.startsWith('baseline_'))) shown.splice(5, 0, 'baseline_start', 'baseline_end');
   const heads = { ref: 'Ref', title: 'Title', type: 'Type', start: 'Start', end: 'End', baseline_start: 'Baseline start', baseline_end: 'Baseline end',
-    status: 'RAG', owner: 'Owner', swimlane: 'Swimlane' };
+    status: 'RAG', owner: 'Owner', stream: 'Stream' };
   document.getElementById('im-preview-head').innerHTML = `<tr><th>Row</th><th></th>${shown.map(k =>
     `<th>${escAttr(heads[k])}</th>`).join('')}<th>Links</th><th>Notes</th></tr>`;
   const actLabel = { add: 'Add', update: 'Update', same: 'No change', skip: 'Skip', delete: 'Delete' };
@@ -5730,7 +5757,7 @@ function wireImport() {
 // with a summary of each; the one being viewed drives the Gantt chart, Items and Reports.
 
 const WORKSPACE_COLUMNS = ['id', 'number', 'name', 'code', 'description', 'owner', 'lead', 'start', 'end', 'status', 'trend',
-  'item_term', 'milestone_term', 'task_term', 'created', 'updated'];
+  'item_term', 'milestone_term', 'task_term', 'dep_priorities', 'dep_types', 'created', 'updated'];
 const WORKSPACE_FIELDS = WORKSPACE_COLUMNS.slice(1, -2);
 
 function rowsToWorkspaces(rows) {
@@ -5806,6 +5833,7 @@ function applyWorkspaceChrome() {
   renderRagLegend();
   updatePageHead();
   updateDueBadge();
+  updateRaidBadge();
 }
 
 // The Gantt key lists the workspace's own RAG options.
@@ -5815,7 +5843,7 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { overview: () => 'Program overview', lanes: () => 'Swimlane overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date history' };
+const VIEW_TITLES = { overview: () => 'Program overview', streams: () => 'Stream overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date history', raid: () => 'Risks, issues & dependencies' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
@@ -5852,11 +5880,11 @@ function msBucket(status, workspaceId, rg = ragOf(workspaceId)) {
   if (status === rg.def || /^not\s*started$/i.test(status)) return 'notStarted';
   return 'green';
 }
-function milestoneOverview(workspaceId, lane = null) { // lane: only that swimlane's milestones
+function milestoneOverview(workspaceId, stream = null) { // stream: only that stream's milestones
   const rg = ragOf(workspaceId);
   const out = { notStarted: 0, green: 0, redAmber: 0, closed: 0, total: 0 };
   for (const m of allItems()) {
-    if (m.workspace_id !== workspaceId || isTask(m) || (lane != null && m.swimlane !== lane)) continue;
+    if (m.workspace_id !== workspaceId || isTask(m) || (stream != null && m.stream !== stream)) continue;
     out.total++;
     out[msBucket(m.status, workspaceId, rg)]++;
   }
@@ -5864,11 +5892,11 @@ function milestoneOverview(workspaceId, lane = null) { // lane: only that swimla
 }
 
 // A count is a way in: it opens the Gantt chart showing just those milestones.
-async function openBucket(workspaceId, bucket, lane = '') {
+async function openBucket(workspaceId, bucket, stream = '') {
   await switchWorkspace(workspaceId, 'gantt');
   clearGanttFilters();
   ganttFilter.type = 'milestone';
-  ganttFilter.lane = lane;
+  ganttFilter.stream = stream;
   if (bucket !== 'total') ganttFilter.rag = STATUSES.filter(st => msBucket(st, workspaceId) === bucket);
   renderGantt();
 }
@@ -5963,6 +5991,7 @@ function openWorkspaceDialog(p) {
   // Default terms show as placeholders, so a new word can be typed straight in.
   for (const k of WORKSPACE_FIELDS) if (k !== 'status') f[k].value = (v[k] === DEFAULT_TERMS[k] ? '' : v[k]) ?? '';
   loadPgStatuses(p);
+  loadPgDepLists(p);
   showPgTab('details');
   document.getElementById('pg-heading').textContent = p ? `Edit ${p.name}` : 'New workspace';
   document.getElementById('pg-submit').textContent = p ? 'Save' : 'Create workspace';
@@ -6116,6 +6145,7 @@ function showPgTab(tab) {
   document.querySelectorAll('[data-pg-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.pgTab === tab));
   document.getElementById('pg-panel-details').hidden = tab !== 'details';
   document.getElementById('pg-panel-rag').hidden = tab !== 'rag';
+  document.getElementById('pg-panel-deps').hidden = tab !== 'deps';
   document.getElementById('workspace-dialog').classList.toggle('wide', tab === 'rag');
 }
 
@@ -6165,7 +6195,7 @@ function applyPgStatuses(workspaceId) {
 }
 
 function newWorkspaceDefaults() {
-  return { number: '', name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', trend: '', ...DEFAULT_TERMS };
+  return { number: '', name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', trend: '', dep_priorities: '', dep_types: '', ...DEFAULT_TERMS };
 }
 
 function updateTermPreview() {
@@ -6179,6 +6209,9 @@ async function submitWorkspaceDialog(e) {
   e.preventDefault();
   const f = document.getElementById('workspace-form').elements;
   const err = document.getElementById('pg-error');
+  const depErr = checkPgDepLists();
+  if (depErr) { showPgTab('deps'); return (err.textContent = depErr); }
+  for (const k of DEP_LIST_KEYS) f[k].value = pgDepListValue(k);
   const v = {};
   for (const k of WORKSPACE_FIELDS) v[k] = f[k].value.trim();
   if (!v.name) return (err.textContent = 'Give the workspace a name.');
@@ -6196,8 +6229,10 @@ async function submitWorkspaceDialog(e) {
   const p = pgEditing || newWorkspace();
   if (!pgEditing) state.workspaces.push(p);
   const res = applyPgStatuses(p.id);
+  const depRenamed = applyPgDepRenames(p.id);
   Object.assign(p, changedFrom(v, pgOpened), { updated: new Date().toISOString() });
   const saves = [saveWorkspaces(pgEditing ? 'Workspace saved' : 'Workspace created')];
+  if (depRenamed) saves.push(saveRaid());
   if (res.listChanged) saves.push(saveStatuses());
   if (res.records) saves.push(saveData('', 'Workspace settings'), saveReports());
   if (!pgEditing) {
@@ -6231,12 +6266,16 @@ async function deleteWorkspace() {
   state.statuses = state.statuses.filter(s => s.workspace_id !== p.id);
   const hadUpdates = state.updates.some(u => u.workspace_id === p.id);
   state.updates = state.updates.filter(u => u.workspace_id !== p.id);
-  const hadLanes = state.lanes.some(l => l.workspace_id === p.id);
-  state.lanes = state.lanes.filter(l => l.workspace_id !== p.id);
+  const hadStreams = state.streams.some(l => l.workspace_id === p.id);
+  state.streams = state.streams.filter(l => l.workspace_id !== p.id);
+  const hadRaid = state.raid.some(r => r.workspace_id === p.id);
+  state.raid = state.raid.filter(r => r.workspace_id !== p.id);
+  const hadNotes = state.raidNotes.some(n => n.workspace_id === p.id);
+  state.raidNotes = state.raidNotes.filter(n => n.workspace_id !== p.id);
   applyWorkspaceChrome();
   rerenderCurrentView();
   offerUndo(snap, `Deleted the workspace ${p.name}${lost.length ? ` and its ${lost.join(' and ')}` : ''}`);
-  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadLanes && saveLanes()]);
+  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadStreams && saveStreams(), hadRaid && saveRaid(), hadNotes && saveRaidNotes()]);
 }
 
 function wireWorkspaces() {
@@ -6271,15 +6310,15 @@ function wireWorkspaces() {
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
-/* ================= program and swimlane overviews ================= */
-// Management tables: one row per workspace (program) across the app, or per swimlane within a
+/* ================= program and stream overviews ================= */
+// Management tables: one row per workspace (program) across the app, or per stream within a
 // workspace. Each row has an area lead, the RAG of its last two weekly updates, trend, the latest
 // update's summary and a count of its milestones by status. Weekly updates live in updates.csv,
-// one per program or swimlane per week (swimlane blank for the program); the newest is "current".
-// A program's area lead and trend are workspace fields; a swimlane's are kept in swimlanes.csv.
+// one per program or stream per week (stream blank for the program); the newest is "current".
+// A program's area lead and trend are workspace fields; a stream's are kept in streams.csv.
 
-const UPDATE_COLUMNS = ['id', 'workspace_id', 'swimlane', 'week_ending', 'status', 'summary', 'author', 'created', 'updated'];
-const LANE_COLUMNS = ['workspace_id', 'name', 'lead', 'trend'];
+const UPDATE_COLUMNS = ['id', 'workspace_id', 'stream', 'week_ending', 'status', 'summary', 'author', 'created', 'updated'];
+const STREAM_COLUMNS = ['workspace_id', 'name', 'lead', 'trend'];
 
 function rowsToUpdates(rows) {
   if (!rows.length) return [];
@@ -6304,29 +6343,29 @@ function updatesToCSV(updates) {
 }
 const nextUpdateId = () => takeId('updates', () => String(Math.max(0, ...state.updates.map(u => +u.id || 0)) + 1));
 
-function rowsToLanes(rows) {
+function rowsToStreams(rows) {
   if (!rows.length) return [];
   const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
   const ids = new Set(state.workspaces.map(p => p.id));
   return rows.slice(1).map(r => {
     const o = {};
-    for (const k of LANE_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
+    for (const k of STREAM_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
     return o;
   }).filter(l => ids.has(l.workspace_id) && l.name);
 }
-function lanesToCSV(lanes) {
-  return [LANE_COLUMNS.join(','), ...lanes.map(l => LANE_COLUMNS.map(k => csvEscape(l[k])).join(','))].join('\n') + '\n';
+function streamsToCSV(streams) {
+  return [STREAM_COLUMNS.join(','), ...streams.map(l => STREAM_COLUMNS.map(k => csvEscape(l[k])).join(','))].join('\n') + '\n';
 }
-// A swimlane's details; a blank one (not yet stored) when it has none.
-const laneRecord = (workspaceId, name) => state.lanes.find(l => l.workspace_id === workspaceId && l.name === name)
+// A stream's details; a blank one (not yet stored) when it has none.
+const streamRecord = (workspaceId, name) => state.streams.find(l => l.workspace_id === workspaceId && l.name === name)
   || { workspace_id: workspaceId, name, lead: '', trend: '' };
 
-// What a row is about: a program, or one swimlane of it. `rec` holds its area lead and trend.
-const programSubject = (p) => ({ p, lane: '', rec: p, label: programLabel(p) });
-const laneSubject = (p, name) => ({ p, lane: name, rec: laneRecord(p.id, name), label: `${p.code || p.name} · ${name}` });
+// What a row is about: a program, or one stream of it. `rec` holds its area lead and trend.
+const programSubject = (p) => ({ p, stream: '', rec: p, label: programLabel(p) });
+const streamSubject = (p, name) => ({ p, stream: name, rec: streamRecord(p.id, name), label: `${p.code || p.name} · ${name}` });
 
-// Weekly updates for a program (lane '') or one of its swimlanes, newest first.
-const updatesFor = (workspaceId, lane = '') => state.updates.filter(u => u.workspace_id === workspaceId && (u.swimlane || '') === lane)
+// Weekly updates for a program (stream '') or one of its streams, newest first.
+const updatesFor = (workspaceId, stream = '') => state.updates.filter(u => u.workspace_id === workspaceId && (u.stream || '') === stream)
   .sort((a, b) => b.week_ending.localeCompare(a.week_ending) || b.updated.localeCompare(a.updated));
 
 // Programs in number order (numbers compared naturally), unnumbered ones last by name.
@@ -6334,43 +6373,43 @@ function programsInOrder() {
   return [...state.workspaces].sort((a, b) => (!a.number) - (!b.number)
     || a.number.localeCompare(b.number, undefined, { numeric: true }) || a.name.localeCompare(b.name));
 }
-// The current workspace's swimlanes in the order the Gantt chart lists them (its Sort setting).
-function lanesInOrder() {
-  const lanes = [], byName = new Map();
+// The current workspace's streams in the order the Gantt chart lists them (its Sort setting).
+function streamsInOrder() {
+  const streams = [], byName = new Map();
   for (const m of state.items) {
-    let lane = byName.get(m.swimlane);
-    if (!lane) byName.set(m.swimlane, lane = { name: m.swimlane, items: [], subs: [] }), lanes.push(lane);
-    lane.items.push({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end) });
+    let stream = byName.get(m.stream);
+    if (!stream) byName.set(m.stream, stream = { name: m.stream, items: [], subs: [] }), streams.push(stream);
+    stream.items.push({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end) });
   }
-  sortLanes(lanes);
-  return lanes.map(l => l.name);
+  sortStreams(streams);
+  return streams.map(l => l.name);
 }
 
 const isStale = (u) => !u || u.week_ending < addDays(defaultPeriodEnd('Weekly'), -6);
 
 function overviewRow(sub) {
-  const { p, lane, rec } = sub;
-  const [cur, prev] = sub.forLane && !lane ? [] : updatesFor(p.id, lane); // a lane without a name has no updates
+  const { p, stream, rec } = sub;
+  const [cur, prev] = sub.forStream && !stream ? [] : updatesFor(p.id, stream); // a stream without a name has no updates
   const rg = ragOf(p.id);
-  const ov = milestoneOverview(p.id, sub.forLane ? lane : null);
+  const ov = milestoneOverview(p.id, sub.forStream ? stream : null);
   const stale = cur && isStale(cur);
   const ragCell = (u, isCur) => (u
     ? `${statusPill(u.status, rg.map)}<small class="ov-week${isCur && stale ? ' stale' : ''}" ${isCur && stale ? 'title="No update since this week"' : ''}>w/e ${fmtShort(u.week_ending)}</small>`
     : '<span class="muted">—</span>');
-  const nameCell = sub.forLane
-    ? `<td class="ov-prog">${lane
-      ? `<button type="button" class="ov-name" data-open-lane="${escAttr(lane)}" title="Show this swimlane on the Gantt chart">${escAttr(lane)}</button>`
-      : '<span class="muted">(No swimlane)</span>'}</td>`
+  const nameCell = sub.forStream
+    ? `<td class="ov-prog">${stream
+      ? `<button type="button" class="ov-name" data-open-stream="${escAttr(stream)}" title="Show this stream on the Gantt chart">${escAttr(stream)}</button>`
+      : '<span class="muted">(No stream)</span>'}</td>`
     : `<td class="ov-num">${p.number ? escAttr(p.number) : '<span class="muted">—</span>'}</td>
       <td class="ov-prog">
         <button type="button" class="ov-name" data-open-workspace="${p.id}" title="Open the Gantt chart">${escAttr(p.name)}</button>
         ${p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : ''}
         <small class="ov-overall">Overall ${statusPill(p.status, rg.map)}</small>
       </td>`;
-  const key = sub.forLane ? `data-lane="${escAttr(lane)}"` : `data-pid="${p.id}"`;
-  const canUpdate = !sub.forLane || lane; // a lane needs a name to hold updates
+  const key = sub.forStream ? `data-stream="${escAttr(stream)}"` : `data-pid="${p.id}"`;
+  const canUpdate = !sub.forStream || stream; // a stream needs a name to hold updates
   return { sub, cur, prev, ov, html: `
-    <tr ${key} style="--rag:${sub.forLane ? 'var(--border)' : pal(p.status, rg.map).base}">
+    <tr ${key} style="--rag:${sub.forStream ? 'var(--border)' : pal(p.status, rg.map).base}">
       ${nameCell}
       <td class="ov-lead">${rec.lead ? escAttr(rec.lead) : '<span class="muted">—</span>'}</td>
       <td class="ov-rag">${ragCell(prev, false)}</td>
@@ -6382,7 +6421,7 @@ function overviewRow(sub) {
     </tr>` };
 }
 
-// Fill one of the overview tables (programs or swimlanes) and its totals row.
+// Fill one of the overview tables (programs or streams) and its totals row.
 function renderOverviewTable(id, subjects, one, many) {
   const rows = subjects.map(overviewRow);
   const cols = document.querySelectorAll(`#${id}-table thead tr:first-child th:not(.ov-ms-group)`).length - 1;
@@ -6391,28 +6430,28 @@ function renderOverviewTable(id, subjects, one, many) {
   const sum = Object.fromEntries(MS_BUCKETS.map(([k]) => [k, rows.reduce((a, r) => a + r.ov[k], 0)]));
   document.getElementById(`${id}-foot`).innerHTML = `
     <tr><td colspan="${cols}">All ${many}</td>${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}">${sum[k]}</td>`).join('')}<td></td></tr>`;
-  const missing = rows.filter(r => (!r.sub.forLane || r.sub.lane) && isStale(r.cur)).length;
+  const missing = rows.filter(r => (!r.sub.forStream || r.sub.stream) && isStale(r.cur)).length;
   document.getElementById(`${id}-count`).textContent = count(rows.length, one, many)
     + (!rows.length ? '' : missing ? ` · ${missing} without an update this week` : ' · all updated this week');
   return rows;
 }
 
-let overviewRows = [], laneRows = []; // as last rendered, for clicks and the CSV
+let overviewRows = [], streamRows = []; // as last rendered, for clicks and the CSV
 function renderOverview() {
   overviewRows = renderOverviewTable('overview', programsInOrder().map(programSubject), 'program', 'programs');
 }
-function renderLaneOverview() {
+function renderStreamOverview() {
   const p = currentWorkspace();
-  laneRows = renderOverviewTable('lanes', lanesInOrder().map(name => ({ ...laneSubject(p, name), forLane: true })), 'swimlane', 'swimlanes');
+  streamRows = renderOverviewTable('streams', streamsInOrder().map(name => ({ ...streamSubject(p, name), forStream: true })), 'stream', 'streams');
 }
 
-function downloadOverviewCSV(forLane) {
-  const rows = forLane ? (renderLaneOverview(), laneRows) : (renderOverview(), overviewRows);
-  const head = [...(forLane ? ['Swimlane'] : ['Program number', 'Program']), 'Area lead', ...(forLane ? [] : ['Overall RAG']),
+function downloadOverviewCSV(forStream) {
+  const rows = forStream ? (renderStreamOverview(), streamRows) : (renderOverview(), overviewRows);
+  const head = [...(forStream ? ['Stream'] : ['Program number', 'Program']), 'Area lead', ...(forStream ? [] : ['Overall RAG']),
     'Previous weekly RAG', 'Previous week ending', 'Current weekly RAG', 'Current week ending', 'Trend', 'Summary',
     ...MS_BUCKETS.map(([, l]) => `Milestones ${l.toLowerCase()}`)];
-  const lines = rows.map(({ sub: { p, lane, rec }, cur, prev, ov }) => [
-    ...(forLane ? [lane] : [p.number, p.name]), rec.lead, ...(forLane ? [] : [p.status]),
+  const lines = rows.map(({ sub: { p, stream, rec }, cur, prev, ov }) => [
+    ...(forStream ? [stream] : [p.number, p.name]), rec.lead, ...(forStream ? [] : [p.status]),
     prev?.status, prev?.week_ending, cur?.status, cur?.week_ending, rec.trend,
     mdToText(cur?.summary || ''), ...MS_BUCKETS.map(([k]) => ov[k]),
   ].map(csvEscape).join(','));
@@ -6420,19 +6459,19 @@ function downloadOverviewCSV(forLane) {
   const a = document.createElement('a');
   const p = currentWorkspace();
   const slug = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
-  a.download = `${forLane ? `${slug}-swimlane` : 'program'}-overview-${fmtISO(new Date())}.csv`;
+  a.download = `${forStream ? `${slug}-stream` : 'program'}-overview-${fmtISO(new Date())}.csv`;
   a.href = URL.createObjectURL(blob);
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
 
 /* ---- weekly update dialog ---- */
-// For a program or a swimlane. Opens on this week's update if there is one, otherwise a new one
+// For a program or a stream. Opens on this week's update if there is one, otherwise a new one
 // starting from last week's RAG. Picking a week that already has an update loads it. The area
-// lead and trend are saved to the program or swimlane; the trend is suggested from the change in
+// lead and trend are saved to the program or stream; the trend is suggested from the change in
 // RAG until it's chosen by hand.
 
-let upSubject = null;   // {p, lane, rec, label} being updated
+let upSubject = null;   // {p, stream, rec, label} being updated
 let upEditing = null;   // update being edited; null for a new one
 let upOpened = null, upRecOpened = null; // it, and the area lead and trend, as the dialog showed them
 let upTrendTouched = false;
@@ -6444,7 +6483,7 @@ function openUpdateDialog(sub) {
   const f = document.getElementById('update-form').elements;
   const rg = ragOf(sub.p.id);
   document.getElementById('up-heading').textContent = `Weekly update · ${sub.label}`;
-  document.getElementById('up-badge').textContent = sub.lane ? 'Swimlane update' : 'Weekly update';
+  document.getElementById('up-badge').textContent = sub.stream ? 'Stream update' : 'Weekly update';
   document.getElementById('up-status').innerHTML = rg.names.map(st => `
     <label style="--c:${rg.map[st].base};--t:${rg.map[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('');
   document.getElementById('up-trend').innerHTML = TRENDS.map(t => `
@@ -6459,7 +6498,7 @@ function openUpdateDialog(sub) {
   document.getElementById('update-dialog').showModal();
 }
 
-const subjectUpdates = () => updatesFor(upSubject.p.id, upSubject.lane);
+const subjectUpdates = () => updatesFor(upSubject.p.id, upSubject.stream);
 
 // Fill the form for the chosen week: its update if there is one, otherwise a fresh one
 // (keeping what's been typed, unless the dialog has just opened).
@@ -6510,19 +6549,19 @@ async function submitUpdate(e) {
   if (!parseDate(week)) return (err.textContent = 'Choose the week ending date.');
   const status = document.querySelector('#up-status input:checked')?.value;
   if (!status) return (err.textContent = 'Choose this week’s RAG.');
-  const { p, lane, rec } = upSubject;
+  const { p, stream, rec } = upSubject;
   const now = new Date().toISOString();
   const v = { week_ending: week, status, summary: f.summary.value.trim(), author: f.author.value.trim(), updated: now };
   if (upEditing && !state.updates.includes(upEditing)) return (err.textContent = 'Someone else has just deleted this update.');
   if (upEditing) Object.assign(upEditing, changedFrom(v, upOpened), { updated: now });
-  else state.updates.push({ id: nextUpdateId(), workspace_id: p.id, swimlane: lane, created: now, ...v });
+  else state.updates.push({ id: nextUpdateId(), workspace_id: p.id, stream: stream, created: now, ...v });
   const saves = [saveUpdates(upEditing ? 'Update saved' : 'Update submitted')];
   const changes = changedFrom({ lead: f.lead.value.trim(), trend: f.trend.value }, upRecOpened);
   if (Object.keys(changes).length) {
     Object.assign(rec, changes);
-    if (lane) {
-      if (!state.lanes.includes(rec)) state.lanes.push(rec);
-      saves.push(saveLanes());
+    if (stream) {
+      if (!state.streams.includes(rec)) state.streams.push(rec);
+      saves.push(saveStreams());
     } else {
       p.updated = now;
       saves.push(saveWorkspaces());
@@ -6543,16 +6582,16 @@ async function deleteUpdate() {
   await saveUpdates('Update deleted');
 }
 
-// Show one swimlane on the Gantt chart.
-function openLaneOnGantt(name) {
+// Show one stream on the Gantt chart.
+function openStreamOnGantt(name) {
   clearGanttFilters();
-  ganttFilter.lane = name;
+  ganttFilter.stream = name;
   switchView('gantt');
 }
 
 function wireOverview() {
   document.getElementById('btn-overview-csv').onclick = () => downloadOverviewCSV(false);
-  document.getElementById('btn-lanes-csv').onclick = () => downloadOverviewCSV(true);
+  document.getElementById('btn-streams-csv').onclick = () => downloadOverviewCSV(true);
   document.getElementById('overview-body').addEventListener('click', (e) => {
     const row = e.target.closest('[data-pid]');
     if (e.target.closest('[data-update]')) return openUpdateDialog(programSubject(workspaceById(row.dataset.pid)));
@@ -6561,13 +6600,13 @@ function wireOverview() {
     const open = e.target.closest('[data-open-workspace]');
     if (open) switchWorkspace(open.dataset.openWorkspace, 'gantt');
   });
-  document.getElementById('lanes-body').addEventListener('click', (e) => {
-    const row = e.target.closest('[data-lane]');
+  document.getElementById('streams-body').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-stream]');
     if (!row) return;
-    if (e.target.closest('[data-update]')) return openUpdateDialog(laneSubject(currentWorkspace(), row.dataset.lane));
+    if (e.target.closest('[data-update]')) return openUpdateDialog(streamSubject(currentWorkspace(), row.dataset.stream));
     const bucket = e.target.closest('[data-bucket]');
-    if (bucket) return openBucket(state.workspaceId, bucket.dataset.bucket, row.dataset.lane);
-    if (e.target.closest('[data-open-lane]')) openLaneOnGantt(row.dataset.lane);
+    if (bucket) return openBucket(state.workspaceId, bucket.dataset.bucket, row.dataset.stream);
+    if (e.target.closest('[data-open-stream]')) openStreamOnGantt(row.dataset.stream);
   });
   const dlg = document.getElementById('update-dialog');
   const form = document.getElementById('update-form');
@@ -6580,6 +6619,536 @@ function wireOverview() {
   document.getElementById('up-close').onclick = () => dlg.close();
   document.getElementById('up-delete').onclick = deleteUpdate;
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+}
+
+/* ================= risks, issues and dependencies ================= */
+// Each workspace keeps a register (raid.csv) of risks (what might happen), issues (what has
+// happened) and dependencies (what the plan needs from others, or others need from it). An entry
+// can be linked to any number of the workspace's items and streams: `links` holds them as
+// `item:<id>` and `stream:<name>`, ;-separated in the file. A link to an item that's since been
+// deleted is kept and shown as deleted, as reports are. A risk is rated by likelihood × impact,
+// an issue by its impact. A dependency has its own statuses, a stream, a RAG (one of the
+// workspace's RAG options), and a priority and type from lists set in Workspace settings.
+//
+// Any entry can have summary notes (raid-notes.csv). Like a SharePoint "append changes" field,
+// a note is added with the time, and then kept: notes are never edited, only added to. They're
+// a file of their own so two people adding notes at once never clash; the server signs each new
+// note with the login ID (changedBy in server.js).
+
+const RAID_KINDS = {
+  risk: {
+    one: 'Risk', many: 'Risks', prefix: 'R', response: 'Mitigation', statuses: ['Open', 'In progress', 'Closed'], done: 'Closed',
+    placeholder: 'What’s being done to make it less likely, or to soften the blow',
+  },
+  issue: {
+    one: 'Issue', many: 'Issues', prefix: 'I', response: 'Resolution plan', statuses: ['Open', 'In progress', 'Closed'], done: 'Closed',
+    placeholder: 'What’s being done to resolve it, and by when',
+  },
+  dependency: {
+    one: 'Dependency', many: 'Dependencies', prefix: 'D', response: 'Agreement / next action', statuses: ['Not started', 'At risk', 'Blocked', 'Complete'], done: 'Complete',
+    placeholder: 'What’s been agreed with the other party, and what happens next',
+  },
+};
+const RAID_LEVELS = ['Low', 'Medium', 'High'];
+const RAID_COLUMNS = ['id', 'workspace_id', 'kind', 'ref', 'title', 'description', 'stream', 'owner', 'status', 'rag', 'priority', 'dep_type',
+  'likelihood', 'impact', 'due', 'party', 'response', 'links', 'raised', 'created', 'updated'];
+const NOTE_COLUMNS = ['id', 'workspace_id', 'raid_id', 'at', 'by', 'text'];
+// A workspace's dependency priorities (highest first) and types, until it sets its own.
+const DEFAULT_DEP_LISTS = { dep_priorities: ['Critical', 'High', 'Medium', 'Low'], dep_types: ['Internal', 'External', 'Supplier', 'Technical'] };
+const depList = (workspaceId, key) => {
+  const own = (workspaceById(workspaceId)?.[key] || '').split(';').map(x => x.trim()).filter(Boolean);
+  return own.length ? own : DEFAULT_DEP_LISTS[key];
+};
+
+const raidKind = (v) => { const t = String(v ?? '').trim().toLowerCase(); return t.startsWith('r') ? 'risk' : t.startsWith('i') ? 'issue' : t.startsWith('d') ? 'dependency' : ''; };
+// A value from a fixed list, matched ignoring case; one that isn't in it is kept as it is.
+const fromList = (v, list) => list.find(x => x.toLowerCase() === String(v ?? '').trim().toLowerCase()) || String(v ?? '').trim();
+const raidLink = (v) => { const m = String(v).trim().match(/^(item|stream):(.+)$/i); return m ? `${m[1].toLowerCase()}:${m[2].trim()}` : ''; };
+// Statuses from earlier files, in a dependency's terms.
+const DEP_STATUS_WAS = { open: 'Not started', 'in progress': 'Not started', closed: 'Complete' };
+
+function rowsToRaid(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const ids = new Set(state.workspaces.map(p => p.id));
+  const out = rows.slice(1).map(r => {
+    const o = {};
+    for (const k of RAID_COLUMNS) o[k] = (r[header.indexOf(k)] ?? '').trim(); // by name only: `status` and `rag` are both columns here
+    const kind = raidKind(o.kind);
+    const d = RAID_KINDS[kind];
+    let status = d ? fromList(o.status, d.statuses) : o.status;
+    if (kind === 'dependency') status = DEP_STATUS_WAS[status.toLowerCase()] || status;
+    return {
+      ...o, kind, status: status || d?.statuses[0], rag: o.rag && normaliseStatus(o.rag, o.workspace_id),
+      likelihood: fromList(o.likelihood, RAID_LEVELS), impact: fromList(o.impact, RAID_LEVELS),
+      priority: fromList(o.priority, depList(o.workspace_id, 'dep_priorities')), dep_type: fromList(o.dep_type, depList(o.workspace_id, 'dep_types')),
+      links: [...new Set(o.links.split(';').map(raidLink).filter(Boolean))],
+    };
+  }).filter(r => ids.has(r.workspace_id) && r.kind);
+  let last = Math.max(0, ...out.map(r => (/^\d+$/.test(r.id) ? +r.id : 0)));
+  const seen = new Set();
+  for (const r of out) {
+    if (!/^\d+$/.test(r.id) || seen.has(r.id)) r.id = String(++last);
+    seen.add(r.id);
+  }
+  return out;
+}
+function raidToCSV(list) {
+  return [RAID_COLUMNS.join(','), ...list.map(r => RAID_COLUMNS.map(k => csvEscape(k === 'links' ? r.links.join(';') : r[k])).join(','))].join('\n') + '\n';
+}
+function rowsToRaidNotes(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const ids = new Set(state.workspaces.map(p => p.id));
+  return rows.slice(1).map(r => Object.fromEntries(NOTE_COLUMNS.map(k => [k, (r[header.indexOf(k)] ?? '').trim()])))
+    .filter(n => ids.has(n.workspace_id) && n.raid_id && n.text);
+}
+function raidNotesToCSV(list) {
+  return [NOTE_COLUMNS.join(','), ...list.map(n => NOTE_COLUMNS.map(k => csvEscape(n[k])).join(','))].join('\n') + '\n';
+}
+const nextRaidId = () => takeId('raid', () => String(Math.max(0, ...state.raid.map(r => +r.id || 0)) + 1));
+const nextNoteId = () => takeId('raid-notes', () => String(Math.max(0, ...state.raidNotes.map(n => +n.id || 0)) + 1));
+// The next free ref of a kind in a workspace: R1, R2… / I1… / D1….
+function nextRaidRef(workspaceId, kind) {
+  const pre = RAID_KINDS[kind].prefix;
+  const n = state.raid.filter(r => r.workspace_id === workspaceId).map(r => r.ref.match(new RegExp(`^${pre}-?(\\d+)$`, 'i'))?.[1]).filter(Boolean);
+  return `${pre}${Math.max(0, ...n.map(Number)) + 1}`;
+}
+
+const raidOf = (workspaceId = state.workspaceId) => state.raid.filter(r => r.workspace_id === workspaceId);
+const isClosed = (r) => r.status === RAID_KINDS[r.kind].done;
+const raidOverdue = (r) => !isClosed(r) && r.due && r.due < fmtISO(new Date());
+// Entries linked to an item (directly) or a stream.
+const raidLinkedTo = (link) => raidOf().filter(r => r.links.includes(link));
+// An entry's notes, newest first.
+const notesOf = (r) => state.raidNotes.filter(n => n.raid_id === r.id).sort((a, b) => b.at.localeCompare(a.at) || +b.id - +a.id);
+
+// Rating: { level: 'High' | 'Medium' | 'Low' | '', score (0–9, for sorting), label } — a risk's
+// from likelihood × impact, an issue's its impact, a dependency's its priority.
+function raidRating(r) {
+  if (r.kind === 'dependency') {
+    const list = depList(r.workspace_id, 'dep_priorities'), i = list.indexOf(r.priority);
+    if (!r.priority) return { level: '', score: 0, label: '' };
+    if (i < 0) return { level: 'Medium', score: 0, label: r.priority };
+    const pos = list.length < 2 ? 0 : i / (list.length - 1); // 0 = top priority
+    return { level: pos < 1 / 3 ? 'High' : pos > 2 / 3 ? 'Low' : 'Medium', score: 9 * (1 - pos), label: r.priority };
+  }
+  const i = RAID_LEVELS.indexOf(r.impact) + 1;
+  const l = RAID_LEVELS.indexOf(r.likelihood) + 1;
+  if (r.kind !== 'risk' || !i || !l) return { level: i ? r.impact : '', score: i * 3, label: i ? r.impact : '' };
+  const score = l * i;
+  const level = score >= 6 ? 'High' : score >= 3 ? 'Medium' : 'Low';
+  return { level, score, label: level };
+}
+const ratingPill = (rt, title = '') => (rt.label ? `<span class="lvl lvl-${rt.level.toLowerCase()}" ${title ? `title="${escAttr(title)}"` : ''}>${escAttr(rt.label)}</span>` : '<span class="muted">—</span>');
+const raidStatusBadge = (r) => `<span class="raid-status raid-status-${r.status.toLowerCase().replace(/\s+/g, '-')}">${escAttr(r.status)}</span>`;
+
+// What a link reads as, and whether it still points at something.
+function linkInfo(link) {
+  const [type, ...rest] = link.split(':');
+  const key = rest.join(':');
+  if (type === 'stream') return { type, key, label: key, title: `Stream: ${key}`, live: state.items.some(m => m.stream === key) || state.streams.some(l => l.workspace_id === state.workspaceId && l.name === key) };
+  const m = itemById(key);
+  return { type, key, label: m ? fullLabel(m) : `#${key}`, title: m ? fullLabel(m) : `Deleted ${T.item} #${key}`, live: !!m };
+}
+const linkChip = (link, removable) => {
+  const x = linkInfo(link);
+  const cls = `chip raid-link raid-link-${x.type}${x.live ? '' : ' gone'}`;
+  const body = `${x.type === 'stream' ? '<i class="raid-link-ico" aria-hidden="true">≡</i>' : ''}<span class="raid-link-text">${escAttr(x.label)}</span>`;
+  return removable
+    ? `<span class="${cls}" title="${escAttr(x.title)}">${body}<button type="button" data-rdrm="${escAttr(link)}" title="Remove link">×</button></span>`
+    : `<button type="button" class="${cls}" data-raid-go="${escAttr(link)}" title="${escAttr(x.title)}${x.live ? ' — show on the Gantt chart' : ''}" ${x.live ? '' : 'disabled'}>${body}</button>`;
+};
+const streamGo = (name) => (name ? `<button type="button" class="link-btn" data-raid-go="stream:${escAttr(name)}" title="Show this stream on the Gantt chart">${escAttr(name)}</button>` : '<span class="muted">—</span>');
+const noteLine = (n) => `<span class="note-when">${fmtStamp(n.at)}${n.by ? ` · ${escAttr(n.by)}` : ''}</span> ${escAttr(n.text)}`;
+
+/* ---- the register ---- */
+const raidFilter = { kind: '', status: 'open', q: '', link: '' };
+let raidRows = []; // as last rendered, for the CSV
+
+function raidMatches(r, ignoreKind) {
+  const f = raidFilter;
+  if (!ignoreKind && f.kind && r.kind !== f.kind) return false;
+  if (f.status === 'open' ? isClosed(r) : f.status === 'done' && !isClosed(r)) return false;
+  if (f.link && !r.links.includes(f.link) && !(f.link === `stream:${r.stream}`)) return false;
+  const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [r.ref, r.title, r.description, r.owner, r.party, r.response, r.stream, r.rag, r.priority, r.dep_type, RAID_KINDS[r.kind].one, r.status,
+    ...notesOf(r).map(n => n.text), ...r.links.map(l => { const x = linkInfo(l); return `${x.label} ${x.title}`; })].join(' ').toLowerCase();
+  return words.every(w => hay.includes(w));
+}
+// Blocked and at risk first, closed last; then highest rated, soonest due, and by ref.
+const STATUS_ORDER = { Blocked: 0, 'At risk': 1, 'In progress': 2, Open: 3, 'Not started': 3 };
+const raidOrder = (a, b) => (isClosed(a) - isClosed(b)) || (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3) || raidRating(b).score - raidRating(a).score
+  || (a.due || '9999').localeCompare(b.due || '9999') || cmpRef(a, b);
+
+// The table's columns: one set for everything, and one for dependencies alone.
+const dash = '<span class="muted">—</span>';
+const cellOr = (v) => (v ? escAttr(v) : dash);
+const RAID_TABLES = {
+  all: [
+    ['Ref', '', (r) => (r.ref ? escAttr(r.ref) : dash), 'raid-ref'],
+    ['Type', '', (r) => `<span class="raid-kind raid-kind-${r.kind}">${RAID_KINDS[r.kind].one}</span>`],
+    ['Title', 'raid-title', (r) => raidTitleCell(r), 'raid-title'],
+    ['Linked to', '', (r) => r.links.map(l => linkChip(l)).join('') || dash, 'raid-links'],
+    ['Owner', '', (r) => cellOr(r.owner)],
+    ['Rating', '', (r) => ratingPill(raidRating(r), ratingTitle(r)), '', 'Risks: likelihood × impact. Issues: impact. Dependencies: priority'],
+    ['Status', '', raidStatusBadge],
+    ['Due', '', (r) => dueCell(r), 'raid-due'],
+    ['Response', 'raid-resp', (r) => cellOr(r.response), 'raid-resp'],
+  ],
+  dependency: [
+    ['Ref', '', (r) => (r.ref ? escAttr(r.ref) : dash), 'raid-ref'],
+    ['Title', 'raid-title', (r) => raidTitleCell(r), 'raid-title'],
+    ['Type', '', (r) => cellOr(r.dep_type)],
+    ['Stream', '', (r) => streamGo(r.stream)],
+    ['Linked to', '', (r) => r.links.map(l => linkChip(l)).join('') || dash, 'raid-links'],
+    ['Owner', '', (r) => cellOr(r.owner)],
+    ['Priority', '', (r) => ratingPill(raidRating(r))],
+    ['RAG', '', (r) => (r.rag ? statusPill(r.rag, ragOf(r.workspace_id).map) : dash)],
+    ['Status', '', raidStatusBadge],
+    ['Due', '', (r) => dueCell(r), 'raid-due'],
+    ['Latest note', 'raid-resp', (r) => { const n = notesOf(r)[0]; return n ? `${noteLine(n)}${notesOf(r).length > 1 ? `<small class="muted"> · ${notesOf(r).length - 1} earlier</small>` : ''}` : dash; }, 'raid-resp raid-note'],
+  ],
+};
+function raidTitleCell(r) {
+  return `<b>${escAttr(r.title) || '<span class="muted">(untitled)</span>'}</b>${r.description ? `<div class="raid-desc">${escAttr(r.description)}</div>` : ''}`
+    + `${r.kind === 'dependency' && r.party ? `<div class="raid-desc">With: ${escAttr(r.party)}</div>` : ''}`;
+}
+const ratingTitle = (r) => (r.kind === 'risk' ? `Likelihood ${r.likelihood || '?'} × impact ${r.impact || '?'}` : r.kind === 'issue' ? `Impact ${r.impact || '?'}` : `Priority ${r.priority || '?'}`);
+const dueCell = (r) => (r.due ? `<span class="${raidOverdue(r) ? 'late' : ''}" ${raidOverdue(r) ? 'title="Overdue"' : ''}>${fmtShort(r.due)}</span>` : dash);
+
+function renderRaid() {
+  const all = raidOf();
+  const base = all.filter(r => raidMatches(r, true));
+  const counts = Object.fromEntries(Object.keys(RAID_KINDS).map(k => [k, base.filter(r => r.kind === k).length]));
+  document.getElementById('raid-kind').innerHTML = [['', 'All', base.length], ...Object.entries(RAID_KINDS).map(([k, d]) => [k, d.many, counts[k]])]
+    .map(([k, label, n]) => `<label><input type="radio" name="raid-kind" value="${k}" ${raidFilter.kind === k ? 'checked' : ''} /><span>${label} <b class="seg-count raid-seg-count">${n}</b></span></label>`).join('');
+  document.getElementById('raid-status').value = raidFilter.status;
+  const chip = document.getElementById('raid-link');
+  chip.hidden = !raidFilter.link;
+  chip.innerHTML = raidFilter.link ? `Linked to ${escAttr(linkInfo(raidFilter.link).title)}<button type="button" data-raid-all title="Show everything">✕</button>` : '';
+  document.getElementById('btn-raid-add').textContent = `+ Add ${raidFilter.kind ? RAID_KINDS[raidFilter.kind].one.toLowerCase() : ''}`.trim();
+  raidRows = base.filter(r => raidMatches(r)).sort(raidOrder);
+  const cols = RAID_TABLES[raidFilter.kind === 'dependency' ? 'dependency' : 'all'];
+  document.getElementById('raid-head').innerHTML = `<tr>${cols.map(([h, cls, , , title]) => `<th class="${cls}" ${title ? `title="${escAttr(title)}"` : ''}>${h}</th>`).join('')}</tr>`;
+  document.getElementById('raid-body').innerHTML = raidRows.map(r => `<tr data-raid="${r.id}" class="raid-row${isClosed(r) ? ' closed' : ''}">
+      ${cols.map(([, , cell, cls]) => `<td class="${cls || ''}">${cell(r)}</td>`).join('')}
+    </tr>`).join('')
+    || `<tr><td colspan="${cols.length}" class="grid-empty">${all.length ? 'Nothing matches the filters.' : 'No risks, issues or dependencies yet. Use <b>+ Add</b> to record one.'}</td></tr>`;
+  const overdue = raidRows.filter(raidOverdue).length;
+  const blocked = raidRows.filter(r => r.status === 'Blocked').length;
+  document.getElementById('raid-count').textContent = count(raidRows.length, 'entry', 'entries')
+    + (blocked ? ` · ${blocked} blocked` : '') + (overdue ? ` · ${overdue} overdue` : '');
+  updateRaidBadge();
+}
+
+// The menu shows how many entries are open in the workspace.
+function updateRaidBadge() {
+  const n = raidOf().filter(r => !isClosed(r)).length;
+  const b = document.getElementById('nav-raid-count');
+  b.hidden = !n;
+  b.textContent = n;
+  b.title = count(n, 'open entry', 'open entries');
+}
+
+// The register, showing only what's linked to an item or stream.
+function showRaidFor(link) {
+  raidFilter.link = link;
+  raidFilter.kind = '';
+  raidFilter.status = '';
+  raidFilter.q = '';
+  document.getElementById('raid-q').value = '';
+  document.querySelectorAll('dialog[open]').forEach(d => d.close());
+  switchView('raid');
+}
+
+function goToLink(link) {
+  const x = linkInfo(link);
+  if (!x.live) return;
+  if (x.type === 'stream') openStreamOnGantt(x.key);
+  else showItemOnGantt(x.key);
+}
+
+function downloadRaidCSV() {
+  renderRaid();
+  const head = ['Ref', 'Type', 'Title', 'Description', 'Stream', 'Linked to', 'Owner', 'Status', 'RAG', 'Priority', 'Dependency type', 'Likelihood', 'Impact', 'Rating',
+    'Due', 'Raised', 'Other party', 'Response', 'Summary notes'];
+  const lines = raidRows.map(r => [r.ref, RAID_KINDS[r.kind].one, r.title, r.description, r.stream, r.links.map(l => linkInfo(l).title).join('; '), r.owner,
+    r.status, r.rag, r.priority, r.dep_type, r.likelihood, r.impact, raidRating(r).label, r.due, r.raised, r.party, r.response,
+    notesOf(r).map(n => `${fmtStamp(n.at)}${n.by ? ` (${n.by})` : ''}: ${n.text}`).join('\n')].map(csvEscape).join(','));
+  const blob = new Blob(['﻿' + [head.map(csvEscape).join(','), ...lines].join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
+  const p = currentWorkspace();
+  const slug = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
+  const a = document.createElement('a');
+  a.download = `${slug}-risks-issues-dependencies-${fmtISO(new Date())}.csv`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+
+/* ---- the dialog ---- */
+let rdEditing = null; // entry being edited; null for a new one
+let rdOpened = null;  // it as the dialog showed it, so only what's changed here is saved
+let rdLinks = [];
+const RD_FIELDS = ['ref', 'title', 'description', 'stream', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact', 'due', 'raised', 'party', 'response'];
+// Fields only some kinds have: cleared on saving any other kind.
+const RD_ONLY = { likelihood: ['risk'], impact: ['risk', 'issue'], stream: ['dependency'], rag: ['dependency'], priority: ['dependency'], dep_type: ['dependency'], party: ['dependency'] };
+
+// Options for a select, keeping a value that isn't in the list so it can't be lost.
+const keepOptions = (list, selected, blank = '—') => `<option value="">${blank}</option>`
+  + [...list, ...(selected && !list.includes(selected) ? [selected] : [])].map(v => `<option value="${escAttr(v)}" ${v === selected ? 'selected' : ''}>${escAttr(v)}</option>`).join('');
+
+// `preset` fills a new entry: { kind, links }.
+function openRaidDialog(r, preset = {}) {
+  hideQuick();
+  hideTip();
+  rdEditing = r;
+  rdOpened = r && structuredClone(r);
+  const f = document.getElementById('raid-form').elements;
+  const kind = r?.kind || preset.kind || raidFilter.kind || 'risk';
+  const linkedStream = preset.links?.find(l => l.startsWith('stream:'))?.slice(7) || '';
+  const v = r || {
+    kind, ref: nextRaidRef(state.workspaceId, kind), title: '', description: '', stream: linkedStream, owner: '', status: '', rag: ragOf(state.workspaceId).def,
+    priority: '', dep_type: '', likelihood: 'Medium', impact: 'Medium', due: '', raised: fmtISO(new Date()), party: '', response: '', links: preset.links || [],
+  };
+  document.getElementById('rd-kind').innerHTML = Object.entries(RAID_KINDS).map(([k, d]) =>
+    `<label><input type="radio" name="kind" value="${k}" ${k === v.kind ? 'checked' : ''} /><span>${d.one}</span></label>`).join('');
+  f.likelihood.innerHTML = keepOptions(RAID_LEVELS, v.likelihood);
+  f.impact.innerHTML = keepOptions(RAID_LEVELS, v.impact);
+  const streams = [...new Set([...streamsInOrder(), ...state.streams.filter(l => l.workspace_id === state.workspaceId).map(l => l.name)])].filter(Boolean);
+  f.stream.innerHTML = keepOptions(streams, v.stream);
+  f.rag.innerHTML = keepOptions(ragOf(state.workspaceId).names, v.rag);
+  f.priority.innerHTML = keepOptions(depList(state.workspaceId, 'dep_priorities'), v.priority);
+  f.dep_type.innerHTML = keepOptions(depList(state.workspaceId, 'dep_types'), v.dep_type);
+  for (const k of RD_FIELDS) if (k !== 'status') f[k].value = v[k] ?? '';
+  f.note.value = '';
+  rdLinks = [...v.links];
+  document.getElementById('rd-delete').hidden = !r;
+  document.getElementById('rd-error').textContent = '';
+  refreshDatalists();
+  updateRdKind(v.status);
+  renderRdLinks();
+  renderRdNotes();
+  document.getElementById('raid-dialog').showModal();
+  f.title.focus();
+}
+
+const rdKindNow = () => document.querySelector('#rd-kind input:checked')?.value || 'risk';
+// The fields only one kind has, its statuses, and the words that change with the kind.
+function updateRdKind(status) {
+  const kind = rdKindNow(), d = RAID_KINDS[kind];
+  const f = document.getElementById('raid-form').elements;
+  for (const [k, kinds] of Object.entries(RD_ONLY)) f[k].closest('label').hidden = !kinds.includes(kind);
+  // Changing the kind carries the status across: closed stays closed, anything else starts again.
+  const was = status ?? f.status.value;
+  const kinds = Object.values(RAID_KINDS);
+  const keep = d.statuses.includes(was) ? was : kinds.some(x => x.done === was) ? d.done
+    : kinds.some(x => x.statuses.includes(was)) || !was ? d.statuses[0] : was;
+  f.status.innerHTML = optionList(d.statuses.includes(keep) ? d.statuses : [...d.statuses, keep], keep);
+  document.getElementById('rd-badge').textContent = d.one;
+  document.getElementById('rd-badge').className = `type-badge raid raid-kind-${kind}`;
+  document.getElementById('rd-heading').textContent = rdEditing ? `Edit ${rdEditing.ref || d.one.toLowerCase()}` : `New ${d.one.toLowerCase()}`;
+  document.getElementById('rd-response-label').textContent = d.response;
+  f.response.placeholder = d.placeholder;
+  // A new entry's ref follows its kind until it's typed over.
+  if (!rdEditing && /^[RID]\d+$/.test(f.ref.value)) f.ref.value = nextRaidRef(state.workspaceId, kind);
+}
+
+// Linked items and streams as chips, and a list to add more: whole streams first, then each
+// stream's items.
+function renderRdLinks() {
+  const streams = [...new Set([...streamsInOrder(), ...state.streams.filter(l => l.workspace_id === state.workspaceId).map(l => l.name)])].filter(Boolean);
+  const free = (l) => !rdLinks.includes(l);
+  const streamOpts = streams.filter(n => free(`stream:${n}`)).map(n => `<option value="stream:${escAttr(n)}">${escAttr(n)} (whole stream)</option>`).join('');
+  const groups = streams.map(n => {
+    const items = state.items.filter(m => m.stream === n && free(`item:${m.id}`)).sort(cmpRef);
+    return items.length ? `<optgroup label="${escAttr(n)}">${items.map(m => `<option value="item:${m.id}">${escAttr(fullLabel(m))}</option>`).join('')}</optgroup>` : '';
+  }).join('');
+  const loose = state.items.filter(m => !m.stream && free(`item:${m.id}`)).sort(cmpRef);
+  document.getElementById('rd-links').innerHTML = rdLinks.map(l => linkChip(l, true)).join('') +
+    `<select id="rd-addlink" class="add-dep"><option value="">+ link ${escAttr(T.item)} or stream</option>
+      ${streamOpts ? `<optgroup label="Streams">${streamOpts}</optgroup>` : ''}${groups}
+      ${loose.length ? `<optgroup label="(No stream)">${loose.map(m => `<option value="item:${m.id}">${escAttr(fullLabel(m))}</option>`).join('')}</optgroup>` : ''}
+    </select>`;
+}
+
+// The notes so far, newest first, under the box for a new one.
+function renderRdNotes() {
+  const notes = rdEditing ? notesOf(rdEditing) : [];
+  document.getElementById('rd-notes').innerHTML = notes.length
+    ? notes.map(n => `<li><div class="note-when">${fmtStamp(n.at)}${n.by ? ` · ${escAttr(n.by)}` : ''}</div><div class="note-text">${escAttr(n.text)}</div></li>`).join('')
+    : '<li class="muted">No notes yet.</li>';
+}
+
+async function submitRaid(e) {
+  e.preventDefault();
+  const f = document.getElementById('raid-form').elements;
+  const err = document.getElementById('rd-error');
+  const v = Object.fromEntries(RD_FIELDS.map(k => [k, f[k].value.trim()]));
+  v.kind = rdKindNow();
+  v.links = [...rdLinks];
+  if (!v.title) return (err.textContent = 'Give it a title.');
+  if (v.ref && raidOf().some(r => r !== rdEditing && r.ref.toLowerCase() === v.ref.toLowerCase())) return (err.textContent = `${v.ref} is already used in this workspace.`);
+  for (const [k, kinds] of Object.entries(RD_ONLY)) if (!kinds.includes(v.kind)) v[k] = '';
+  if (rdEditing && !state.raid.includes(rdEditing)) return (err.textContent = 'Someone else has just deleted this.');
+  const now = new Date().toISOString();
+  const what = RAID_KINDS[v.kind].one;
+  let r = rdEditing;
+  if (r) Object.assign(r, changedFrom(v, rdOpened), { updated: now });
+  else state.raid.push(r = { id: nextRaidId(), workspace_id: state.workspaceId, ...v, created: now, updated: now });
+  const note = f.note.value.trim();
+  if (note) state.raidNotes.push({ id: nextNoteId(), workspace_id: r.workspace_id, raid_id: r.id, at: now, by: '', text: note });
+  document.getElementById('raid-dialog').close();
+  rerenderCurrentView();
+  const changed = !rdEditing || !same(r, rdOpened);
+  await Promise.all([changed && saveRaid(`${what} ${rdEditing ? 'saved' : 'added'}`), note && saveRaidNotes('Note added')]);
+}
+
+async function deleteRaid() {
+  const r = rdEditing;
+  if (!r) return;
+  const snap = snapshotData();
+  const hadNotes = state.raidNotes.some(n => n.raid_id === r.id);
+  state.raid = state.raid.filter(x => x !== r);
+  state.raidNotes = state.raidNotes.filter(n => n.raid_id !== r.id);
+  document.getElementById('raid-dialog').close();
+  rerenderCurrentView();
+  offerUndo(snap, `Deleted ${RAID_KINDS[r.kind].one.toLowerCase()} ${r.ref || r.title}`);
+  await Promise.all([saveRaid(`${RAID_KINDS[r.kind].one} deleted`), hadNotes && saveRaidNotes()]);
+}
+
+// A line in an item's hover card: what's open against it.
+function raidTipLine(m) {
+  const open = raidLinkedTo(`item:${m.id}`).filter(r => !isClosed(r));
+  if (!open.length) return '';
+  const n = Object.entries(RAID_KINDS).map(([k, d]) => { const c = open.filter(r => r.kind === k).length; return c && count(c, d.one.toLowerCase(), d.many.toLowerCase()); }).filter(Boolean);
+  const blocked = open.some(r => r.status === 'Blocked');
+  const high = open.some(r => raidRating(r).level === 'High');
+  const flag = blocked ? ' — one is blocked' : high ? ' — rated high' : '';
+  return `<div class="tip-row ${flag ? 'tip-late' : 'tip-muted'}">Open: ${n.join(', ')}${flag}</div>`;
+}
+
+/* ---- settings: dependency priorities and types ---- */
+// Workspace settings → Dependencies edits the two lists (kept in workspaces.csv, ;-separated;
+// blank means the standard lists). Renaming a value renames it on the workspace's dependencies;
+// removing one leaves it on any dependency that has it, where it still shows.
+const DEP_LIST_KEYS = ['dep_priorities', 'dep_types'];
+let pgDepLists = {}; // key → [{ orig (name when the dialog opened, null if new), name }]
+
+function loadPgDepLists(p) {
+  for (const key of DEP_LIST_KEYS) pgDepLists[key] = depList(p?.id, key).map(name => ({ orig: p ? name : null, name }));
+  renderPgDepLists();
+}
+const depUsage = (workspaceId, field, name) => state.raid.filter(r => r.workspace_id === workspaceId && r[field] === name).length;
+function renderPgDepLists() {
+  const field = { dep_priorities: 'priority', dep_types: 'dep_type' };
+  for (const key of DEP_LIST_KEYS) {
+    const list = pgDepLists[key];
+    document.getElementById(`pg-${key}`).innerHTML = list.map((x, i) => {
+      const used = pgEditing && x.orig ? depUsage(pgEditing.id, field[key], x.orig) : 0;
+      return `<li data-i="${i}">
+        <input value="${escAttr(x.name)}" data-dl-name aria-label="Name" />
+        <button type="button" class="btn btn-sm btn-ghost" data-dl-move="-1" ${i ? '' : 'disabled'} title="Move up">↑</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-dl-move="1" ${i < list.length - 1 ? '' : 'disabled'} title="Move down">↓</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-dl-remove title="${used ? `Remove — ${count(used, 'dependency keeps', 'dependencies keep')} it` : 'Remove'}">✕</button>
+        ${used ? `<small class="muted">${used} in use</small>` : ''}
+      </li>`;
+    }).join('');
+  }
+}
+// Check the lists; an error message or null. Then the lists as stored ('' for the standard ones).
+function checkPgDepLists() {
+  const words = { dep_priorities: 'priority', dep_types: 'dependency type' };
+  for (const key of DEP_LIST_KEYS) {
+    const list = pgDepLists[key];
+    for (const x of list) x.name = x.name.trim().replace(/;/g, ',');
+    if (list.some(x => !x.name)) return `Every ${words[key]} needs a name.`;
+    const seen = new Set();
+    for (const x of list) {
+      if (seen.has(x.name.toLowerCase())) return `There are two of “${x.name}” in the ${words[key]} list.`;
+      seen.add(x.name.toLowerCase());
+    }
+  }
+  return null;
+}
+const pgDepListValue = (key) => { const names = pgDepLists[key].map(x => x.name); return !names.length || names.join(';') === DEFAULT_DEP_LISTS[key].join(';') ? '' : names.join(';'); };
+// Rename values on the workspace's dependencies to match; true if any changed.
+function applyPgDepRenames(workspaceId) {
+  const field = { dep_priorities: 'priority', dep_types: 'dep_type' };
+  let changed = false;
+  for (const key of DEP_LIST_KEYS) {
+    for (const x of pgDepLists[key]) {
+      if (x.orig == null || x.orig === x.name) continue;
+      for (const r of state.raid) if (r.workspace_id === workspaceId && r[field[key]] === x.orig) { r[field[key]] = x.name; changed = true; }
+    }
+  }
+  return changed;
+}
+function wirePgDepLists() {
+  for (const key of DEP_LIST_KEYS) {
+    const ul = document.getElementById(`pg-${key}`);
+    ul.addEventListener('input', (e) => { if (e.target.matches('[data-dl-name]')) pgDepLists[key][+e.target.closest('li').dataset.i].name = e.target.value; });
+    ul.addEventListener('click', (e) => {
+      const li = e.target.closest('li[data-i]');
+      if (!li) return;
+      const i = +li.dataset.i, list = pgDepLists[key];
+      const mv = e.target.closest('[data-dl-move]');
+      if (mv) { const j = i + +mv.dataset.dlMove; [list[i], list[j]] = [list[j], list[i]]; renderPgDepLists(); }
+      else if (e.target.closest('[data-dl-remove]')) { list.splice(i, 1); renderPgDepLists(); }
+    });
+  }
+  document.querySelectorAll('[data-dl-add]').forEach(b => {
+    b.onclick = () => {
+      const list = pgDepLists[b.dataset.dlAdd];
+      list.push({ orig: null, name: '' });
+      renderPgDepLists();
+      document.querySelector(`#pg-${b.dataset.dlAdd} li:last-child input`).focus();
+    };
+  });
+  document.querySelectorAll('[data-dl-reset]').forEach(b => {
+    b.onclick = () => {
+      const key = b.dataset.dlReset;
+      pgDepLists[key] = DEFAULT_DEP_LISTS[key].map(name => ({ orig: pgDepLists[key].some(x => x.orig === name) ? name : null, name }));
+      renderPgDepLists();
+    };
+  });
+}
+
+function wireRaid() {
+  document.getElementById('raid-kind').addEventListener('change', (e) => { raidFilter.kind = e.target.value; renderRaid(); });
+  document.getElementById('raid-status').onchange = (e) => { raidFilter.status = e.target.value; renderRaid(); };
+  document.getElementById('raid-q').oninput = (e) => { raidFilter.q = e.target.value; renderRaid(); };
+  document.getElementById('raid-link').addEventListener('click', (e) => { if (e.target.closest('[data-raid-all]')) { raidFilter.link = ''; raidFilter.status = 'open'; renderRaid(); } });
+  document.getElementById('btn-raid-add').onclick = () => openRaidDialog(null, { links: raidFilter.link ? [raidFilter.link] : [] });
+  document.getElementById('btn-raid-csv').onclick = downloadRaidCSV;
+  document.getElementById('raid-body').addEventListener('click', (e) => {
+    const go = e.target.closest('[data-raid-go]');
+    if (go) return goToLink(go.dataset.raidGo);
+    const row = e.target.closest('[data-raid]');
+    if (row) openRaidDialog(state.raid.find(r => r.id === row.dataset.raid) || null);
+  });
+  const dlg = document.getElementById('raid-dialog');
+  const form = document.getElementById('raid-form');
+  form.addEventListener('submit', submitRaid);
+  document.getElementById('rd-kind').addEventListener('change', () => updateRdKind());
+  document.getElementById('rd-links').addEventListener('change', (e) => {
+    if (e.target.id !== 'rd-addlink' || !e.target.value) return;
+    rdLinks.push(e.target.value);
+    renderRdLinks();
+    document.getElementById('rd-addlink').focus();
+  });
+  document.getElementById('rd-links').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rdrm]');
+    if (!b) return;
+    rdLinks = rdLinks.filter(l => l !== b.dataset.rdrm);
+    renderRdLinks();
+  });
+  document.getElementById('rd-cancel').onclick = () => dlg.close();
+  document.getElementById('rd-close').onclick = () => dlg.close();
+  document.getElementById('rd-delete').onclick = deleteRaid;
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+  wirePgDepLists();
 }
 
 /* ================= what changed ================= */
@@ -6724,14 +7293,14 @@ function wireChanges() {
   });
 }
 
-// Open the Gantt chart on one item: clear filters that hide it, unfold its swimlane, scroll to it
+// Open the Gantt chart on one item: clear filters that hide it, unfold its stream, scroll to it
 // and give it the keyboard focus (its chain lit and its card showing).
 function showItemOnGantt(id) {
   const m = itemById(id);
   if (!m) return;
   switchView('gantt');
   if (!ganttMatches(m)) clearGanttFilters();
-  if (collapsedLanes().has(m.swimlane)) toggleLane(m.swimlane, false);
+  if (collapsedStreams().has(m.stream)) toggleStream(m.stream, false);
   const d = parseDate(m.start), e = parseDate(m.end);
   if (d < state.rangeStart || e > state.rangeEnd) { autoRange(); }
   renderGantt();
@@ -6918,7 +7487,7 @@ function downloadPNG() {
 }
 
 /* ================= find (⌘K) ================= */
-// One box to jump anywhere: any item in any workspace (by ref, title, owner or swimlane), a
+// One box to jump anywhere: any item in any workspace (by ref, title, owner or stream), a
 // workspace, or a page. Every word typed has to match; refs and the starts of titles rank first.
 
 let palHits = [], palSel = 0;
@@ -6928,7 +7497,8 @@ function palPages() {
   return [
     ['overview', 'Program overview'], ['workspaces', 'All workspaces'], ['gantt', `Gantt chart · ${ws.name}`],
     ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`],
-    ['changes', `What changed · ${ws.name}`], ['dates', `Date history · ${ws.name}`], ['lanes', `Swimlane overview · ${ws.name}`],
+    ['raid', `Risks, issues & dependencies · ${ws.name}`],
+    ['changes', `What changed · ${ws.name}`], ['dates', `Date history · ${ws.name}`], ['streams', `Stream overview · ${ws.name}`],
   ].map(([view, label]) => ({ kind: 'page', view, label, hay: label.toLowerCase() }));
 }
 
@@ -6949,8 +7519,13 @@ function palSearch(q) {
   }
   for (const m of allItems()) {
     const p = workspaceById(m.workspace_id);
-    const s = score(m.ref, m.title, [m.ref, m.title, m.owner, m.swimlane, m.subswimlane, p?.code, p?.name].join(' ').toLowerCase());
+    const s = score(m.ref, m.title, [m.ref, m.title, m.owner, m.stream, m.substream, p?.code, p?.name].join(' ').toLowerCase());
     if (s >= 0) hits.push({ kind: 'item', m, p, s });
+  }
+  for (const r of state.raid) {
+    const p = workspaceById(r.workspace_id);
+    const s = score(r.ref, r.title, [r.ref, r.title, r.owner, RAID_KINDS[r.kind].one, p?.code, p?.name].join(' ').toLowerCase());
+    if (s >= 0) hits.push({ kind: 'raid', r, p, s: s + 0.25 });
   }
   return hits.sort((a, b) => a.s - b.s || (a.kind === 'item' && b.kind === 'item' ? (a.p.id === state.workspaceId ? -1 : 0) - (b.p.id === state.workspaceId ? -1 : 0) || cmpRef(a.m, b.m) : 0)).slice(0, 40);
 }
@@ -6964,7 +7539,10 @@ function renderPalette() {
     if (h.kind === 'item') {
       const rg = ragOf(h.p.id);
       main = `${h.m.ref ? `<b class="ref">${escAttr(h.m.ref)}</b> ` : ''}${escAttr(h.m.title)}`;
-      sub = `${statusPill(h.m.status, rg.map)} <span>${escAttr([h.p.code || h.p.name, h.m.swimlane, h.m.owner].filter(Boolean).join(' · '))}</span>`;
+      sub = `${statusPill(h.m.status, rg.map)} <span>${escAttr([h.p.code || h.p.name, h.m.stream, h.m.owner].filter(Boolean).join(' · '))}</span>`;
+    } else if (h.kind === 'raid') {
+      main = `${h.r.ref ? `<b class="ref">${escAttr(h.r.ref)}</b> ` : ''}${escAttr(h.r.title)}`;
+      sub = `<span>${escAttr([RAID_KINDS[h.r.kind].one, h.r.status, h.p.code || h.p.name, h.r.owner].filter(Boolean).join(' · '))}</span>`;
     } else if (h.kind === 'ws') {
       main = `${escAttr(h.p.name)}${h.p.code ? ` <span class="prog-code">${escAttr(h.p.code)}</span>` : ''}`;
       sub = '<span>Workspace</span>';
@@ -7001,6 +7579,11 @@ async function pickPalette(i) {
     return switchView(h.view);
   }
   if (h.kind === 'ws') return switchWorkspace(h.p.id, 'gantt');
+  if (h.kind === 'raid') {
+    if (h.p.id !== state.workspaceId) await switchWorkspace(h.p.id, 'raid');
+    else switchView('raid');
+    return openRaidDialog(h.r);
+  }
   if (h.p.id !== state.workspaceId) await switchWorkspace(h.p.id, 'gantt');
   showItemOnGantt(h.m.id);
 }
@@ -7042,7 +7625,7 @@ function wirePalette() {
 /* ================= links ================= */
 // The address says where you are, so it can be bookmarked or sent to someone: the view, the
 // workspace and, on the Gantt chart, its search and filters — e.g.
-// #/ws/3/gantt?lane=Delivery&rag=Red,Amber&late=1. #…&item=12 opens the chart on item 12.
+// #/ws/3/gantt?stream=Delivery&rag=Red,Amber&late=1. #…&item=12 opens the chart on item 12.
 
 let routeReady = false; // until the first view is shown, nothing is written over the address
 let lastHash = '';
@@ -7052,7 +7635,7 @@ function readHash() {
   if (!m || !VIEWS.includes(m[2])) return null;
   const q = new URLSearchParams(m[3] || '');
   const filter = {};
-  for (const k of ['q', 'lane', 'owner']) if (q.has(k)) filter[k] = q.get(k);
+  for (const k of ['q', 'stream', 'owner']) if (q.has(k)) filter[k] = q.get(k);
   if (TYPES.includes(q.get('type'))) filter.type = q.get('type');
   if (q.get('rag')) filter.rag = q.get('rag').split(',').filter(Boolean);
   if (q.get('late') === '1') filter.late = true;
@@ -7066,7 +7649,7 @@ function writeHash() {
   if (view === 'gantt') {
     const f = ganttFilter, q = new URLSearchParams();
     if (f.q.trim()) q.set('q', f.q.trim());
-    if (f.lane) q.set('lane', f.lane);
+    if (f.stream) q.set('stream', f.stream);
     if (f.owner) q.set('owner', f.owner);
     if (f.type) q.set('type', f.type);
     if (f.rag.length) q.set('rag', f.rag.join(','));
@@ -7099,7 +7682,7 @@ async function copyLink() {
 // and content, drawn at 2× in the light colours, without the buttons. The page is copied with every
 // element's computed style written onto it and drawn through an SVG image onto a canvas.
 
-const PNG_TARGETS = { overview: 'overview-table', lanes: 'lanes-table', changes: 'ch-body' };
+const PNG_TARGETS = { overview: 'overview-table', streams: 'streams-table', changes: 'ch-body' };
 
 function pngSlug(s) { return s.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase(); }
 
@@ -7185,7 +7768,7 @@ function svgToPNG(svg, w, h) {
 
 /* ================= wiring ================= */
 
-const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'changes', 'dates', 'lanes'];
+const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'raid', 'changes', 'dates', 'streams'];
 const APP_VIEWS = ['overview', 'workspaces']; // views across every workspace
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 const currentView = () => VIEWS.find(isShown) || 'gantt';
@@ -7202,9 +7785,10 @@ function switchView(view) {
   else if (view === 'editor') renderEditor();
   else if (view === 'reports') renderReports();
   else if (view === 'overview') renderOverview();
-  else if (view === 'lanes') renderLaneOverview();
+  else if (view === 'streams') renderStreamOverview();
   else if (view === 'changes') renderChanges();
   else if (view === 'dates') renderDates();
+  else if (view === 'raid') renderRaid();
   else renderWorkspaces();
   for (const v of VIEWS) {
     document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
@@ -7254,6 +7838,7 @@ function wireEvents() {
   document.getElementById('app-main').addEventListener('scroll', () => { if (!quickDirty()) hideQuick(); hideTip(); });
   wireWorkspaces();
   wireOverview();
+  wireRaid();
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
@@ -7281,8 +7866,8 @@ function wireEvents() {
   document.getElementById('toggle-today').onchange = (e) => { state.showToday = e.target.checked; renderGantt(); };
   document.getElementById('link-mode').onchange = (e) => { state.linkMode = e.target.value; saveAppPrefs({ linkMode: state.linkMode }); renderGantt(); };
   document.getElementById('toggle-baseline').onchange = (e) => { state.showBaseline = e.target.checked; saveAppPrefs({ showBaseline: state.showBaseline }); renderGantt(); };
-  document.getElementById('fold-all').onclick = () => foldAllLanes(true);
-  document.getElementById('unfold-all').onclick = () => foldAllLanes(false);
+  document.getElementById('fold-all').onclick = () => foldAllStreams(true);
+  document.getElementById('unfold-all').onclick = () => foldAllStreams(false);
   document.getElementById('baseline-set').onclick = () => setBaseline(true);
   document.getElementById('baseline-clear').onclick = () => setBaseline(false);
 
@@ -7307,7 +7892,7 @@ function wireEvents() {
   gc.addEventListener('pointerdown', (e) => {
     const g = e.button === 0 && !e.ctrlKey && e.target.closest('.gantt-item');
     const m = g && itemById(g.dataset.id);
-    if (!m || collapsedLanes().has(m.swimlane)) return;
+    if (!m || collapsedStreams().has(m.stream)) return;
     e.preventDefault(); // no text selection while dragging
     drag = { m, g, mode: dragModeAt(g, m, e.clientX), x0: e.clientX, days: 0, active: false };
   });
@@ -7320,7 +7905,7 @@ function wireEvents() {
     if (drag) return;
     const g = e.target.closest('.gantt-item');
     const m = g && itemById(g.dataset.id);
-    gc.style.cursor = m && !collapsedLanes().has(m.swimlane) && dragModeAt(g, m, e.clientX) !== 'move' ? 'ew-resize' : '';
+    gc.style.cursor = m && !collapsedStreams().has(m.stream) && dragModeAt(g, m, e.clientX) !== 'move' ? 'ew-resize' : '';
   });
   gc.tabIndex = 0;
   gc.setAttribute('aria-label', 'Chart: use the arrow keys to move between items and Enter to update one');
@@ -7328,8 +7913,8 @@ function wireEvents() {
   gc.addEventListener('focusout', (e) => { if (!gc.contains(e.relatedTarget) && kbId && !quickId) { kbId = null; document.querySelectorAll('#gantt-container .gantt-item.kb').forEach(g => g.classList.remove('kb')); hideTip(); focusLinks(null); } });
   for (const type of ['click', 'contextmenu']) gc.addEventListener(type, (e) => {
     if (dragSuppressClick) return;
-    const lane = type === 'click' && e.target.closest('.lane-toggle');
-    if (lane) return toggleLane(lane.dataset.lane);
+    const stream = type === 'click' && e.target.closest('.stream-toggle');
+    if (stream) return toggleStream(stream.dataset.stream);
     const m = itemAt(e);
     if (m) showQuick(m, e);
   });
@@ -7339,14 +7924,14 @@ function wireEvents() {
   const form = document.getElementById('edit-form');
   form.addEventListener('submit', submitEditDialog);
   form.elements.type.addEventListener('change', updateEdType);
-  form.elements.swimlane.addEventListener('change', (e) => pickEdLane(e.target));
-  form.elements.newlane.addEventListener('keydown', (e) => {
+  form.elements.stream.addEventListener('change', (e) => pickEdStream(e.target));
+  form.elements.newstream.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     e.preventDefault(); // keep the dialog open
-    closeNewLane(form.elements);
-    form.elements.swimlane.focus();
+    closeNewStream(form.elements);
+    form.elements.stream.focus();
   });
-  form.elements.newlane.addEventListener('blur', (e) => { if (!e.target.value.trim()) closeNewLane(form.elements); });
+  form.elements.newstream.addEventListener('blur', (e) => { if (!e.target.value.trim()) closeNewStream(form.elements); });
   form.elements.end.addEventListener('input', updateEdType); // keeps a milestone's hidden start in step
   document.getElementById('ed-cancel').onclick = () => dlg.close();
   document.getElementById('ed-close').onclick = () => dlg.close();
@@ -7354,6 +7939,7 @@ function wireEvents() {
   document.getElementById('ed-report').onclick = () => { const m = editing; dlg.close(); openReportDialog({ itemId: m.id }); };
   document.getElementById('ed-history').onclick = () => { const m = editing; dlg.close(); showReportsFor(m.id); };
   document.getElementById('ed-dates').onclick = () => showDatesFor(editing.id);
+  document.getElementById('ed-raid').onclick = () => showRaidFor(`item:${editing.id}`);
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   document.getElementById('ed-deps').addEventListener('click', (e) => {
     const rm = e.target.closest('[data-edrm]');

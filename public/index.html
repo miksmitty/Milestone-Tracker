@@ -65,6 +65,10 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5.5M7.5 13h5.5"/></svg>
         <span class="nav-text">Reports</span><span id="nav-due" class="nav-badge" hidden></span>
       </button>
+      <button id="nav-raid" class="nav-item" title="Risks, issues &amp; dependencies">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 17.6 16H2.4z"/><path d="M10 7.8v3.8"/><circle cx="10" cy="13.7" r=".6"/></svg>
+        <span class="nav-text">Risks &amp; issues</span><span id="nav-raid-count" class="nav-badge nav-badge-quiet" hidden></span>
+      </button>
       <button id="nav-changes" class="nav-item" title="What changed">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10a6.5 6.5 0 1 0 2-4.7"/><path d="M3 2.8v3.4h3.4"/><path d="M10 6.5V10l2.5 1.8"/></svg>
         <span class="nav-text">What changed</span>
@@ -73,9 +77,9 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="13" rx="1.5"/><path d="M3 8h14M7 2.5v3M13 2.5v3M6.5 11.5h3M6.5 14h6"/></svg>
         <span class="nav-text">Date history</span>
       </button>
-      <button id="nav-lanes" class="nav-item" title="Swimlane overview">
+      <button id="nav-streams" class="nav-item" title="Stream overview">
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M7 3.5v13"/><path d="M10 9.75h4.5M10 14.25h3"/></svg>
-        <span class="nav-text">Swimlane overview</span>
+        <span class="nav-text">Stream overview</span>
       </button>
     </nav>
 
@@ -143,23 +147,23 @@
       Set the program number, area lead and trend in <b>Workspace settings</b>. Weekly updates are stored in <code>updates.csv</code>.</p>
   </main>
 
-  <!-- ============ SWIMLANE OVERVIEW ============ -->
-  <main id="view-lanes" class="view hidden">
+  <!-- ============ STREAM OVERVIEW ============ -->
+  <main id="view-streams" class="view hidden">
     <div class="toolbar">
       <div class="toolbar-group">
-        <button id="btn-lanes-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
+        <button id="btn-streams-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
         <button class="btn btn-primary btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
-        <span id="lanes-count" class="grid-count"></span>
+        <span id="streams-count" class="grid-count"></span>
       </div>
       <div class="toolbar-group toolbar-right">
         <span class="autosave-note">Use <b>Update</b> on a row to record its weekly RAG and summary</span>
       </div>
     </div>
     <div class="table-wrap">
-      <table id="lanes-table" class="ov-table">
+      <table id="streams-table" class="ov-table">
         <thead>
           <tr>
-            <th rowspan="2">Swimlane</th>
+            <th rowspan="2">Stream</th>
             <th rowspan="2">Area lead</th>
             <th rowspan="2">Previous weekly RAG</th>
             <th rowspan="2">Current weekly RAG</th>
@@ -176,16 +180,48 @@
             <th class="ov-ms ms-total">Total</th>
           </tr>
         </thead>
-        <tbody id="lanes-body"></tbody>
-        <tfoot id="lanes-foot"></tfoot>
+        <tbody id="streams-body"></tbody>
+        <tfoot id="streams-foot"></tfoot>
       </table>
     </div>
-    <p class="hint">One row per swimlane of this workspace, in the order the Gantt chart lists them. Click a swimlane to see just its items on the Gantt chart.
-      <b>Current weekly RAG</b> and the summary come from the swimlane’s latest weekly update, and <b>Previous weekly RAG</b> from the one before it; a week-ending date in red means there’s no update for this week yet.
-      The milestones overview counts the swimlane’s milestones as on the program overview. Use <b>Update</b> to record the week’s update and to set the swimlane’s area lead and trend.
-      Swimlane updates are stored in <code>updates.csv</code> (with the swimlane’s name) and area leads and trends in <code>swimlanes.csv</code>. Renaming a swimlane starts it afresh.</p>
+    <p class="hint">One row per stream of this workspace, in the order the Gantt chart lists them. Click a stream to see just its items on the Gantt chart.
+      <b>Current weekly RAG</b> and the summary come from the stream’s latest weekly update, and <b>Previous weekly RAG</b> from the one before it; a week-ending date in red means there’s no update for this week yet.
+      The milestones overview counts the stream’s milestones as on the program overview. Use <b>Update</b> to record the week’s update and to set the stream’s area lead and trend.
+      Stream updates are stored in <code>updates.csv</code> (with the stream’s name) and area leads and trends in <code>streams.csv</code>. Renaming a stream starts it afresh.</p>
   </main>
 
+
+  <!-- ============ RISKS, ISSUES AND DEPENDENCIES ============ -->
+  <main id="view-raid" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <div id="raid-kind" class="mode-seg" role="radiogroup" aria-label="Show"></div>
+        <button id="btn-raid-add" class="btn btn-primary">+ Add</button>
+        <button id="btn-raid-csv" class="btn" title="Download the entries shown (filters applied) as a CSV">Download CSV</button>
+        <button class="btn btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
+        <span id="raid-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-group rp-filters">
+        <input id="raid-q" type="search" placeholder="Search title, owner, linked item…" aria-label="Search risks, issues and dependencies" />
+        <select id="raid-status" class="tb-select" aria-label="Status">
+          <option value="open">Not closed</option>
+          <option value="">Any status</option>
+          <option value="done">Closed / complete</option>
+        </select>
+        <span id="raid-link" class="dl-item" hidden></span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="ov-table raid-table">
+        <thead id="raid-head"></thead>
+        <tbody id="raid-body"></tbody>
+      </table>
+    </div>
+    <p class="hint">The workspace’s register of <b>risks</b> (what might happen), <b>issues</b> (what has happened) and <b>dependencies</b> (what the plan needs from others, or others need from it). Each can be linked to any number of <span data-term="items">items</span> and streams; click a link to see it on the Gantt chart, or a row to edit it.
+      A risk’s rating is its likelihood × impact (High is 6 or more out of 9), an issue’s its impact and a dependency’s its priority. A due date in red has passed while the entry is still open.
+      Summary notes are added with the date and time and kept, never edited. A dependency’s priorities and types are set in <b>Workspace settings → Dependencies</b>.
+      <b>Risks &amp; issues</b> in an <span data-term="item">item</span>’s edit dialog shows just the ones linked to it. Stored in <code>raid.csv</code> and <code>raid-notes.csv</code>.</p>
+  </main>
 
   <!-- ============ WHAT CHANGED ============ -->
   <main id="view-changes" class="view hidden">
@@ -260,7 +296,7 @@
             Filter <span id="gf-badge" class="tb-badge" hidden></span>
           </button>
           <div id="gm-filter" class="tb-pop" hidden>
-            <label class="pop-field"><span>Swimlane</span><select id="gf-lane"></select></label>
+            <label class="pop-field"><span>Stream</span><select id="gf-stream"></select></label>
             <label class="pop-field"><span>Owner</span><select id="gf-owner"></select></label>
             <div class="pop-field"><span>Type</span><div id="gf-type" class="pop-seg" role="group" aria-label="Type"></div></div>
             <div class="pop-field"><span>RAG</span><div id="gf-rag" class="rag-pick sm" role="group" aria-label="RAG"></div></div>
@@ -274,8 +310,8 @@
             Sort <span id="gs-badge" class="tb-dot" hidden></span>
           </button>
           <div id="gm-sort" class="tb-pop" hidden>
-            <label class="pop-field"><span>Swimlanes</span>
-              <select id="gs-lanes">
+            <label class="pop-field"><span>Streams</span>
+              <select id="gs-streams">
                 <option value="list">As listed</option>
                 <option value="name">A–Z</option>
                 <option value="start">Earliest start first</option>
@@ -283,7 +319,7 @@
                 <option value="risk">Most at risk first</option>
               </select>
             </label>
-            <label class="pop-field"><span>Items in each swimlane</span>
+            <label class="pop-field"><span>Items in each stream</span>
               <select id="gs-rows">
                 <option value="packed">Packed by date</option>
                 <option value="start">One per row, by start</option>
@@ -320,8 +356,8 @@
                 <option value="none">Hide</option>
               </select>
             </label>
-            <div class="pop-field"><span>Swimlanes</span>
-              <div class="pop-seg"><button type="button" id="fold-all" title="Fold every swimlane into one row">Fold all</button><button type="button" id="unfold-all">Unfold all</button></div>
+            <div class="pop-field"><span>Streams</span>
+              <div class="pop-seg"><button type="button" id="fold-all" title="Fold every stream into one row">Fold all</button><button type="button" id="unfold-all">Unfold all</button></div>
             </div>
             <div class="pop-field"><span>Baseline</span>
               <div class="pop-btns">
@@ -403,7 +439,7 @@
       <div class="toolbar-group">
         <div class="mode-seg" role="radiogroup" aria-label="Columns shown">
           <label title="Just RAG and dates — the things that change week to week"><input type="radio" name="grid-mode" value="quick" /><span>Quick update</span></label>
-          <label title="Every field, including title, lanes and links"><input type="radio" name="grid-mode" value="full" /><span>All fields</span></label>
+          <label title="Every field, including title, streams and links"><input type="radio" name="grid-mode" value="full" /><span>All fields</span></label>
         </div>
         <button id="btn-add" class="btn btn-primary">+ Add <span data-term="item">item</span></button>
         <span id="grid-count" class="grid-count"></span>
@@ -432,7 +468,7 @@
         <tbody id="editor-body"></tbody>
       </table>
     </div>
-    <p class="hint"><b>Quick update</b> shows the fields that change most — ref, title, type, owner, RAG and dates: click a RAG to change it, or edit any cell. Switch to <b>All fields</b> for lanes, links and the rest.
+    <p class="hint"><b>Quick update</b> shows the fields that change most — ref, title, type, owner, RAG and dates: click a RAG to change it, or edit any cell. Switch to <b>All fields</b> for streams, links and the rest.
       Tick the boxes on the left (shift-click for a range, or the header box for everything shown) to change a field on many rows at once, move their dates, or delete them.
       Columns work like a spreadsheet's: use the <b>▾</b> on a heading to sort or filter by ticking values, drag a heading to move the column, and drag a heading's edge to resize it (double-click to fit). Click headings to select columns (⌘/Ctrl or shift for several) — resizing one then sizes them all, and right-click offers autofit, distribute evenly and fit to window. <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
       Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.
@@ -494,8 +530,8 @@
         <label>Ref<input name="ref" placeholder="e.g. 4.1" /></label>
         <label class="span2">Title<input name="title" placeholder="Title" /></label>
         <label class="span3">Description<textarea name="description" rows="2" placeholder="Description"></textarea></label>
-        <label>Swimlane<select name="swimlane"></select><input name="newlane" placeholder="New swimlane name" title="Esc to pick an existing swimlane" hidden /></label>
-        <label>Sub-swimlane<input name="subswimlane" list="sublane-list" /></label>
+        <label>Stream<select name="stream"></select><input name="newstream" placeholder="New stream name" title="Esc to pick an existing stream" hidden /></label>
+        <label>Sub-stream<input name="substream" list="substream-list" /></label>
         <label>Owner<input name="owner" list="owner-list" /></label>
         <label>Type<select name="type"></select></label>
         <label id="ed-start">Start<input name="start" type="date" /></label>
@@ -513,6 +549,7 @@
         <button type="button" id="ed-report" class="btn">Provide report</button>
         <button type="button" id="ed-history" class="btn">View reports</button>
         <button type="button" id="ed-dates" class="btn">Date history</button>
+        <button type="button" id="ed-raid" class="btn" title="Risks, issues and dependencies linked to this">Risks &amp; issues</button>
         <span class="spacer"></span>
         <button type="button" id="ed-cancel" class="btn">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>
@@ -574,6 +611,7 @@
       <div class="pg-tabs" role="tablist">
         <button type="button" role="tab" data-pg-tab="details" aria-selected="true">Details</button>
         <button type="button" role="tab" data-pg-tab="rag" aria-selected="false">RAG options</button>
+        <button type="button" role="tab" data-pg-tab="deps" aria-selected="false">Dependencies</button>
       </div>
       <div id="pg-panel-details" class="form-grid" role="tabpanel">
         <label class="span3">Name<input name="name" placeholder="e.g. Platform Replacement" /></label>
@@ -606,6 +644,22 @@
           <button type="button" id="pg-reset-statuses" class="link-btn">Reset to the standard RAG</button>
         </div>
         <div class="pg-rag-preview"><span class="pg-rag-preview-label">Key preview</span><span id="pg-rag-preview"></span></div>
+      </div>
+      <div id="pg-panel-deps" class="pg-deps" role="tabpanel" hidden>
+        <p class="pg-rag-intro">The choices a dependency offers in this workspace, in order. Priorities run from highest to lowest: the register sorts and colours them that way. Renaming one renames it on the dependencies that have it; removing one leaves it on any that do.</p>
+        <input type="hidden" name="dep_priorities" /><input type="hidden" name="dep_types" />
+        <div class="pg-deps-lists">
+          <section>
+            <h3>Priority <small>highest first</small></h3>
+            <ul id="pg-dep_priorities" class="pg-dep-list"></ul>
+            <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="dep_priorities">+ Add priority</button><button type="button" class="link-btn" data-dl-reset="dep_priorities">Reset</button></div>
+          </section>
+          <section>
+            <h3>Dependency type</h3>
+            <ul id="pg-dep_types" class="pg-dep-list"></ul>
+            <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="dep_types">+ Add type</button><button type="button" class="link-btn" data-dl-reset="dep_types">Reset</button></div>
+          </section>
+        </div>
       </div>
       <p id="pg-error" class="dlg-error"></p>
       <footer class="dlg-foot">
@@ -640,6 +694,48 @@
         <span class="spacer"></span>
         <button type="button" id="up-cancel" class="btn">Cancel</button>
         <button type="submit" id="up-submit" class="btn btn-primary">Submit update</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ RISK, ISSUE OR DEPENDENCY DIALOG ============ -->
+  <dialog id="raid-dialog" class="edit-dialog raid-dialog">
+    <form id="raid-form" novalidate>
+      <header class="dlg-head">
+        <span id="rd-badge" class="type-badge raid">Risk</span>
+        <h2 id="rd-heading">New risk</h2>
+        <button type="button" id="rd-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="form-grid">
+        <div class="span2 field"><span class="field-label">Type</span><div id="rd-kind" class="seg"></div></div>
+        <label>Ref<input name="ref" placeholder="e.g. R4" /></label>
+        <label class="span3">Title<input name="title" placeholder="A short name for it" /></label>
+        <label class="span3">Description<textarea name="description" rows="3" placeholder="What it is, and what it would mean for the plan"></textarea></label>
+        <label>Owner<input name="owner" list="people-list" /></label>
+        <label>Status<select name="status"></select></label>
+        <label>Stream<select name="stream"></select></label>
+        <label>RAG<select name="rag"></select></label>
+        <label>Priority<select name="priority"></select></label>
+        <label>Dependency type<select name="dep_type"></select></label>
+        <label>Likelihood<select name="likelihood"></select></label>
+        <label>Impact<select name="impact"></select></label>
+        <label>Due<input name="due" type="date" /></label>
+        <label>Raised<input name="raised" type="date" /></label>
+        <label class="span3">Other party<input name="party" placeholder="The team, supplier or project it depends on (or that depends on us)" /></label>
+        <label class="span3"><span id="rd-response-label">Mitigation</span><textarea name="response" rows="3"></textarea></label>
+        <div class="span3 field"><span class="field-label">Linked to <small class="muted">— <span data-term="items">items</span> or whole streams, as many as it affects</small></span><div id="rd-links" class="deps"></div></div>
+        <div class="span3 field rd-notes-field">
+          <span class="field-label">Summary notes</span>
+          <textarea name="note" rows="2" placeholder="Add a note — it’s kept with today’s date and time, and earlier notes stay as they are"></textarea>
+          <ul id="rd-notes" class="rd-notes"></ul>
+        </div>
+      </div>
+      <p id="rd-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <button type="button" id="rd-delete" class="btn btn-danger">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="rd-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
       </footer>
     </form>
   </dialog>
@@ -704,7 +800,7 @@
       <kbd>Esc</kbd>
     </div>
     <ul id="pal-list" class="pal-list" role="listbox"></ul>
-    <p class="pal-foot"><kbd>↑</kbd> <kbd>↓</kbd> to choose · <kbd>Enter</kbd> to open · searches every workspace by ref, title, owner and swimlane</p>
+    <p class="pal-foot"><kbd>↑</kbd> <kbd>↓</kbd> to choose · <kbd>Enter</kbd> to open · searches every workspace by ref, title, owner and stream</p>
   </dialog>
 
   <!-- ============ IMPORT DIALOG ============ -->

@@ -1,4 +1,4 @@
-id,workspace_id,swimlane,week_ending,rag,summary,author,created,updated
+id,workspace_id,stream,week_ending,rag,summary,author,created,updated
 1,1,,2026-09-25,Amber,"- Data migration dry run 2 slipped a week
 - Supplier contract signed",Helen Carter,2026-09-29T07:32:25.880Z,2026-09-29T07:32:25.880Z
 2,1,,2026-10-02,Green,"- **Dry run 2 completed** with 99.8% records reconciled

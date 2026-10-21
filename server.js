@@ -1,6 +1,7 @@
 // Tracker — zero-dependency Node server.
 // Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv,
-// updates.csv and swimlanes.csv, and appends every change to an item's dates to date-changes.csv.
+// updates.csv, streams.csv, raid.csv (risks, issues and dependencies) and raid-notes.csv (their
+// notes), and appends every change to an item's dates to date-changes.csv.
 // Several people can use it at once: each file has a version, a save based on an older version is
 // turned back with the current file for the browser to merge, and every save is pushed to the
 // other browsers straight away (see "Working together" below).
@@ -36,7 +37,7 @@ const DATASETS = {
   '/api/workspaces': {
     file: path.join(DATA_DIR, 'workspaces.csv'),
     legacy: path.join(DATA_DIR, 'programs.csv'), // read until workspaces.csv is first saved
-    header: 'id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,created,updated\n',
+    header: 'id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,dep_priorities,dep_types,created,updated\n',
   },
   '/api/statuses': {
     file: path.join(DATA_DIR, 'statuses.csv'),
@@ -44,7 +45,7 @@ const DATASETS = {
   },
   '/api/milestones': {
     file: path.join(DATA_DIR, 'milestones.csv'),
-    header: 'id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url\n',
+    header: 'id,workspace_id,ref,title,type,description,stream,substream,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url\n',
     audited: true, // date changes are logged to date-changes.csv
   },
   '/api/reports': {
@@ -53,11 +54,20 @@ const DATASETS = {
   },
   '/api/updates': {
     file: path.join(DATA_DIR, 'updates.csv'),
-    header: 'id,workspace_id,swimlane,week_ending,rag,summary,author,created,updated\n',
+    header: 'id,workspace_id,stream,week_ending,rag,summary,author,created,updated\n',
   },
-  '/api/swimlanes': {
-    file: path.join(DATA_DIR, 'swimlanes.csv'),
+  '/api/streams': {
+    file: path.join(DATA_DIR, 'streams.csv'),
     header: 'workspace_id,name,lead,trend\n',
+  },
+  '/api/raid': {
+    file: path.join(DATA_DIR, 'raid.csv'),
+    header: 'id,workspace_id,kind,ref,title,description,stream,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,links,raised,created,updated\n',
+  },
+  '/api/raid-notes': {
+    file: path.join(DATA_DIR, 'raid-notes.csv'),
+    header: 'id,workspace_id,raid_id,at,by,text\n',
+    stampBy: true, // new notes are signed with the login ID (see changedBy)
   },
 };
 
@@ -258,6 +268,7 @@ function serveAudit(res) {
 // edited on disk (the files are checked every couple of seconds). Run one instance of the server:
 // two would each keep their own date log counter and only tell their own browsers about saves.
 const nameOf = (ds) => Object.keys(DATASETS).find(k => DATASETS[k] === ds).slice('/api/'.length);
+const serialize = (rows) => rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n';
 const versionOf = (buf) => (buf ? crypto.createHash('sha1').update(buf).digest('hex').slice(0, 16) : 'none');
 // The file's bytes (or the legacy file's, until the new one is saved), or null when there's neither.
 function readDataset(ds) {
@@ -310,7 +321,7 @@ setInterval(checkFiles, 2000).unref();
 // next number. A browser reserves a few at a time (POST /api/ids?file=milestones&n=20). The last
 // id given out per file is kept in ids.json; the next is always above every id in the file too.
 const IDS_FILE = path.join(DATA_DIR, 'ids.json');
-const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates'];
+const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'raid', 'raid-notes'];
 function reserveIds(file, n) {
   let issued = {};
   try { issued = JSON.parse(fs.readFileSync(IDS_FILE, 'utf8')); } catch { /* none issued yet */ }
@@ -324,6 +335,19 @@ function reserveIds(file, n) {
   fs.writeFileSync(IDS_FILE, JSON.stringify(issued, null, 2) + '\n');
   return Array.from({ length: n }, (_, i) => String(first + i));
 }
+// Notes are signed on the server, so a browser can't sign as someone else: a row that wasn't in
+// the file before and has no `by` gets the login ID. Returns the text to write.
+function stampAuthors(text, oldBuf, who) {
+  if (!who) return text;
+  const [header = [], ...rows] = parseCSV(text);
+  const id = header.indexOf('id'), by = header.indexOf('by');
+  if (id < 0 || by < 0) return text;
+  const before = new Set(oldBuf ? parseCSV(decodeCSV(oldBuf)).slice(1).map(r => r[id]) : []);
+  let changed = false;
+  for (const r of rows) if (!before.has(r[id]) && !(r[by] ?? '').trim()) { r[by] = who; changed = true; }
+  return changed ? serialize([header, ...rows]) : text;
+}
+
 function serveIds(req, res) {
   const q = new URL(req.url, 'http://x').searchParams;
   const file = q.get('file'), n = Math.min(500, Math.max(1, +q.get('n') || 20));
@@ -452,6 +476,8 @@ const server = http.createServer((req, res) => {
         if (base && base !== versionOf(current)) {
           return finish(409, { ok: false, conflict: true, version: versionOf(current), text: current ? decodeCSV(current) : ds.header });
         }
+        const sent = body;
+        if (ds.stampBy) body = stampAuthors(body, current, changedBy(req));
         backupDaily(ds.file, () => {
           // the file being replaced, for the date log ('' when it's new)
           const old = !ds.audited ? '' : current && fs.existsSync(ds.file) ? decodeCSV(current) : '';
@@ -465,7 +491,8 @@ const server = http.createServer((req, res) => {
               }
               const version = versionOf(Buffer.from(body, 'utf8'));
               if (!err2) noteVersion(ds, Buffer.from(body, 'utf8'));
-              finish(err2 ? 500 : 200, { ok: !err2, error: err2 ? err2.message : undefined, version });
+              // When the server changed what was sent (signed notes), the browser takes the file back.
+              finish(err2 ? 500 : 200, { ok: !err2, error: err2 ? err2.message : undefined, version, text: body !== sent ? body : undefined });
             };
             fs.rename(tmp, ds.file, (err2) => {
               if (!err2) return done();

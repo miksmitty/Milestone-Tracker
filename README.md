@@ -65,15 +65,15 @@ Changes show when the page is reloaded; there's no need to restart the server. I
 
 ## Workspaces
 
-Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Program overview**, **All workspaces**, a workspace switcher (with a ⚙ for **Workspace settings**), and the current workspace's **Gantt chart**, **Items**, **Reports** (with a count of reports due), **What changed**, **Date history** and **Swimlane overview**. At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, and **Collapse** shrinks the menu to icons; the app remembers the open workspace, view, theme and menu state per browser.
+Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Program overview**, **All workspaces**, a workspace switcher (with a ⚙ for **Workspace settings**), and the current workspace's **Gantt chart**, **Items**, **Reports** (with a count of reports due), **What changed**, **Date history** and **Stream overview**. At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, and **Collapse** shrinks the menu to icons; the app remembers the open workspace, view, theme and menu state per browser.
 
 ### Find (⌘K)
 
-**Find…** in the menu, or ⌘K (Ctrl+K on Windows), opens one box to jump anywhere: any item in any workspace (by ref, title, owner or swimlane), a workspace, or a page. Every word typed has to match; refs and the starts of titles rank first. ↑ ↓ to choose, Enter to open: an item opens on the Gantt chart, scrolled to and picked out.
+**Find…** in the menu, or ⌘K (Ctrl+K on Windows), opens one box to jump anywhere: any item in any workspace (by ref, title, owner or stream), a workspace, or a page. Every word typed has to match; refs and the starts of titles rank first. ↑ ↓ to choose, Enter to open: an item opens on the Gantt chart, scrolled to and picked out.
 
 ### Links
 
-The address bar says where you are, so a view can be bookmarked or sent to someone: the workspace, the view and, on the Gantt chart, its search and filters (e.g. `#/ws/1/gantt?lane=Delivery&rag=Red,Amber&late=1`). The link button on the Gantt toolbar copies it. Adding `&item=12` opens the chart on item 12.
+The address bar says where you are, so a view can be bookmarked or sent to someone: the workspace, the view and, on the Gantt chart, its search and filters (e.g. `#/ws/1/gantt?stream=Delivery&rag=Red,Amber&late=1`). The link button on the Gantt toolbar copies it. Adding `&item=12` opens the chart on item 12.
 
 ### Undo
 
@@ -95,21 +95,21 @@ Deleting (items, reports, weekly updates, a whole workspace), importing, bulk ed
 - **Trend**, shown as an arrow (↑ improving, → stable, ↓ declining; hover for the word), and the **summary of last week's progress** (key points for management) from the latest update
 - **Milestones overview**: the program's milestones counted as **Not started**, **Green**, **Red/Amber**, **Closed** and **Total**. Done statuses (named or described as complete) are Closed, statuses that need a get to green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and anything else counts as Green, so the four add up to the total. A totals row sums every program
 
-Each count in the milestones overview (here, on the swimlane overview and on the workspace cards) opens the Gantt chart showing just those milestones. **PNG** downloads the table as an image at 2× resolution, titled and dated, in the light colours and without the Update buttons; the swimlane overview and **What changed** have the same button.
+Each count in the milestones overview (here, on the stream overview and on the workspace cards) opens the Gantt chart showing just those milestones. **PNG** downloads the table as an image at 2× resolution, titled and dated, in the light colours and without the Update buttons; the stream overview and **What changed** have the same button.
 
 **Update** on a row records that program's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend, summary (with formatting) and area lead. If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one; the trend and area lead are saved to the workspace. **Download CSV** saves the table.
 
-### Swimlane overview
+### Stream overview
 
-**Swimlane overview** is the same table for the current workspace, one row per swimlane in the order the Gantt chart lists them: **Swimlane** (click to show just that swimlane on the Gantt chart), **Area lead**, **Previous / Current weekly RAG**, **Trend**, the **summary** and the **milestones overview** of that swimlane's milestones, with a totals row that matches the program's. Each swimlane has its own weekly updates, area lead and trend, recorded with **Update** exactly as for a program. Swimlanes are matched by name, so renaming one starts it afresh.
+**Stream overview** is the same table for the current workspace, one row per stream in the order the Gantt chart lists them: **Stream** (click to show just that stream on the Gantt chart), **Area lead**, **Previous / Current weekly RAG**, **Trend**, the **summary** and the **milestones overview** of that stream's milestones, with a totals row that matches the program's. Each stream has its own weekly updates, area lead and trend, recorded with **Update** exactly as for a program. Streams are matched by name, so renaming one starts it afresh.
 
-Weekly updates live in [updates.csv](updates.csv), one row per program or swimlane per week (`swimlane` is blank for the program itself):
+Weekly updates live in [updates.csv](updates.csv), one row per program or stream per week (`stream` is blank for the program itself):
 
 ```
-id,workspace_id,swimlane,week_ending,rag,summary,author,created,updated
+id,workspace_id,stream,week_ending,rag,summary,author,created,updated
 ```
 
-A swimlane's area lead and trend live in [swimlanes.csv](swimlanes.csv), created the first time one is set:
+A stream's area lead and trend live in [streams.csv](streams.csv), created the first time one is set:
 
 ```
 workspace_id,name,lead,trend
@@ -137,6 +137,38 @@ The log is kept by the server, not the browser: each time milestones.csv is save
 ```
 id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 ```
+
+### Risks, issues & dependencies
+
+**Risks & issues** is the workspace's register of **risks** (what might happen), **issues** (what has happened) and **dependencies** (what the plan needs from another team, supplier or project, or what they need from it). Every entry has a ref (R1, I1, D1… numbered per type, editable), title, description, owner, status, due and raised dates, a response (a risk's *mitigation*, an issue's *resolution plan*, a dependency's *agreement / next action*) and summary notes. Beyond that:
+
+- **Risks**: likelihood and impact; status *Open*, *In progress* or *Closed*
+- **Issues**: impact; status *Open*, *In progress* or *Closed*
+- **Dependencies**: stream, RAG (one of the workspace's RAG options), priority, dependency type and the other party; status *Not started*, *At risk*, *Blocked* or *Complete*. The **priority** and **dependency type** lists are set per workspace in **Workspace settings → Dependencies** (by default *Critical, High, Medium, Low* and *Internal, External, Supplier, Technical*). Priorities run highest first, which is how they sort and colour. Renaming a value there renames it on the workspace's dependencies; removing one leaves it on any dependency that has it
+
+**Summary notes** work like a SharePoint "append changes" field: type a note and save, and it's added with the date and time, under the box, newest first. Notes are never edited or removed, only added to (deleting an entry removes its notes, and Undo brings them back). Each note is signed on the server with the login ID once the app is behind a sign-in (`changedBy()` in server.js), so a browser can't sign as someone else.
+
+Each entry can be **linked to any number of items and whole streams** of its workspace, and an item or stream can have any number of entries linked to it. Pick them from **Linked to** in the entry's dialog (streams first, then each stream's items); click a link in the register to see it on the Gantt chart.
+
+- **Rating**: a risk's is likelihood × impact (6–9 is *High*, 3–4 *Medium*, 1–2 *Low*); an issue's is its impact, a dependency's its priority. The register lists blocked and at-risk entries first and closed or complete ones last, then highest rated and soonest due. A due date in red has passed while the entry is still open
+- Filter by type, by status (*Not closed* by default) or by searching any text, including notes and what an entry is linked to. Showing **Dependencies** alone switches to their own columns: type, stream, priority, RAG, status and the latest note. **Download CSV** saves the entries shown, with all their notes
+- **Risks & issues** in an item's edit dialog opens the register showing just what's linked to that item (with the number open), and **+ Add** there links the new entry to it. An item's hover card on the Gantt chart says what's open against it
+- The menu shows how many entries are open in the workspace, and **Find (⌘K)** searches them too
+- A link to an item that's since been deleted is kept and shown struck through; streams are matched by name, so renaming a stream leaves its links pointing at the old name (also struck through)
+
+Entries live in [raid.csv](raid.csv), created when the first is added. `links` holds `item:<id>` and `stream:<name>` references, `;`-separated:
+
+```
+id,workspace_id,kind,ref,title,description,stream,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,links,raised,created,updated
+```
+
+Notes live in [raid-notes.csv](raid-notes.csv), one row per note (`raid_id` is the entry's `id`):
+
+```
+id,workspace_id,raid_id,at,by,text
+```
+
+A workspace's own priority and dependency type lists are kept in workspaces.csv (`dep_priorities`, `dep_types`, `;`-separated; blank means the standard lists).
 
 ### RAG options
 
@@ -170,7 +202,7 @@ Items and reports carry a `workspace_id`. Ids stay unique across all workspaces,
 Items live in [milestones.csv](milestones.csv) with columns:
 
 ```
-id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url
+id,workspace_id,ref,title,type,description,stream,substream,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url
 ```
 
 - **workspace_id**: the workspace the item belongs to (`id` in workspaces.csv)
@@ -180,7 +212,7 @@ id,workspace_id,ref,title,type,description,swimlane,subswimlane,owner,start,end,
 - **type**: `top` (a top level milestone: one date, under change control — anything that would move, delete or retype it asks for confirmation first — drawn as a diamond in a ring), `milestone` (one date, drawn as a diamond) or `task` (a start and end date, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to its end date. Files without a type column still load: a start before the end makes a task, otherwise a milestone. Older files with a `top_level` column (yes/no) and a `shape` column still load: top level milestones become `top`, and shape is ignored
 - **start / end**: `YYYY-MM-DD`. A milestone's start and end are always the same, and **changing either one moves the milestone**. A task's dates are inclusive, so its bar runs to the end of its end date, and a one-day task can start and end on the same day
 - **rag**: one of the workspace's RAG options (by default `Green` | `Amber` | `Red` | `Complete` | `Not Started`). Matching ignores case; a status that isn't in the list is kept and shown in grey. Files with the older `status` column still load
-- **swimlane / subswimlane**: free text — each distinct value becomes a lane / nested sub-lane
+- **stream / substream**: free text — each distinct value becomes a stream / nested sub-stream
 - **parent**: id of the milestone this item rolls up to (the milestone can't fall before it finishes)
 - **depends_on**: `;`-separated ids this item depends on (finish-to-start)
 - **baseline_start / baseline_end**: the dates recorded by **View → Baseline → Set from current dates** on the Gantt chart, to measure slippage against (blank until a baseline is set). Files without these columns still load
@@ -190,14 +222,14 @@ Changing an item's end date in the **Items** screen shifts everything downstream
 RAG and dates change far more often than anything else, so they are the quickest to update:
 
 - **Gantt chart**: drag an item to move it, or drag either end of a task's bar to change its start or end (see **Gantt chart** below). Or click (or right-click) an item to open the quick update panel, which opens beside it. Change its RAG, switch it between milestone and task, or change its dates, then **Save** (or Enter) — nothing changes until you do, and **Cancel** / Esc throws the changes away. Switching the type back and forth keeps both dates, and moving a milestone's date keeps the task's length if you switch back. Clicking away with unsaved changes gives the panel a nudge instead of losing them. The panel says how many dependent items will move. From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
-- **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. The current RAG shows as a pill and the others as dots (hover for the name): click one to set it, or edit any cell. An end date in red means the item is overdue. Switch to **All fields** for lanes, links and so on.
+- **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. The current RAG shows as a pill and the others as dots (hover for the name): click one to set it, or edit any cell. An end date in red means the item is overdue. Switch to **All fields** for streams, links and so on.
 - The quick update panel on the chart also has a **Type** switch.
 
 ### Importing
 
 **Items → Import…** brings a list of milestones and tasks into the current workspace, from a CSV file (comma, semicolon or tab separated; UTF-8 or Excel's Windows encoding) or from cells copied out of Excel or Sheets and pasted in. Excel workbooks can't be read directly: save as CSV, or copy and paste.
 
-- **Columns** are matched to fields by their headings (e.g. *WBS* → Ref, *Task Name* → Title, *Finish* / *Due* → End date, *Status* → RAG, *Assigned To* → Owner, *Workstream* → Swimlane, *Predecessors* → Depends on), and each can be changed or left out. `workspace_id` is ignored: everything goes into the workspace you're in
+- **Columns** are matched to fields by their headings (e.g. *WBS* → Ref, *Task Name* → Title, *Finish* / *Due* → End date, *Status* → RAG, *Assigned To* → Owner, *Workstream* → Stream, *Predecessors* → Depends on), and each can be changed or left out. `workspace_id` is ignored: everything goes into the workspace you're in
 - **Dates** can be written almost any way: `2026-03-31`, `31/03/2026`, `3/31/2026`, `31.03.26`, `31-Mar-26`, `31 March 2026`, `March 31, 2026`, `Tue 31st March 2026`, `20260331`, Excel date numbers, with or without a time. Whether `03/04/2026` is 3 April or 4 March is detected from the file (any day over 12 gives it away), otherwise it follows the browser's locale; you can override it. Each date column shows how its examples will be read
 - **Type**: a type column (*milestone* / *task*, the workspace's own words, or yes/no from a *Milestone?* column), otherwise a start before the end makes a task and a single date a milestone
 - **What to do**: *Add new, update matching refs* (the default), *Add all as new*, or *Replace all*, which also deletes items that aren't in the file (their reports are kept). Blank cells leave an existing item's value alone; a filled *depends on* cell replaces its dependencies
@@ -237,8 +269,8 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 
 ## Gantt chart
 
-- Swimlanes with alternating backgrounds and colour accents
-- Swimlanes with nested sub-swimlanes
+- Streams with alternating backgrounds and colour accents
+- Streams with nested sub-streams
 - Milestones drawn as RAG-coloured diamonds (top level ones ringed), tasks as bars, with title, dates and owner; overlapping items stack automatically
 - Each task shows its duration in days after its title (e.g. **24d**, counting start and end day)
 - Each milestone with tasks rolling up to it shows its **% complete**: the share of those tasks' total duration that is at a complete RAG (a status named or described as Complete / Done). Tasks rolling up through other milestones count too, and the hover card shows the days and tasks behind it
@@ -247,18 +279,18 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 - **Drag to reschedule**: drag an item to move it, or the left or right end of a task's bar to change its start or end. Days snap as you drag, and the card beside the pointer shows the new dates and how many items downstream move with it. Let go to save (Esc cancels); **Undo** takes it back
 - **Overdue** items (past their end date and not at a done status) get a red **!**, and tasks that should have started but are still at the default status an amber one; the hover card says by how much. **Filter → Only overdue or late starting** shows just those
 - **Baseline**: **View → Baseline → Set from current dates** records every item's dates as the plan. Where an item has moved since, a grey bar under a task (or a dashed outline of a milestone) shows where it was planned, and the hover card says *slipped 12 days* or *3 days early*. **View → Baseline** hides them; **Clear** removes the baseline
-- **Fold a swimlane** by clicking its name: its items share one summary row, small and unlabelled (the hover card still works). **View → Swimlanes → Fold all / Unfold all**. Folding is remembered per workspace, per browser
-- **Keyboard**: Tab into the chart, then ← → move along a swimlane, ↑ ↓ to the row above or below, Enter opens the quick update panel and Esc lets go. Enter on a swimlane's name folds it
+- **Fold a stream** by clicking its name: its items share one summary row, small and unlabelled (the hover card still works). **View → Streams → Fold all / Unfold all**. Folding is remembered per workspace, per browser
+- **Keyboard**: Tab into the chart, then ← → move along a stream, ↑ ↓ to the row above or below, Enter opens the quick update panel and Esc lets go. Enter on a stream's name folds it
 - **View → Row height** — below 40px the dates/owner line under each item is hidden for a compact view
 - Hover an item for a summary card (including its last report); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)
 - The chart fills the window below its toolbar and scrolls inside its own panel
 - One toolbar: **Search**, **Filter**, **Sort** and **View** menus on the left; the date range, zoom and actions on the right
 - Timescale, as in MS Project: **Quarters** (quarters over months, fitted to the window), **Months** (months over weeks) or **Weeks** (weeks over days, with day names). Months and Weeks open scrolled to today, weekends are shaded once days are wide enough, and the choice is remembered per browser
-- The swimlane column and the timescale header stay pinned while the chart scrolls
+- The stream column and the timescale header stay pinned while the chart scrolls
 - Zoom: − **Fit** + (auto-fits until you zoom manually), with a finer slider under **View**; header labels shorten to fit as you zoom
 - The date range button shows the months in view; open it to pick dates, or **Fit to items** to fit the range to everything shown
-- **Search** by ref, title, description, owner or swimlane, and **Filter** by swimlane, owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
-- **Sort** swimlanes A–Z (the default), as listed, by earliest start, by latest end, or most at risk first (most items at an off-track RAG). Items are packed several to a row by date, or choose one per row sorted by start, end, ref, title, RAG or owner, ascending or descending. A dot on **Sort** shows it's changed from the default, and the sort is remembered per browser
+- **Search** by ref, title, description, owner or stream, and **Filter** by stream, owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
+- **Sort** streams A–Z (the default), as listed, by earliest start, by latest end, or most at risk first (most items at an off-track RAG). Items are packed several to a row by date, or choose one per row sorted by start, end, ref, title, RAG or owner, ascending or descending. A dot on **Sort** shows it's changed from the default, and the sort is remembered per browser
 - **View** toggles the **top** and **bottom timescale**, **today line** (labelled in the timescale header, so it never covers an item) and **baseline**, and sets the dependency lines, folding and baseline
 - **Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the workspace, always in the light colours
 - The link button copies a link to the chart with its filters (see **Links**)
