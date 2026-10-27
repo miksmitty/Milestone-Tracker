@@ -1,16 +1,16 @@
 id,workspace_id,ref,title,type,description,stream,substream,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url
-1,1,1.1,Project Kickoff,milestone,Initial mobilisation and team onboarding,Leadership,Governance,Sarah Patel,2026-01-12,2026-01-12,Green,,,,,,
+1,1,1.1,Project Kickoff,milestone,Initial mobilisation and team onboarding,Leadership is a much underused term does this wrap,Governance,Sarah Patel,2026-01-12,2026-01-12,Green,,,,,,
 2,1,1.2,Requirements Gathering,task,Workshops with business stakeholders,Leadership,Governance,Sarah Patel,2026-01-13,2026-02-05,Complete,3,1,,,https://gitlab.example.com/platform/requirements,https://wiki.example.com/use-cases/2
 3,1,1.3,Requirements Signed Off,milestone,Business requirements baselined with stakeholders,Leadership,Governance,Sarah Patel,2026-02-06,2026-02-06,Complete,,,,,,https://wiki.example.com/use-cases/3
 4,1,2.1,Solution Architecture,task,Design the target solution architecture,Design,Architecture,Tom Reed,2026-02-09,2026-02-27,Complete,5,3,,,,https://wiki.example.com/use-cases/4
 5,1,2.2,Architecture Approved,top,Solution architecture through design authority,Design,Architecture,Tom Reed,2026-03-07,2026-03-07,Complete,,,,,,
 6,1,2.3,UX Prototyping,task,Design and test a clickable prototype,Design,UX,Priya Shah,2026-03-19,2026-03-19,Complete,7,3,,,,
 7,1,2.4,UX Prototype Complete,milestone,Clickable prototype validated with user panel,Design,UX,Priya Shah,2026-03-20,2026-03-20,Complete,,,,,,
-8,1,3.1,Vendor Negotiation,top,Commercial negotiation with implementation partner,Commercial,Procurement,James Okoro,2026-04-01,2026-04-01,Amber,9,3,,,,
+8,1,3.1,Vendor Negotiation,top,Commercial negotiation with implementation partner,Commercial,Procurement,James Okoro,2026-04-01,2026-04-01,Complete,9,3,,,,
 9,1,3.2,Vendor Contract Signed,milestone,Commercial terms agreed with implementation partner,Commercial,Procurement,James Okoro,2026-04-24,2026-04-24,Complete,,,,,,
 10,1,4.1,Build Phase 1,task,Core platform features,Delivery,Build,Lucy Chen,2026-04-30,2026-06-11,Red,11,5;9,,,,
 11,1,4.2,Build Phase 1 Complete,milestone,Core platform features code complete,Delivery,Build,Lucy Chen,2026-06-11,2026-06-11,Complete,,,,,,
-12,1,4.3,Build Phase 2,task,Integrations and reporting,Delivery,Build,Lucy Chen,2026-06-11,2026-08-17,Red,13,11,,,,
+12,1,4.3,Build Phase 2,task,Integrations and reporting,Delivery,Build,Lucy Chen,2026-06-11,2026-08-17,Green,13,11,,,,
 13,1,4.4,Build Phase 2 Complete,milestone,All features code complete,Delivery,Build,Lucy Chen,2026-08-17,2026-08-17,Complete,,,,,,
 14,1,4.5,Integration Testing,task,End-to-end integration testing,Delivery,Test,Mark Evans,2026-06-11,2026-08-10,Complete,16,11,,,,
 15,1,4.6,Security Pen Test,task,Independent penetration test of the platform,Delivery,Test,Mark Evans,2026-07-06,2026-07-17,Complete,16,11,,,,

@@ -197,6 +197,7 @@
       <div class="toolbar-group">
         <div id="raid-kind" class="mode-seg" role="radiogroup" aria-label="Show"></div>
         <button id="btn-raid-add" class="btn btn-primary">+ Add</button>
+        <button id="btn-raid-import" class="btn" title="Bring in risks, issues and dependencies from a CSV (such as a SharePoint list export) or cells pasted from a spreadsheet">Import…</button>
         <button id="btn-raid-csv" class="btn" title="Download the entries shown (filters applied) as a CSV">Download CSV</button>
         <button class="btn btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
         <span id="raid-count" class="grid-count"></span>
@@ -632,6 +633,14 @@
           <label>A date range<input name="task_term" list="term-task" placeholder="Task" /><small>drawn as a bar</small></label>
           <p id="pg-term-preview" class="pg-term-preview"></p>
         </fieldset>
+        <fieldset class="span3 pg-terms pg-fields">
+          <legend>Fields and features this workspace uses</legend>
+          <input type="hidden" name="hidden" />
+          <label class="pg-check"><input type="checkbox" data-show-field="gitlab_url" /> GitLab URL</label>
+          <label class="pg-check"><input type="checkbox" data-show-field="use_case_url" /> Use case URL <small>badge on the Gantt chart</small></label>
+          <label class="pg-check"><input type="checkbox" data-show-field="reports" /> Reports <small>the Reports tab and Provide report buttons</small></label>
+          <p class="pg-term-preview">Untick one to hide it from this workspace. Nothing is deleted: links and reports already entered are kept and come back when it’s ticked again.</p>
+        </fieldset>
         <div id="pg-history" class="span3 pg-history">
           <div><strong class="pg-history-title">Start the history afresh</strong><span>After deleting demo or test data: clears this workspace’s <b>Date history</b> and makes <b>What changed</b> compare from today, so nothing that’s gone still shows. It can’t be undone.</span></div>
           <button type="button" id="pg-clear-history" class="btn btn-danger btn-sm">Clear history…</button>
@@ -856,6 +865,58 @@
         <span class="spacer"></span>
         <button type="button" id="im-cancel" class="btn">Cancel</button>
         <button type="submit" id="im-submit" class="btn btn-primary" disabled>Import</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="raid-import-dialog" class="edit-dialog import-dialog">
+    <form id="raid-import-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge imp">Import</span>
+        <h2>Import risks, issues &amp; dependencies into <span id="ri-workspace"></span></h2>
+        <button type="button" id="ri-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="im-body">
+        <section id="ri-step-source" class="im-source">
+          <label id="ri-drop" class="im-drop">
+            <input type="file" id="ri-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" />
+            <strong>Choose a CSV file</strong> or drop it here
+            <small>A SharePoint list exported to CSV, or any comma, semicolon or tab separated file with column headings.</small>
+          </label>
+          <div class="im-or"><span>or</span></div>
+          <div class="form-grid im-paste">
+            <div class="span3 field"><span class="field-label">Paste rows from a spreadsheet</span>
+              <textarea id="ri-paste" rows="7" placeholder="Copy the cells in Excel or Sheets, headings included, and paste them here"></textarea></div>
+          </div>
+          <p class="dlg-hint">Columns are matched to fields by their headings (Title, Risk owner, Likelihood, Mitigation, Due date, Comments and so on), and you can change the matching before anything is imported. SharePoint’s own columns are left out, and its ID becomes the ref (R12, I12, D12), so importing a later export of the same list updates the entries rather than adding them again. One file can hold every kind, with a Type column, or just one. A comments column becomes summary notes; ones already there aren’t added twice.</p>
+        </section>
+        <section id="ri-step-map" class="im-map" hidden>
+          <div class="im-bar">
+            <span id="ri-source-name" class="im-source-name"></span>
+            <button type="button" id="ri-change" class="link-btn">Choose a different file</button>
+          </div>
+          <div class="form-grid im-options">
+            <div class="span3 field"><span class="field-label">What to do</span>
+              <div class="seg" id="ri-mode">
+                <label title="Rows whose ref (or, without one, kind and title) matches an existing entry update it; the rest are added"><input type="radio" name="ri-mode" value="merge" checked /><span>Add new, update matching</span></label>
+                <label title="Every row becomes a new entry"><input type="radio" name="ri-mode" value="add" /><span>Add all as new</span></label>
+                <label title="Make the register match the file for the kinds it holds: matching entries are updated, the rest added, and entries of those kinds not in the file deleted"><input type="radio" name="ri-mode" value="replace" /><span>Replace those kinds</span></label>
+              </div>
+            </div>
+            <label id="ri-kind-label">Every row is<select id="ri-kind"></select></label>
+            <label>Dates like 03/04/2026<select id="ri-order"></select></label>
+          </div>
+          <h3 class="im-h">Columns</h3>
+          <div class="im-scroll im-cols-wrap"><table class="im-table im-cols"><thead><tr><th>Column in file</th><th>Example</th><th>Import as</th></tr></thead><tbody id="ri-cols"></tbody></table></div>
+          <h3 class="im-h">Preview <span id="ri-summary" class="im-summary"></span></h3>
+          <div class="im-scroll im-preview-wrap"><table class="im-table im-preview"><thead id="ri-preview-head"></thead><tbody id="ri-preview"></tbody></table></div>
+        </section>
+      </div>
+      <p id="ri-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" id="ri-cancel" class="btn">Cancel</button>
+        <button type="submit" id="ri-submit" class="btn btn-primary" disabled>Import</button>
       </footer>
     </form>
   </dialog>

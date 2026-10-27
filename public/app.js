@@ -698,7 +698,7 @@ const FIELD_NAMES = {
   exec_summary: 'Executive summary', next_steps: 'Next steps', get_to_green: 'Get to green plan', period_end: 'Period ending',
   week_ending: 'Week ending', lead: 'Area lead', author: 'Author', number: 'Program number', rows: 'RAG options',
   likelihood: 'Likelihood', impact: 'Impact', priority: 'Priority', dep_type: 'Dependency type', dep_priorities: 'Dependency priorities', dep_types: 'Dependency types', text: 'Note', due: 'Due', party: 'Other party', response: 'Response', links: 'Linked to', kind: 'Type',
-  item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task',
+  item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task', hidden: 'Hidden fields and features',
 };
 const fieldName = (k) => FIELD_NAMES[k] || k[0].toUpperCase() + k.slice(1).replace(/_/g, ' ');
 function shownValue(v, field) {
@@ -1357,6 +1357,10 @@ function removeItem(id) {
 
 const MIN_STREAM_COL_W = 130;
 const MIN_SUB_COL_W = 130;
+const MAX_STREAM_COL_W = 210; // longer stream / sub-stream names wrap onto more lines rather than widening the column
+const MAX_SUB_COL_W = 180;
+const STREAM_LINE_H = 17;
+const SUB_LINE_H = 15;
 const PAD_RIGHT = 30;
 const QUARTER_H = 26;
 const MONTH_H = 24;
@@ -1407,11 +1411,11 @@ function rowMetrics() {
   };
 }
 
-// Label columns grow to fit the longest stream and sub-stream names, so none is cut short.
+// Label columns grow to fit the longest stream and sub-stream names up to a cap; longer names wrap.
 const hasSubStreams = () => state.items.some(m => m.substream);
 const widest = (names, size, weight) => Math.max(0, ...[...new Set(names)].filter(Boolean).map(n => textW(n, size, weight)));
-const streamColWidth = () => Math.ceil(Math.max(hasSubStreams() ? MIN_STREAM_COL_W : 170, widest(state.items.map(m => m.stream), 14, 700) + 40));
-const subColWidth = () => Math.ceil(Math.max(MIN_SUB_COL_W, widest(state.items.map(m => m.substream), 12, 600) + 24));
+const streamColWidth = () => Math.ceil(Math.min(MAX_STREAM_COL_W, Math.max(hasSubStreams() ? MIN_STREAM_COL_W : 170, widest(state.items.map(m => m.stream), 14, 700) + 40)));
+const subColWidth = () => Math.ceil(Math.min(MAX_SUB_COL_W, Math.max(MIN_SUB_COL_W, widest(state.items.map(m => m.substream), 12, 600) + 24)));
 const labelWidth = () => streamColWidth() + (hasSubStreams() ? subColWidth() : 0);
 
 function svgEl(tag, attrs, text) {
@@ -1428,6 +1432,32 @@ const measureCtx = document.createElement('canvas').getContext('2d');
 function textW(s, size, weight = 400) {
   measureCtx.font = `${weight} ${size}px ${FONT}`;
   return measureCtx.measureText(s).width;
+}
+// Word-wrap a name into lines no wider than px; a single word too long for a line is broken mid-word.
+function wrapText(s, px, size, weight = 400) {
+  const lines = [];
+  let line = '';
+  for (let word of String(s || '').split(/\s+/).filter(Boolean)) {
+    const next = line ? `${line} ${word}` : word;
+    if (textW(next, size, weight) <= px) { line = next; continue; }
+    if (line) lines.push(line);
+    while (textW(word, size, weight) > px && word.length > 1) {
+      let n = word.length - 1;
+      while (n > 1 && textW(word.slice(0, n), size, weight) > px) n--;
+      lines.push(word.slice(0, n));
+      word = word.slice(n);
+    }
+    line = word;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+// Multi-line SVG text, its lines centred vertically on cy.
+function svgLines(attrs, lines, cy, lineH) {
+  const t = svgEl('text', attrs);
+  const y0 = cy - (lines.length - 1) * lineH / 2;
+  lines.forEach((l, i) => t.appendChild(svgEl('tspan', { x: attrs.x, y: y0 + i * lineH }, l)));
+  return t;
 }
 function truncate(s, px, size, weight = 400) {
   if (textW(s, size, weight) <= px) return s;
@@ -1487,14 +1517,18 @@ function layoutStreams(items, xOf, rm, minX, maxX) {
   sortStreams(streams);
   const oneEach = ganttSort.rows !== 'packed';
   const folded = collapsedStreams();
+  const subCol = hasSubStreams();
+  const nameW = (subCol ? streamColWidth() : labelWidth()) - 40, subW = subColWidth() - 24;
   for (const stream of streams) {
+    stream.lines = wrapText(stream.name, nameW, 14, 700);
+    const nameH = stream.lines.length * STREAM_LINE_H + 14;
     if (folded.has(stream.name)) {
       // folded: one summary row for the whole stream
       const all = stream.subs.flatMap(sub => sub.items);
       for (const m of all) m._row = 0;
       stream.collapsed = true;
       stream.count = all.length;
-      stream.subs = [{ name: '', items: all, rows: 1, collapsed: true, h: Math.max(44, rm.h + rm.pad * 2) }];
+      stream.subs = [{ name: '', lines: [], items: all, rows: 1, collapsed: true, h: Math.max(44, rm.h + rm.pad * 2, nameH + 13) }];
       stream.h = stream.subs[0].h;
       continue;
     }
@@ -1538,9 +1572,12 @@ function layoutStreams(items, xOf, rm, minX, maxX) {
         m._row = r;
       }
       sub.rows = Math.max(1, rowEnds.length);
-      sub.h = sub.rows * rm.h + rm.pad * 2;
+      sub.lines = subCol && sub.name ? wrapText(sub.name, subW, 12, 600) : [];
+      sub.h = Math.max(sub.rows * rm.h + rm.pad * 2, sub.lines.length * SUB_LINE_H + 12);
     }
     stream.h = stream.subs.reduce((a, s) => a + s.h, 0);
+    // a stream name on several lines needs the room: the last sub-stream takes up the slack
+    if (stream.h < nameH) { stream.subs.at(-1).h += nameH - stream.h; stream.h = nameH; }
   }
   return streams;
 }
@@ -1695,9 +1732,10 @@ function renderGantt() {
       d: stream.collapsed ? `M 14 ${y + stream.h / 2 - 4} l 4.5 4 l -4.5 4` : `M 12 ${y + stream.h / 2 - 2} l 4 4.5 l 4 -4.5`,
       fill: 'none', stroke: G.muted, 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
     }));
+    const nameH = (stream.lines.length - 1) * STREAM_LINE_H;
     const nameY = stream.collapsed ? y + stream.h / 2 + 1 : y + stream.h / 2 + 5;
-    toggle.appendChild(svgEl('text', { x: 26, y: nameY, 'font-size': 14, 'font-weight': 700, fill: G.text }, stream.name));
-    if (stream.collapsed) toggle.appendChild(svgEl('text', { x: 26, y: nameY + 13, 'font-size': 10.5, fill: G.muted }, `${stream.count} ${stream.count === 1 ? T.item : T.items} folded`));
+    toggle.appendChild(svgLines({ x: 26, 'font-size': 14, 'font-weight': 700, fill: G.text }, stream.lines, nameY, STREAM_LINE_H));
+    if (stream.collapsed) toggle.appendChild(svgEl('text', { x: 26, y: nameY + nameH / 2 + 13, 'font-size': 10.5, fill: G.muted }, `${stream.count} ${stream.count === 1 ? T.item : T.items} folded`));
     col.appendChild(toggle);
 
     let sy = y;
@@ -1708,10 +1746,8 @@ function renderGantt() {
           svg.appendChild(svgEl('line', { x1: STREAM_COL_W, y1: sy, x2: width, y2: sy, stroke: G.line, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
           col.appendChild(svgEl('line', { x1: STREAM_COL_W, y1: sy, x2: LABEL_W, y2: sy, stroke: G.line, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
         }
-        if (sub.name) {
-          col.appendChild(svgEl('text', {
-            x: STREAM_COL_W + 12, y: sy + sub.h / 2 + 4, 'font-size': 12, 'font-weight': 600, fill: G.sub,
-          }, sub.name));
+        if (sub.lines.length) {
+          col.appendChild(svgLines({ x: STREAM_COL_W + 12, 'font-size': 12, 'font-weight': 600, fill: G.sub }, sub.lines, sy + sub.h / 2 + 4, SUB_LINE_H));
         }
       }
       sy += sub.h;
@@ -1873,7 +1909,7 @@ function renderGantt() {
       if (m._meta) g.appendChild(svgEl('text', { x: m._lx, y: cy + 15, 'text-anchor': anchor, 'font-size': 10.5, fill: G.muted, ...halo() }, m._meta));
     }
     // a use case link: a dark badge with a document on its bottom-right corner
-    if (m.use_case_url) {
+    if (m.use_case_url && !linkHidden('use_case_url')) {
       const ux = m._task ? x2 - 1 : x1 + rm.shapeS + 1, uy = m._task ? cy + rm.barH / 2 : cy + rm.shapeS + 1;
       const badge = svgEl('g', { class: 'gantt-usecase', 'pointer-events': 'none' });
       badge.appendChild(svgEl('circle', { cx: ux, cy: uy, r: 7, fill: G.text, stroke: G.bg, 'stroke-width': 1.5 }));
@@ -2475,7 +2511,14 @@ const withScheme = (u) => (u && !/^[a-z][\w+.-]*:/i.test(u) ? `https://${u}` : u
 const linkOut = (u) => isWebUrl(u)
   ? `<a href="${escAttr(u)}" target="_blank" rel="noopener noreferrer" title="${escAttr(u)}">${escAttr(u.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, ''))}</a>`
   : escAttr(u);
-const itemLinks = (m) => Object.entries({ GitLab: m.gitlab_url, 'Use case': m.use_case_url }).filter(([, u]) => u);
+// A workspace can switch off the link fields and features it doesn't use (its `hidden` list):
+// link fields leave the grid, the edit dialog and the Gantt chart; 'reports' hides reporting everywhere.
+const LINK_FIELDS = ['gitlab_url', 'use_case_url'];
+const hiddenFields = (wsId = state.workspaceId) => (workspaceById(wsId)?.hidden || '').split(';').filter(Boolean);
+const linkHidden = (k, wsId) => LINK_FIELDS.includes(k) && hiddenFields(wsId).includes(k);
+const reportsOff = (wsId) => hiddenFields(wsId).includes('reports');
+const itemLinks = (m) => Object.entries({ GitLab: 'gitlab_url', 'Use case': 'use_case_url' })
+  .filter(([, k]) => m[k] && !linkHidden(k, m.workspace_id || undefined)).map(([l, k]) => [l, m[k]]);
 
 function openEditDialog(m) {
   hideTip();
@@ -2496,16 +2539,17 @@ function openEditDialog(m) {
     parents.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('');
   f.stream.innerHTML = streamOptions(v.stream);
   for (const k of EDIT_FIELDS) f[k].value = v[k] ?? '';
+  for (const k of LINK_FIELDS) f[k].closest('label').hidden = linkHidden(k);
   f.stream.dataset.prev = f.stream.value;
   closeNewStream(f);
   edDeps = [...v.deps];
 
   document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : `New ${T.item}`;
   document.getElementById('ed-delete').hidden = !m;
-  document.getElementById('ed-report').hidden = !m;
+  document.getElementById('ed-report').hidden = !m || reportsOff();
   const n = m ? reportsFor(m.id).length : 0;
   const hist = document.getElementById('ed-history');
-  hist.hidden = !m;
+  hist.hidden = !m || reportsOff();
   hist.disabled = !n;
   hist.textContent = `View reports (${n})`;
   document.getElementById('ed-dates').hidden = !m;
@@ -2576,7 +2620,7 @@ async function submitEditDialog(e) {
   if (!changes.title) return (err.textContent = 'Title is required.');
   for (const k in URL_FIELDS) {
     changes[k] = withScheme(changes[k]);
-    if (changes[k] && !isWebUrl(changes[k])) { f[k].focus(); return (err.textContent = `The ${URL_FIELDS[k]} isn’t a web address.`); }
+    if (changes[k] && !isWebUrl(changes[k]) && !linkHidden(k)) { f[k].focus(); return (err.textContent = `The ${URL_FIELDS[k]} isn’t a web address.`); }
   }
   if (!changes.start && !changes.end) return (err.textContent = 'Enter a start or end date.');
   const clash = changes.ref && state.items.find(x => x !== editing && x.ref === changes.ref);
@@ -3208,29 +3252,29 @@ function wireTable(t) {
 // How an item reads in a filter list; one that's gone shows its number.
 const itemShow = (id) => { const m = itemById(id); return m ? fullLabel(m) : `#${id}`; };
 const byItemRef = (a, b) => { const ma = itemById(a), mb = itemById(b); return ma && mb ? cmpRef(ma, mb) : !ma - !mb; };
+// The item's ID is an internal key, so it isn't shown; Ref is how people know an item.
 const GRID_COLS = [
   { key: 'sel', label: '', w: 36, fixed: true, head: () => `<input type="checkbox" id="grid-sel-all" title="Select all shown" />` },
+  { key: 'ref', label: 'Ref', w: 80 },
   { key: 'title', label: 'Title', w: 200 },
   { key: 'description', label: 'Description', w: 220 },
-  { key: 'ref', label: 'Ref', w: 80 },
   { key: 'status', label: 'RAG', w: 125, kind: 'status' },
   { key: 'start', label: 'Start', w: 135, kind: 'date', show: fmtNice },
   { key: 'end', label: 'End', w: 135, kind: 'date', show: fmtNice },
   { key: 'parent', label: 'Rolls up to', w: 170, show: itemShow, order: byItemRef, blank: '(None)' },
   { key: 'type', label: 'Type', w: 170, title: 'A single date (diamond; top level ones are under change control and ringed) or a date range (bar)', show: typeLabel },
+  { key: 'deps', label: 'Depends on', w: 190, show: itemShow, order: byItemRef, blank: '(None)' },
   { key: 'stream', label: 'Stream', w: 120 },
   { key: 'owner', label: 'Owner', w: 120 },
-  { key: 'deps', label: 'Depends on', w: 190, show: itemShow, order: byItemRef, blank: '(None)' },
   { key: 'gitlab_url', label: 'GitLab URL', w: 200 },
   { key: 'use_case_url', label: 'Use case URL', w: 200 },
   { key: 'substream', label: 'Sub-stream', w: 120 },
-  { key: 'id', label: 'ID', w: 64, title: 'Primary key — assigned automatically, never changes', kind: 'number' },
   { key: 'actions', label: '', w: 40, fixed: true },
 ];
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
 const QUICK_COLS = {
-  sel: {}, title: { w: 180 }, ref: { w: 70 }, status: { w: 205, wkey: 'status.compact' }, start: { w: 130 }, end: { w: 130 },
-  type: { w: 160 }, owner: { w: 130 }, id: { w: 56 }, actions: { w: 90, wkey: 'actions.quick' },
+  sel: {}, ref: { w: 70 }, title: { w: 180 }, status: { w: 205, wkey: 'status.compact' }, start: { w: 130 }, end: { w: 130 },
+  type: { w: 160 }, owner: { w: 130 }, actions: { w: 90, wkey: 'actions.quick' },
 };
 
 const grid = makeTable({
@@ -3240,7 +3284,7 @@ const grid = makeTable({
   rows: () => state.items,
   cols: () => (grid.mode === 'quick'
     ? Object.entries(QUICK_COLS).map(([k, o]) => ({ ...GRID_COLS.find(c => c.key === k), ...o }))
-    : GRID_COLS),
+    : GRID_COLS.filter(c => !linkHidden(c.key))),
   onChange: () => { syncEditorToState(); renderEditor(); },
 });
 
@@ -3375,7 +3419,7 @@ function renderEditor(highlight = [], keepOrder = false) {
         : `<select data-i="${i}" data-k="status" class="status-sel" style="color:${pal(m.status).dark}">${statusOptions(m.status)}</select>`,
       parent: `<select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select>`,
       deps: `<div class="deps">${chips}<select data-adddep="${i}" class="add-dep"><option value="">+ add</option>${depOpts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select></div>`,
-      actions: quick ? `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this ${escAttr(T.item)}">Report…</button>`
+      actions: quick ? (reportsOff() ? '' : `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this ${escAttr(T.item)}">Report…</button>`)
         : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
     };
     cols.forEach((c, j) => setCell(tr.children[j], cells[c.key]));
@@ -3745,6 +3789,7 @@ const periodText = (r) => `${fmtShort(r.period_start)} – ${fmtNice(r.period_en
 const statusPill = (st, map) => { const c = pal(st, map); return `<span class="pill" style="background:${c.base};color:${c.text}">${escAttr(st)}</span>`; };
 
 function lastReportLine(m) {
+  if (reportsOff()) return '';
   const r = reportsFor(m.id)[0];
   return r ? `<div class="tip-row tip-muted">Last report: period ending ${fmtShort(r.period_end)} ${statusPill(r.status)}</div>`
     : '<div class="tip-row tip-muted">No reports yet</div>';
@@ -3857,8 +3902,8 @@ function renderQuick() {
       <button type="submit" class="btn btn-primary">Save</button>
     </div>
     <div class="q-foot">
-      <button type="button" class="btn" data-act="report">Provide report…</button>
-      <button type="button" class="btn" data-act="history" ${n ? '' : 'disabled'}>Reports (${n})</button>
+      ${reportsOff() ? '' : `<button type="button" class="btn" data-act="report">Provide report…</button>
+      <button type="button" class="btn" data-act="history" ${n ? '' : 'disabled'}>Reports (${n})</button>`}
       <button type="button" class="btn" data-act="dates">Date history</button>
       <button type="button" class="btn" data-act="edit">Edit details…</button>
     </div>
@@ -5628,20 +5673,24 @@ function loadImportText(text, name) {
   renderImport();
 }
 
-async function readImportFile(file) {
-  const err = document.getElementById('im-error');
+// A file's text, or null (with the reason shown in `err`) for a workbook, which can't be read.
+async function readTextFile(file, err) {
   if (/\.(xlsx|xlsm|xls|numbers|ods)$/i.test(file.name)) {
-    return (err.textContent = `${file.name} is a workbook, which can't be read directly. Save it as CSV (in Excel: File › Save As › CSV), or copy the cells and paste them.`);
+    err.textContent = `${file.name} is a workbook, which can't be read directly. Save it as CSV (in Excel: File › Save As › CSV), or copy the cells and paste them.`;
+    return null;
   }
   const buf = await file.arrayBuffer();
-  let text;
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
   catch {
     // UTF-16 (Excel "Unicode text") or Windows-1252 (Excel's plain CSV on Windows)
     const b = new Uint8Array(buf);
-    text = new TextDecoder(b[0] === 0xff && b[1] === 0xfe ? 'utf-16le' : b[0] === 0xfe && b[1] === 0xff ? 'utf-16be' : 'windows-1252').decode(buf);
+    return new TextDecoder(b[0] === 0xff && b[1] === 0xfe ? 'utf-16le' : b[0] === 0xfe && b[1] === 0xff ? 'utf-16be' : 'windows-1252').decode(buf);
   }
-  loadImportText(text, file.name);
+}
+
+async function readImportFile(file) {
+  const text = await readTextFile(file, document.getElementById('im-error'));
+  if (text != null) loadImportText(text, file.name);
 }
 
 function renderImport() {
@@ -5757,7 +5806,7 @@ function wireImport() {
 // with a summary of each; the one being viewed drives the Gantt chart, Items and Reports.
 
 const WORKSPACE_COLUMNS = ['id', 'number', 'name', 'code', 'description', 'owner', 'lead', 'start', 'end', 'status', 'trend',
-  'item_term', 'milestone_term', 'task_term', 'dep_priorities', 'dep_types', 'created', 'updated'];
+  'item_term', 'milestone_term', 'task_term', 'dep_priorities', 'dep_types', 'hidden', 'created', 'updated'];
 const WORKSPACE_FIELDS = WORKSPACE_COLUMNS.slice(1, -2);
 
 function rowsToWorkspaces(rows) {
@@ -5823,6 +5872,8 @@ function applyWorkspaceChrome() {
   const p = currentWorkspace();
   document.querySelectorAll('[data-term]').forEach(el => { el.textContent = T[el.dataset.term]; });
   document.getElementById('nav-editor').title = T.Items;
+  document.getElementById('nav-reports').hidden = reportsOff();
+  if (reportsOff() && isShown('reports')) switchView('gantt');
   document.getElementById('workspace-select').innerHTML = state.workspaces
     .map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${escAttr(x.name)}</option>`).join('');
   document.getElementById('workspace-dot').style.background = pal(p.status).base;
@@ -5954,7 +6005,7 @@ function renderWorkspaces() {
         <dl class="prog-meta">
           ${meta}
           <div><dt>Timeline</dt><dd>${span}${spanNote}</dd></div>
-          <div><dt>Last report</dt><dd>${st.lastReport ? `period ending ${fmtNice(st.lastReport)}` : 'none yet'}</dd></div>
+          ${reportsOff(p.id) ? '' : `<div><dt>Last report</dt><dd>${st.lastReport ? `period ending ${fmtNice(st.lastReport)}` : 'none yet'}</dd></div>`}
         </dl>
         <div class="prog-rag">
           <div class="prog-ragbar">${bar}</div>
@@ -5962,7 +6013,7 @@ function renderWorkspaces() {
         </div>
         <div class="prog-ms"><span class="prog-ms-label">${escAttr(t.Milestone)} overview</span>${milestoneStrip(p.id)}</div>
         <footer class="prog-foot">
-          <span class="prog-counts">${count(n, t.item, t.items)} · ${count(n - st.tasks, t.milestone, t.milestones)} · ${count(st.tasks, t.task, t.tasks)} · ${count(st.reports.length, 'report', 'reports')}</span>
+          <span class="prog-counts">${count(n, t.item, t.items)} · ${count(n - st.tasks, t.milestone, t.milestones)} · ${count(st.tasks, t.task, t.tasks)} ${reportsOff(p.id) ? '' : `· ${count(st.reports.length, 'report', 'reports')}`}</span>
           <button type="button" class="btn ${current ? '' : 'btn-primary'}" data-open-workspace="${p.id}">${current ? 'Continue' : 'Open'} →</button>
         </footer>
       </article>`;
@@ -5990,6 +6041,8 @@ function openWorkspaceDialog(p) {
   const v = p || { ...newWorkspaceDefaults() };
   // Default terms show as placeholders, so a new word can be typed straight in.
   for (const k of WORKSPACE_FIELDS) if (k !== 'status') f[k].value = (v[k] === DEFAULT_TERMS[k] ? '' : v[k]) ?? '';
+  const hidden = (v.hidden || '').split(';');
+  for (const box of document.querySelectorAll('[data-show-field]')) box.checked = !hidden.includes(box.dataset.showField);
   loadPgStatuses(p);
   loadPgDepLists(p);
   showPgTab('details');
@@ -6213,6 +6266,7 @@ async function submitWorkspaceDialog(e) {
   const depErr = checkPgDepLists();
   if (depErr) { showPgTab('deps'); return (err.textContent = depErr); }
   for (const k of DEP_LIST_KEYS) f[k].value = pgDepListValue(k);
+  f.hidden.value = [...document.querySelectorAll('[data-show-field]')].filter(b => !b.checked).map(b => b.dataset.showField).join(';');
   const v = {};
   for (const k of WORKSPACE_FIELDS) v[k] = f[k].value.trim();
   if (!v.name) return (err.textContent = 'Give the workspace a name.');
@@ -6246,7 +6300,7 @@ async function submitWorkspaceDialog(e) {
   }
   applyWorkspaceChrome();
   rerenderCurrentView();
-  if (isShown('editor')) renderEditor(); // new terms / RAG options in the grid
+  if (isShown('editor')) { renderTableHead(grid); renderEditor(); } // new terms / RAG options / link columns in the grid
   await Promise.all(saves);
 }
 
@@ -7178,6 +7232,724 @@ function wireRaid() {
   wirePgDepLists();
 }
 
+/* ---- import (built for SharePoint list exports) ---- */
+// Brings risks, issues and dependencies in from a CSV file or pasted cells, as Import does for
+// items: each column is matched to a field by its heading (and can be changed), and a preview
+// shows what will be added, updated, deleted or skipped before anything is saved. Blank cells
+// leave an existing entry's value alone.
+//
+// It's made for a SharePoint list exported to CSV. SharePoint's own columns (Item Type, Path,
+// Created By…) are left out; rich text comes in as plain text; lookup and person values lose their
+// ids ("12;#Jane Doe" → "Jane Doe"); a title row above the headings is passed over; and the list's
+// ID becomes the ref (R12, I12, D12) when there's no ref column, so importing a later export of
+// the same list updates the entries instead of adding them again. Without a ref or ID, an entry
+// is matched by its kind and title.
+//
+// One file can hold every kind (read from a Type column, or a ref like R-12) or just one (chosen
+// in the dialog, and guessed from the file name). Values are read generously: likelihood and
+// impact from Low/Medium/High, 1–3, 1–5 or 1–10 scores, words like Rare…Almost certain or Minor…
+// Severe, or percentages; statuses from the usual SharePoint words (Active, Mitigating, Resolved,
+// Delivered…), and a value that can't be placed is kept as it is, with a note. A comments column
+// becomes summary notes: a cell can hold several, each starting with a date (and who wrote it,
+// as Download CSV writes them), and a note that's already on the entry isn't added again. Links
+// name items by ref or title, or a stream by name; a risk or issue's stream becomes a link.
+
+const RI_FIELDS = ['kind', 'ref', 'spid', 'title', 'description', 'stream', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact',
+  'due', 'raised', 'party', 'response', 'links', 'notes', 'modified'];
+// Several columns can go into these: their text is put together, each under its heading.
+const RI_MULTI = ['description', 'response', 'links', 'notes'];
+const RI_DATES = ['due', 'raised', 'modified'];
+const riFieldLabel = (k) => ({
+  kind: 'Type (risk, issue or dependency)', ref: 'Ref', spid: 'SharePoint ID (makes the ref if there’s no ref column)', title: 'Title',
+  description: 'Description', stream: 'Stream', owner: 'Owner', status: 'Status', rag: 'RAG (dependencies)', priority: 'Priority (dependencies)',
+  dep_type: 'Dependency type', likelihood: 'Likelihood (risks)', impact: 'Impact (risks and issues)', due: 'Due date', raised: 'Date raised',
+  party: 'Other party (dependencies)', response: 'Mitigation / resolution / next action', links: `Linked ${T.items} or streams`,
+  notes: 'Summary notes', modified: 'Last modified (dates notes that have no date)',
+}[k]);
+// Headings are compared with everything but letters and digits removed; earlier names win.
+const RI_ALIASES = {
+  kind: ['raidtype', 'raidcategory', 'raid', 'entrytype', 'logtype', 'recordtype', 'type', 'kind', 'category'],
+  ref: ['ref', 'reference', 'refno', 'referencenumber', 'raidref', 'raidid', 'riskid', 'issueid', 'dependencyid', 'depid', 'riskref', 'issueref',
+    'dependencyref', 'riskno', 'issueno', 'dependencyno', 'riskreference', 'issuereference', 'logid', 'key', 'number', 'no'],
+  spid: ['id'],
+  title: ['title', 'risktitle', 'issuetitle', 'dependencytitle', 'name', 'riskname', 'issuename', 'dependencyname', 'subject', 'headline',
+    'shortdescription', 'summary', 'risk', 'issue', 'dependency'],
+  description: ['description', 'riskdescription', 'issuedescription', 'dependencydescription', 'desc', 'details', 'detail', 'fulldescription',
+    'longdescription', 'background', 'context', 'cause', 'event', 'effect'],
+  stream: ['stream', 'workstream', 'workstreams', 'streamname', 'area', 'team', 'function', 'theme'],
+  owner: ['owner', 'riskowner', 'issueowner', 'dependencyowner', 'actionowner', 'assignedto', 'assignee', 'ownedby', 'responsible', 'accountable',
+    'lead', 'pointofcontact', 'contact'],
+  status: ['status', 'riskstatus', 'issuestatus', 'dependencystatus', 'currentstatus', 'state', 'stage', 'progress'],
+  rag: ['rag', 'ragstatus', 'ragrating', 'health', 'rating'],
+  priority: ['priority', 'dependencypriority', 'criticality', 'importance', 'urgency'],
+  dep_type: ['dependencytype', 'deptype', 'typeofdependency', 'dependencycategory', 'direction', 'dependencydirection', 'inboundoutbound'],
+  likelihood: ['likelihood', 'probability', 'likelihoodscore', 'probabilityscore', 'likelihoodrating', 'chance', 'prob'],
+  impact: ['impact', 'severity', 'impactscore', 'impactrating', 'impactlevel', 'severityrating', 'consequence', 'consequences', 'seriousness'],
+  due: ['due', 'duedate', 'datedue', 'targetdate', 'targetresolutiondate', 'expectedresolutiondate', 'resolutiondate', 'resolveby', 'neededby',
+    'needbydate', 'neededbydate', 'requiredby', 'requiredbydate', 'requireddate', 'deadline', 'targetclosuredate'],
+  raised: ['raised', 'dateraised', 'raisedon', 'raiseddate', 'dateidentified', 'identifieddate', 'identified', 'dateopened', 'openeddate',
+    'datelogged', 'loggeddate', 'datecreated', 'created'],
+  party: ['otherparty', 'party', 'dependenton', 'dependentupon', 'dependson', 'provider', 'providedby', 'supplier', 'thirdparty',
+    'externalparty', 'counterparty', 'providingteam', 'deliveringteam', 'receivingteam', 'dependentteam'],
+  response: ['response', 'mitigation', 'mitigations', 'mitigationplan', 'mitigatingactions', 'mitigationactions', 'mitigationstrategy',
+    'responseplan', 'responsestrategy', 'resolution', 'resolutionplan', 'actionplan', 'actions', 'action', 'nextsteps', 'nextaction',
+    'nextactions', 'agreement', 'agreementnextaction', 'treatment', 'contingency', 'contingencyplan'],
+  links: ['links', 'linkedto', 'linkeditems', 'linkedmilestones', 'relatedmilestones', 'relatedmilestone', 'affectedmilestones',
+    'impactedmilestones', 'relateditems', 'relatedto', 'milestones', 'milestone', 'deliverables', 'deliverable', 'relatedtasks', 'tasks', 'items'],
+  notes: ['summarynotes', 'notes', 'comments', 'comment', 'updates', 'update', 'latestupdate', 'statusupdate', 'progressupdate', 'commentary',
+    'progressnotes', 'history'],
+  modified: ['modified', 'lastmodified', 'datemodified', 'lastupdated', 'updated', 'updatedon'],
+};
+// SharePoint's own columns, never imported.
+const RI_IGNORED = ['itemtype', 'path', 'createdby', 'modifiedby', 'contenttype', 'attachments', 'complianceassetid', 'version', 'appcreatedby',
+  'appmodifiedby', 'folderchildcount', 'itemchildcount', 'labelsetting', 'retentionlabel', 'retentionlabelapplied', 'labelappliedby',
+  'itemislocked', 'sensitivity', 'edit', 'workspaceid'];
+// (SharePoint's internal names write a space as _x0020_.)
+const riNorm = (h) => String(h ?? '').replace(/_x([0-9a-f]{4})_/gi, ' ').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const rimp = { name: '', rows: [], headerRow: 0, map: [], order: 'auto', mode: 'merge', kind: 'risk', plan: null, detected: null };
+
+/* ---- cells ---- */
+// Plain text from a SharePoint cell: rich text (HTML) loses its tags, lookups and people lose
+// their ids, and stray invisible characters go.
+function riClean(v) {
+  let s = String(v ?? '');
+  if (/<[a-z!/][^>]*>|&(nbsp|amp|lt|gt|quot|#\d+);/i.test(s)) {
+    const doc = new DOMParser().parseFromString(s.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h\d|tr)>/gi, '\n').replace(/<li[^>]*>/gi, '• '), 'text/html');
+    s = doc.body.textContent || '';
+  }
+  s = s.replace(/[​‎‏﻿]/g, '').replace(/ /g, ' ').replace(/i:0#\.[a-z]\|membership\|/gi, '');
+  if (s.includes(';#')) s = s.split(';#').map(x => x.trim()).filter(x => x && !/^\d+$/.test(x)).join('; ');
+  return s.split('\n').map(l => l.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// risk / issue / dependency, 'other' for the RAID kinds the register doesn't keep (assumptions,
+// actions, decisions), '' for a blank cell and null for anything else.
+function readRaidKind(v) {
+  const s = String(v ?? '').toLowerCase().replace(/[^a-z ]+/g, ' ').trim();
+  if (!s) return '';
+  if (/^(r|risks?|threats?|opportunit(y|ies))$/.test(s)) return 'risk';
+  if (/^(i|issues?|problems?|incidents?)$/.test(s)) return 'issue';
+  if (/^(d|deps?|dependenc(y|ies))$/.test(s)) return 'dependency';
+  if (/^(a|assumptions?|actions?|decisions?|lessons?( learned| learnt)?|changes?|change requests?)$/.test(s)) return 'other';
+  if (/\brisk/.test(s)) return 'risk';
+  if (/\bissue/.test(s)) return 'issue';
+  if (/\bdepend/.test(s)) return 'dependency';
+  if (/\b(assum|action|decision)/.test(s)) return 'other';
+  return null;
+}
+// A ref like R-12, ISS012 or DEP 3 gives the kind away.
+const kindFromRef = (ref) => {
+  const m = String(ref).match(/^([a-z]+)[-_ ]?\d+$/i);
+  if (!m) return '';
+  const p = m[1].toLowerCase();
+  return /^(r|rsk|risk)$/.test(p) ? 'risk' : /^(i|iss|issue)$/.test(p) ? 'issue' : /^(d|dep|dependency)$/.test(p) ? 'dependency' : '';
+};
+
+// Low / Medium / High from words, a score on a scale (the column's largest number tells which:
+// 1–3, 1–5 or 1–10), or a percentage. '' for a blank cell, null if it can't be read.
+function readLevel(v, scale) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (!s) return '';
+  const w = s.replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (w) {
+    if (/^[lmh]$/.test(w)) return { l: 'Low', m: 'Medium', h: 'High' }[w];
+    if (/\b(very low|low|minor|negligible|insignificant|minimal|trivial|rare|remote|unlikely|improbable|green)\b/.test(w)) return 'Low';
+    if (/\b(medium|med|moderate|possible|possibly|amber|average|mid|normal)\b/.test(w)) return 'Medium';
+    if (/\b(very high|high|extreme|catastrophic|critical|severe|major|significant|almost certain|certain|very likely|likely|probable|red)\b/.test(w)) return 'High';
+  }
+  const m = s.match(/\d+(\.\d+)?/);
+  if (!m) return null;
+  let n = +m[0];
+  if (s.includes('%') || (n > 0 && n < 1)) {
+    if (n < 1) n *= 100;
+    return n < 34 ? 'Low' : n < 67 ? 'Medium' : 'High';
+  }
+  const top = Math.max(scale || 0, n);
+  if (top <= 3) return ['Low', 'Low', 'Medium', 'High'][Math.round(n)] || 'Low';
+  if (top <= 5) return n <= 2 ? 'Low' : n < 4 ? 'Medium' : 'High';
+  return n <= 3 ? 'Low' : n <= 7 ? 'Medium' : 'High';
+}
+
+// A status in a kind's own words: [status, true] if it could be placed, [the value as written,
+// false] if not.
+const RI_STATUS_WORDS = {
+  closed: /^(closed?|resolved|retired|cancell?ed|completed?|done|archived|reali[sz]ed|occurred|materiali[sz]ed|transferred|superseded|duplicate|withdrawn|rejected|expired|obsolete|no longer (valid|relevant|required|applicable)|not required|mitigated|avoided|eliminated|terminated|finished|fixed|delivered|met|received|fulfill?ed|satisfied|achieved|provided|landed)$/,
+  progress: /^(in progress|wip|work in progress|mitigating|being mitigated|under mitigation|active|ongoing|working|assigned|monitoring|monitor|managing|managed|in hand|investigating|under investigation|under review|in review|escalated|on hold|accepted|tolerated|treating|in treatment|started|actioned|tracking|on track|agreed|committed|planned)$/,
+  open: /^(open|new|proposed|identified|raised|draft|submitted|not started|pending|logged|live|re ?opened|unassigned|to do|todo|awaiting|candidate|requested)$/,
+  blocked: /^(blocked|missed|failed|stuck|halted|stalled)$/,
+  atRisk: /^(at risk|amber|red|delayed|late|overdue|off track|slipping|behind|concern|issue|escalated)$/,
+};
+function readRaidStatus(v, kind) {
+  const raw = String(v ?? '').trim();
+  const d = RAID_KINDS[kind];
+  const exact = d.statuses.find(x => x.toLowerCase() === raw.toLowerCase());
+  if (exact) return [exact, true];
+  const s = raw.toLowerCase().replace(/^\(?\d+\)?\s*[-.:)]?\s*/, '').replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const W = RI_STATUS_WORDS;
+  if (kind === 'dependency') {
+    if (W.closed.test(s)) return ['Complete', true];
+    if (W.blocked.test(s)) return ['Blocked', true];
+    if (W.atRisk.test(s)) return ['At risk', true];
+    if (W.open.test(s) || W.progress.test(s) || s === 'green') return ['Not started', true];
+  } else {
+    if (W.closed.test(s)) return ['Closed', true];
+    if (W.progress.test(s) || W.blocked.test(s) || W.atRisk.test(s)) return ['In progress', true];
+    if (W.open.test(s)) return ['Open', true];
+  }
+  return [raw, false];
+}
+
+// A value from one of the workspace's dependency lists: exactly, as part of the words ("High
+// priority", "External dependency"), or for priorities by number (P1, 1, "(1) High") or the
+// usual words for the top and bottom. Null if it can't be placed.
+function readFromDepList(v, list, priorities) {
+  const raw = String(v ?? '').trim(), s = raw.toLowerCase();
+  if (!s) return '';
+  const exact = list.find(x => x.toLowerCase() === s);
+  if (exact) return exact;
+  const words = s.replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const part = words && list.find(x => new RegExp(`\\b${x.toLowerCase().replace(/[^a-z0-9 ]+/g, '')}\\b`).test(words));
+  if (part) return part;
+  if (!priorities) return null;
+  if (/\b(urgent|highest|very high|showstopper|blocker|top)\b/.test(words)) return list[0];
+  if (/\b(lowest|very low|minor|trivial)\b/.test(words)) return list.at(-1);
+  if (/\b(normal|moderate|med)\b/.test(words)) return list.find(x => /^medium$/i.test(x)) || list[Math.floor(list.length / 2)];
+  const n = s.match(/\d+/);
+  if (n && +n[0] >= 1) return list[Math.min(+n[0], list.length) - 1];
+  return null;
+}
+
+// A date and time ("21 Oct 2026, 14:05", "10/21/2026 2:05 PM") as an ISO time stamp, or null.
+// A date alone is taken as noon.
+function readStamp(raw, order) {
+  const s = String(raw ?? '').trim();
+  const day = (o) => readDate(s.replace(/,\s*$/, ''), o) || readDate(stripTime(s).replace(/,\s*$/, ''), o);
+  const d = day(order) || day(order === 'mdy' ? 'dmy' : 'mdy'); // a stamp that only reads the other way round
+  if (!d) return null;
+  const t = s.match(/(?:^|[\sT,])(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?\.?m?\.?\s*(?:z|[+-]\d{2}:?\d{2})?$/i);
+  let h = 12, mi = 0;
+  if (t) {
+    h = +t[1] % (t[3] ? 12 : 24) + (t[3]?.toLowerCase() === 'p' ? 12 : 0);
+    mi = +t[2];
+  }
+  if (/t\d.*z$/i.test(s)) { const z = new Date(s); if (!isNaN(z)) return z.toISOString(); }
+  return new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), h, mi).toISOString();
+}
+
+// The start of a note line: a date (and time), perhaps with who wrote it, then ": " or " - ".
+// Download CSV writes "21 Oct 2026, 14:05 (A. Person): text"; others write "[21/10/2026] text",
+// "A. Person (21/10/2026 14:05): text" or "21/10/2026 - text".
+function noteHead(line, order) {
+  for (const m of line.matchAll(/\]\s*|:\s+|\s+[-–]\s+/g)) {
+    if (m.index > 70) break;
+    let head = line.slice(0, m.index + (m[0].startsWith(']') ? 1 : 0)).trim().replace(/^\[|\]$/g, '').trim();
+    const text = line.slice(m.index + m[0].length).trim();
+    const tries = [[head, '']];
+    const p = head.match(/^(.*?)\s*\(([^()]*)\)$/);
+    if (p) tries.push([p[1], p[2]], [p[2], p[1]]);
+    const b = head.match(/^(.*?)\s+(?:by|[-–])\s+(.+)$/i);
+    if (b) tries.push([b[1], b[2]]);
+    for (const [when, by] of tries) {
+      if (!/\d/.test(when)) continue;
+      const at = readStamp(when, order);
+      if (at) return { at, by: by.trim(), text };
+    }
+  }
+  return null;
+}
+// The notes in a cell, oldest first.
+function readNotes(text, order, fallbackAt) {
+  const notes = [];
+  let cur = null;
+  for (const line of text.split('\n')) {
+    const head = noteHead(line, order);
+    if (head) notes.push(cur = head);
+    else if (cur) cur.text += `\n${line}`;
+    else if (line.trim()) notes.push(cur = { at: fallbackAt, by: '', text: line });
+  }
+  for (const n of notes) n.text = n.text.trim();
+  return notes.filter(n => n.text).sort((a, b) => a.at.localeCompare(b.at));
+}
+const noteKey = (t) => t.toLowerCase().replace(/\s+/g, ' ').trim();
+
+// Links: an item by ref, "ref title", title or #id, or a stream by name ("Stream: Design" as
+// Download CSV writes it). `loose` also takes a ref followed by anything. Returns the link, or null.
+function riStreamName(name) {
+  const k = riNorm(name);
+  const all = [...new Set([...streamsInOrder(), ...state.streams.filter(l => l.workspace_id === state.workspaceId).map(l => l.name)])].filter(Boolean);
+  return all.find(n => riNorm(n) === k) || '';
+}
+function resolveRaidLink(tok, loose) {
+  const t = tok.trim();
+  if (!t) return null;
+  let m;
+  if ((m = t.match(/^(item|stream):(.+)$/i))) {
+    if (m[1].toLowerCase() === 'item') return itemById(m[2].trim()) ? `item:${m[2].trim()}` : null;
+    const n = riStreamName(m[2]);
+    return n ? `stream:${n}` : null;
+  }
+  if ((m = t.match(/^#(\d+)$/))) return itemById(m[1]) ? `item:${m[1]}` : null;
+  const k = riNorm(t), low = t.toLowerCase();
+  const items = state.items;
+  const hit = items.find(x => x.ref && x.ref.toLowerCase() === low) || items.find(x => riNorm(fullLabel(x)) === k)
+    || (items.filter(x => riNorm(x.title) === k).length === 1 && items.find(x => riNorm(x.title) === k));
+  if (hit) return `item:${hit.id}`;
+  const n = riStreamName(t);
+  if (n) return `stream:${n}`;
+  // "M12 – Build the thing": a ref, then anything.
+  const first = loose && t.match(/^(\S+?)[\s:–-]+\S/);
+  const byRef = first && items.find(x => x.ref && x.ref.toLowerCase() === first[1].toLowerCase());
+  return byRef ? `item:${byRef.id}` : null;
+}
+// A cell's links: [links, things it couldn't place].
+function readRaidLinks(text) {
+  const whole = resolveRaidLink(text);
+  if (whole) return [[whole], []];
+  const found = [], missing = [];
+  for (const piece of text.split(/\s*(?:;|\n|\|)\s*/).filter(Boolean)) {
+    const one = resolveRaidLink(piece, true);
+    if (one) { found.push(one); continue; }
+    const parts = piece.split(/\s*,\s*/).filter(Boolean);
+    const each = parts.map(x => resolveRaidLink(x, true));
+    if (parts.length > 1 && each.every(Boolean)) found.push(...each);
+    else missing.push(piece);
+  }
+  return [found, missing];
+}
+
+/* ---- columns ---- */
+// The heading row is usually the first, but an export saved from Excel can have a title above it.
+function riHeaderRow(rows) {
+  const known = new Set(Object.values(RI_ALIASES).flat().concat(RI_IGNORED));
+  let best = 0, bestHits = 0;
+  rows.slice(0, 6).forEach((r, i) => {
+    const hits = r.filter(h => known.has(riNorm(h))).length;
+    if (hits > bestHits) { best = i; bestHits = hits; }
+  });
+  return bestHits >= 2 ? best : 0;
+}
+
+function guessRaidMap(header, data) {
+  const norm = header.map(h => riNorm(h));
+  const map = norm.map(() => '');
+  const values = (i) => data.map(r => riClean(r[i])).filter(Boolean);
+  const looksLikeKinds = (i) => { const v = values(i); return v.length > 0 && v.filter(x => readRaidKind(x)).length >= v.length * 0.8; };
+  const free = (i) => !map[i] && !RI_IGNORED.includes(norm[i]);
+  for (const k of RI_FIELDS) {
+    for (const alias of RI_ALIASES[k]) {
+      if (!RI_MULTI.includes(k) && map.includes(k)) break;
+      norm.forEach((h, i) => {
+        if (h !== alias || !free(i) || (!RI_MULTI.includes(k) && map.includes(k))) return;
+        // A Type or Category column is the kind only if it holds kinds: otherwise, for a list of
+        // dependencies, it's their type.
+        if (k === 'kind' && !looksLikeKinds(i)) { if (['type', 'category'].includes(h) && rimp.kind === 'dependency' && !map.includes('dep_type')) map[i] = 'dep_type'; return; }
+        map[i] = k;
+      });
+    }
+  }
+  // Looser second pass, e.g. "Risk mitigation actions" or "Date of next review".
+  const take = (i, k) => { if (RI_MULTI.includes(k) || !map.includes(k)) map[i] = k; };
+  norm.forEach((h, i) => {
+    if (!free(i)) return;
+    if (!map.includes('kind') && looksLikeKinds(i)) map[i] = 'kind';
+    else if (/likel|probab/.test(h)) take(i, 'likelihood');
+    else if (/impact|severit|consequen/.test(h)) take(i, 'impact');
+    else if (/mitigat|resolution|response|action|nextstep|contingen/.test(h)) take(i, 'response');
+    else if (/owner|assign/.test(h)) take(i, 'owner');
+    else if (/status/.test(h)) take(i, 'status');
+    else if (/due|target|needby|neededby|requiredby|deadline/.test(h)) take(i, 'due');
+    else if (/raised|identified|logged|opened/.test(h)) take(i, 'raised');
+    else if (/comment|note|update/.test(h)) take(i, 'notes');
+    else if (/descri|detail/.test(h)) take(i, 'description');
+    else if (/milestone|linked|related/.test(h)) take(i, 'links');
+    else if (/stream/.test(h)) take(i, 'stream');
+    else if (/priorit/.test(h)) take(i, 'priority');
+    else if (/title/.test(h)) take(i, 'title');
+  });
+  return map;
+}
+
+/* ---- plan ---- */
+// Works out, row by row, what the import will do. Nothing changes until applyRaidImport.
+function planRaidImport() {
+  const order = rimp.order === 'auto' ? rimp.detected?.found || localDateOrder() : rimp.order;
+  const ws = state.workspaceId;
+  const data = rimp.rows.slice(rimp.headerRow + 1);
+  const header = rimp.rows[rimp.headerRow];
+  const cols = (k) => rimp.map.map((x, i) => (x === k ? i : -1)).filter(i => i >= 0);
+  const has = (k) => cols(k).length > 0;
+  // Likelihood and impact scores share a scale: the largest number in either column.
+  const scale = Math.max(0, ...[...cols('likelihood'), ...cols('impact')].flatMap(i => data.map(r => String(r[i] ?? '')))
+    .filter(v => !/%/.test(v) && !/[a-z]/i.test(v)).map(v => +(v.match(/\d+(\.\d+)?/)?.[0] ?? 0)));
+  const existing = raidOf(ws);
+  const rag = ragOf(ws);
+  const rows = [], usedTargets = new Set(), refRow = new Map();
+  const now = new Date().toISOString();
+
+  data.forEach((r, i) => {
+    const line = rimp.headerRow + i + 2;
+    if (r.every(v => !String(v).trim())) return;
+    const cell = (k) => { const c = cols(k); return c.length ? riClean(r[c[0]]) : ''; };
+    // Several columns: each under its heading, when more than one has something.
+    const joined = (k) => {
+      const parts = cols(k).map(c => [header[c], riClean(r[c])]).filter(([, v]) => v);
+      return parts.length > 1 ? parts.map(([h, v]) => `${h}: ${v}`).join('\n\n') : parts[0]?.[1] || '';
+    };
+    const row = { line, action: 'add', warn: [], fields: {}, target: null, links: [], newNotes: [] };
+    rows.push(row);
+
+    // Kind: the Type column, then the ref, then the dialog's choice.
+    let ref = cell('ref');
+    const kindCell = cell('kind');
+    let kind = readRaidKind(kindCell);
+    if (kind === 'other') { row.action = 'skip'; row.warn.push(`“${kindCell}” isn't kept in the register (only risks, issues and dependencies are)`); return; }
+    if (kind === null) row.warn.push(`Type “${kindCell}” isn't a risk, issue or dependency, so it's taken as ${withArticle(RAID_KINDS[rimp.kind].one.toLowerCase())}`);
+    kind = kind || kindFromRef(ref) || rimp.kind;
+    const d = RAID_KINDS[kind];
+    row.kind = kind;
+
+    // Ref: a ref column; a bare number (SharePoint's ID) gets the kind's letter.
+    const spid = cell('spid');
+    const madeRef = /^\d+$/.test(ref) || (!ref && /^\d+$/.test(spid));
+    if (/^\d+$/.test(ref)) ref = d.prefix + ref;
+    else if (!ref && /^\d+$/.test(spid)) ref = d.prefix + spid;
+    if (ref && refRow.has(ref.toLowerCase())) {
+      row.action = 'skip';
+      row.warn.push(`Ref ${ref} is already used on row ${refRow.get(ref.toLowerCase()).line}`);
+      return;
+    }
+    if (ref) refRow.set(ref.toLowerCase(), row);
+    row.ref = ref;
+
+    const title = cell('title');
+    const byTitle = () => title && existing.find(x => x.kind === kind && noteKey(x.title) === noteKey(title) && !usedTargets.has(x));
+    let t = rimp.mode === 'add' ? null : ref ? existing.find(x => x.ref.toLowerCase() === ref.toLowerCase()) : byTitle();
+    // A ref made from SharePoint's ID never takes over an entry that's plainly something else
+    // (one added in the app, say): the row matches by title instead, or gets a new ref. One that
+    // matches nothing can still be an entry first typed in by hand: matched by title.
+    if (!t && madeRef && rimp.mode !== 'add') { t = byTitle() || null; if (t) row.ref = ref = t.ref; }
+    else if (t && madeRef && title && noteKey(t.title) !== noteKey(title)) {
+      t = byTitle() || null;
+      if (!t) row.warn.push(`${ref} is already used here by “${existing.find(x => x.ref.toLowerCase() === ref.toLowerCase()).title}”, so this one gets a new ref`);
+      row.ref = ref = t ? t.ref : '';
+    }
+    if (rimp.mode === 'add' && ref && existing.some(x => x.ref.toLowerCase() === ref.toLowerCase())) {
+      row.warn.push(`Ref ${ref} is already used in this workspace, so this one gets a new ref`);
+      row.ref = ref = '';
+    }
+    if (t && usedTargets.has(t)) { row.action = 'skip'; row.warn.push(`Matches ${t.ref || t.title}, which an earlier row already updates`); return; }
+    if (t) { row.target = t; row.action = 'update'; usedTargets.add(t); }
+    if (t && ref && title && noteKey(t.title) !== noteKey(title)) row.warn.push(`Matched to ${t.ref} by its ref, but the titles differ: check it's the same entry`);
+    const f = row.fields;
+    if (!t || t.kind !== kind) f.kind = kind;
+    if (ref && !t) f.ref = ref;
+
+    if (title) f.title = title;
+    if (!t && !title) { row.action = 'skip'; row.warn.push('No title'); return; }
+    for (const k of ['owner', 'party']) if (cell(k)) f[k] = cell(k);
+    for (const k of ['description', 'response']) if (joined(k)) f[k] = joined(k);
+
+    // Stream: a dependency's own field; for a risk or issue, a link to the stream.
+    const streamRaw = cell('stream');
+    const stream = streamRaw && (riStreamName(streamRaw) || streamRaw);
+    if (streamRaw && !riStreamName(streamRaw)) row.warn.push(`Stream “${streamRaw}” isn't one of this workspace's streams yet`);
+    if (stream && kind === 'dependency') f.stream = stream;
+    else if (stream) row.links.push(`stream:${stream}`);
+
+    // Status: in the kind's own words. Blank keeps what's there (carried across a change of kind).
+    const st = cell('status');
+    if (st) {
+      const [s, ok] = readRaidStatus(st, kind);
+      f.status = s;
+      if (!ok) row.warn.push(`Status “${st}” isn't one of ${d.statuses.join(', ')}, so it's kept as it is`);
+    } else if (!t) f.status = d.statuses[0];
+    else if (t.kind !== kind) {
+      const kinds = Object.values(RAID_KINDS);
+      f.status = d.statuses.includes(t.status) ? t.status : kinds.some(x => x.done === t.status) ? d.done : d.statuses[0];
+    }
+
+    if (kind === 'dependency') {
+      const v = cell('rag');
+      if (v) {
+        const n = normaliseStatus(v, ws);
+        if (rag.names.includes(n)) f.rag = n;
+        else row.warn.push(`RAG “${v}” isn't one of this workspace's options, so ${t?.rag ? 'it stays' : 'it starts at'} ${t?.rag || rag.def}`);
+      }
+      if (!t?.rag && !f.rag) f.rag = rag.def;
+      for (const [k, key, word] of [['priority', 'dep_priorities', 'priority'], ['dep_type', 'dep_types', 'dependency type']]) {
+        const v = cell(k);
+        if (!v) continue;
+        const x = readFromDepList(v, depList(ws, key), k === 'priority');
+        f[k] = x || v;
+        if (!x) row.warn.push(`“${v}” isn't one of this workspace's ${word === 'priority' ? 'priorities' : 'dependency types'}, so it's kept as it is`);
+      }
+    }
+    const levels = kind === 'risk' ? ['likelihood', 'impact'] : kind === 'issue' ? ['impact'] : [];
+    for (const k of levels) {
+      const v = cell(k);
+      const x = readLevel(v, scale);
+      if (x) f[k] = x;
+      else if (x === null) row.warn.push(`Couldn't read ${k} “${v}” as low, medium or high`);
+    }
+
+    for (const k of ['due', 'raised']) {
+      const v = cell(k);
+      const x = readDate(v, order);
+      if (x) f[k] = x;
+      else if (x === null) row.warn.push(`Couldn't read the date “${v}”`);
+    }
+
+    // Links: added to the ones already there.
+    for (const c of cols('links')) {
+      const v = riClean(r[c]);
+      if (!v) continue;
+      const [found, missing] = readRaidLinks(v);
+      row.links.push(...found);
+      if (missing.length) row.warn.push(`Linked to ${missing.map(x => `“${x}”`).join(', ')}, not found in this workspace`);
+    }
+    row.links = [...new Set(row.links)].filter(l => !t?.links.includes(l));
+
+    // Notes: only the ones not already on the entry.
+    const modified = readStamp(cell('modified'), order) || now;
+    const seen = new Set((t ? notesOf(t) : []).map(n => noteKey(n.text)));
+    for (const c of cols('notes')) {
+      const v = riClean(r[c]);
+      if (!v) continue;
+      for (const n of readNotes(v, order, modified)) {
+        if (seen.has(noteKey(n.text))) continue;
+        seen.add(noteKey(n.text));
+        row.newNotes.push(n);
+      }
+    }
+
+    // Fields the kind doesn't have are cleared, as the dialog does.
+    for (const [k, kinds] of Object.entries(RD_ONLY)) if (!kinds.includes(kind)) { if (t?.[k]) f[k] = ''; else delete f[k]; }
+    if (t) for (const k of Object.keys(f)) if (f[k] === (t[k] ?? '')) delete f[k];
+    if (t && !Object.keys(f).length && !row.links.length && !row.newNotes.length) row.action = 'same';
+  });
+
+  // Refs for new entries that have none: the next free of their kind.
+  const next = {};
+  for (const r of rows) {
+    if (r.action !== 'add' || r.ref) continue;
+    const pre = RAID_KINDS[r.kind].prefix;
+    if (!(pre in next)) {
+      const nums = [...existing.map(x => x.ref), ...rows.map(x => x.ref || '')].map(x => x.match(new RegExp(`^${pre}-?(\\d+)$`, 'i'))?.[1]).filter(Boolean).map(Number);
+      next[pre] = Math.max(0, ...nums) + 1;
+    }
+    r.ref = r.fields.ref = `${pre}${next[pre]++}`;
+  }
+
+  // Replace: entries of the kinds the file brings in, and not in it, are deleted.
+  const kinds = new Set(rows.filter(r => r.action !== 'skip').map(r => r.kind));
+  const deletes = rimp.mode === 'replace' ? existing.filter(x => kinds.has(x.kind) && !usedTargets.has(x)) : [];
+  return { rows, deletes, order };
+}
+
+async function applyRaidImport() {
+  const plan = planRaidImport();
+  const snap = snapshotData();
+  const now = new Date().toISOString();
+  let added = 0, updated = 0, notes = 0;
+  const gone = new Set(plan.deletes.map(r => r.id));
+  state.raid = state.raid.filter(r => !gone.has(r.id));
+  const hadNotes = state.raidNotes.some(n => gone.has(n.raid_id));
+  state.raidNotes = state.raidNotes.filter(n => !gone.has(n.raid_id));
+  for (const row of plan.rows) {
+    if (row.action === 'skip' || row.action === 'same') continue;
+    let r = row.target;
+    if (r && !state.raid.includes(r)) continue; // deleted by someone else meanwhile
+    if (!r) {
+      r = {
+        id: nextRaidId(), workspace_id: state.workspaceId, kind: row.kind, ref: '', title: '', description: '', stream: '', owner: '', status: '',
+        rag: '', priority: '', dep_type: '', likelihood: '', impact: '', due: '', raised: '', party: '', response: '', links: [], created: now, updated: now,
+      };
+      state.raid.push(r);
+      added++;
+    } else if (Object.keys(row.fields).length || row.links.length) updated++;
+    Object.assign(r, row.fields);
+    if (row.links.length) r.links = [...new Set([...r.links, ...row.links])];
+    if (row.target && (Object.keys(row.fields).length || row.links.length)) r.updated = now;
+    for (const n of row.newNotes) {
+      state.raidNotes.push({ id: nextNoteId(), workspace_id: r.workspace_id, raid_id: r.id, at: n.at, by: n.by, text: n.text });
+      notes++;
+    }
+  }
+  document.getElementById('raid-import-dialog').close();
+  rerenderCurrentView();
+  const parts = [added && `${added} added`, updated && `${updated} updated`, plan.deletes.length && `${plan.deletes.length} deleted`,
+    notes && count(notes, 'note', 'notes')].filter(Boolean);
+  const label = `Imported: ${parts.join(', ') || 'nothing changed'}`;
+  if (parts.length) offerUndo(snap, label);
+  await Promise.all([(added || updated || plan.deletes.length) && saveRaid(label), (notes || hadNotes) && saveRaidNotes(label)]);
+}
+
+// Which way round the file writes numeric dates: the way most dates that only read one way
+// read. A date that reads neither way (13/40/2026) doesn't count.
+function riDateOrder(values) {
+  let dmy = 0, mdy = 0, ambiguous = false;
+  for (const v of values) {
+    const m = stripTime(v).match(NUMERIC_DATE);
+    if (!m) continue;
+    const y = fullYear(m[3]), d = ymd(y, +m[2], +m[1]), md = ymd(y, +m[1], +m[2]);
+    if (d && !md) dmy++;
+    else if (md && !d) mdy++;
+    else if (d && m[1] !== m[2]) ambiguous = true;
+  }
+  return { found: dmy > mdy ? 'dmy' : mdy > dmy ? 'mdy' : null, ambiguous, conflict: dmy > 0 && mdy > 0 };
+}
+
+/* ---- dialog ---- */
+function openRaidImport() {
+  document.getElementById('ri-workspace').textContent = currentWorkspace().name;
+  document.getElementById('ri-paste').value = '';
+  document.getElementById('ri-file').value = '';
+  showRaidImportStep('source');
+  document.getElementById('raid-import-dialog').showModal();
+}
+
+function showRaidImportStep(step) {
+  document.getElementById('ri-step-source').hidden = step !== 'source';
+  document.getElementById('ri-step-map').hidden = step !== 'map';
+  document.getElementById('ri-error').textContent = '';
+  document.getElementById('ri-submit').disabled = step !== 'map';
+}
+
+function loadRaidImportText(text, name) {
+  const rows = parseAny(text.replace(/\u0000/g, '').replace(/^﻿?sep=.\r?\n/i, '')).map(r => r.map(v => v.trim()));
+  const err = document.getElementById('ri-error');
+  const headerRow = riHeaderRow(rows);
+  if (rows.length - headerRow < 2) return (err.textContent = rows.length ? 'Only the headings were found: include at least one row under them.' : 'Nothing to import.');
+  // One kind per file unless it says otherwise: the file name (Risks.csv, Issue log.csv…) or the current filter.
+  const n = name.toLowerCase();
+  const kind = /depend/.test(n) ? 'dependency' : /issue/.test(n) ? 'issue' : /risk/.test(n) ? 'risk' : raidFilter.kind || 'risk';
+  Object.assign(rimp, { name, rows, headerRow, order: 'auto', mode: 'merge', kind });
+  rimp.map = guessRaidMap(rows[headerRow], rows.slice(headerRow + 1));
+  document.querySelector('[name="ri-mode"][value="merge"]').checked = true;
+  showRaidImportStep('map');
+  renderRaidImport();
+}
+
+async function readRaidImportFile(file) {
+  const text = await readTextFile(file, document.getElementById('ri-error'));
+  if (text != null) loadRaidImportText(text, file.name);
+}
+
+function renderRaidImport() {
+  const header = rimp.rows[rimp.headerRow];
+  const data = rimp.rows.slice(rimp.headerRow + 1);
+  const width = Math.max(...rimp.rows.map(r => r.length));
+  const heads = Array.from({ length: width }, (_, i) => header[i] || `Column ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`);
+  while (rimp.map.length < width) rimp.map.push('');
+
+  const dateCols = rimp.map.map((k, i) => (RI_DATES.includes(k) ? i : -1)).filter(i => i >= 0);
+  rimp.detected = riDateOrder(dateCols.flatMap(i => data.map(r => r[i] ?? '')));
+  const d = rimp.detected, local = localDateOrder();
+  const label = { dmy: 'day first (3 April 2026)', mdy: 'month first (4 March 2026)' };
+  document.getElementById('ri-order').innerHTML = [
+    ['auto', d.found ? `Detected: ${label[d.found]}` : `Automatic: ${label[local]}`], ['dmy', 'Day first: 03/04 is 3 April'], ['mdy', 'Month first: 03/04 is 4 March'],
+  ].map(([v, t]) => `<option value="${v}" ${v === rimp.order ? 'selected' : ''}>${t}</option>`).join('');
+  const hasKind = rimp.map.includes('kind');
+  document.getElementById('ri-kind-label').firstChild.textContent = hasKind ? 'Rows with no type are' : 'Every row is';
+  document.getElementById('ri-kind').innerHTML = Object.entries(RAID_KINDS).map(([k, x]) =>
+    `<option value="${k}" ${k === rimp.kind ? 'selected' : ''}>${hasKind ? x.many.toLowerCase() : `${withArticle(x.one.toLowerCase())}`}</option>`).join('');
+  document.getElementById('ri-source-name').textContent = `${rimp.name} · ${count(data.length, 'row', 'rows')}${rimp.headerRow ? ` · headings on row ${rimp.headerRow + 1}` : ''}`;
+
+  const plan = rimp.plan = planRaidImport();
+  const opts = (sel) => `<option value="">— don't import —</option>` +
+    RI_FIELDS.map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${escAttr(riFieldLabel(k))}</option>`).join('');
+  document.getElementById('ri-cols').innerHTML = heads.map((h, i) => {
+    const samples = [...new Set(data.map(r => riClean(r[i]).replace(/\s+/g, ' ')).filter(Boolean))].slice(0, 3);
+    const k = rimp.map[i];
+    const ex = samples.map(v => {
+      const short = v.length > 60 ? `${v.slice(0, 60)}…` : v;
+      if (!RI_DATES.includes(k)) return escAttr(short);
+      const iso = readDate(v, plan.order);
+      return iso ? `${escAttr(short)} <span class="im-date">→ ${fmtNice(iso)}</span>` : `${escAttr(short)} <span class="im-bad">→ can't read</span>`;
+    }).join(' · ');
+    const sp = RI_IGNORED.includes(riNorm(h)) && !k ? ' <small class="muted">(SharePoint)</small>' : '';
+    return `<tr><td>${escAttr(h)}${sp}</td><td title="${escAttr(samples.join(' · '))}">${ex || '<span class="im-bad">empty</span>'}</td>
+      <td><select data-col="${i}" class="${k ? '' : 'unmapped'}">${opts(k)}</select></td></tr>`;
+  }).join('');
+
+  // Preview
+  document.getElementById('ri-preview-head').innerHTML = `<tr><th>Row</th><th></th><th>Ref</th><th>Type</th><th>Title</th><th>Owner</th><th>Status</th>
+    <th>Rating</th><th>Due</th><th>Links</th><th>Notes</th><th>Check</th></tr>`;
+  const actLabel = { add: 'Add', update: 'Update', same: 'No change', skip: 'Skip', delete: 'Delete' };
+  const preview = (row) => {
+    const t = row.target;
+    const v = { ...(t || {}), ...row.fields, kind: row.kind || t?.kind };
+    v.links = [...(t?.links || []), ...row.links];
+    const c = (k, html) => `<td class="${k === 'title' ? 'im-title' : ''} ${t && k in row.fields ? 'changed' : ''}">${html}</td>`;
+    const rt = v.kind ? raidRating({ ...v, workspace_id: state.workspaceId }) : { label: '' };
+    const links = v.links.map(l => linkInfo(l).label);
+    return `<tr class="${row.action}"><td>${row.line}</td><td><span class="im-act ${row.action === 'same' ? 'skip' : row.action}">${actLabel[row.action]}</span></td>
+      ${c('ref', escAttr(v.ref || row.ref || ''))}${c('kind', v.kind ? RAID_KINDS[v.kind].one : '')}${c('title', escAttr(v.title || ''))}
+      ${c('owner', escAttr(v.owner || ''))}${c('status', escAttr(v.status || ''))}
+      <td class="${t && ['likelihood', 'impact', 'priority'].some(k => k in row.fields) ? 'changed' : ''}">${escAttr(rt.label)}</td>
+      ${c('due', v.due ? fmtNice(v.due) : '')}
+      <td class="${row.links.length && t ? 'changed' : ''}" title="${escAttr(links.join('\n'))}">${escAttr(links.length > 2 ? `${links.slice(0, 2).join(', ')} +${links.length - 2}` : links.join(', '))}</td>
+      <td class="${row.newNotes.length && t ? 'changed' : ''}" title="${escAttr(row.newNotes.map(n => `${fmtStamp(n.at)}${n.by ? ` (${n.by})` : ''}: ${n.text}`).join('\n'))}">${row.newNotes.length ? `+${row.newNotes.length}` : ''}</td>
+      <td class="im-notes">${escAttr(row.warn.join('. '))}</td></tr>`;
+  };
+  document.getElementById('ri-preview').innerHTML = plan.rows.map(preview).join('')
+    + plan.deletes.map(r => `<tr class="delete"><td></td><td><span class="im-act delete">Delete</span></td><td>${escAttr(r.ref)}</td><td>${RAID_KINDS[r.kind].one}</td>
+      <td class="im-title">${escAttr(r.title)}</td><td>${escAttr(r.owner)}</td><td>${escAttr(r.status)}</td><td>${escAttr(raidRating(r).label)}</td>
+      <td>${r.due ? fmtNice(r.due) : ''}</td><td></td><td></td><td class="im-notes">Not in the file${notesOf(r).length ? `; its ${count(notesOf(r).length, 'note goes', 'notes go')} too` : ''}</td></tr>`).join('');
+
+  const n = (a) => plan.rows.filter(r => r.action === a).length;
+  const noteN = plan.rows.reduce((s, r) => s + (r.action === 'skip' ? 0 : r.newNotes.length), 0);
+  const warned = plan.rows.filter(r => r.action !== 'skip' && r.warn.length).length;
+  const byKind = Object.entries(RAID_KINDS).map(([k, x]) => { const c = plan.rows.filter(r => r.action !== 'skip' && r.kind === k).length; return c && count(c, x.one.toLowerCase(), x.many.toLowerCase()); }).filter(Boolean);
+  document.getElementById('ri-summary').textContent = [byKind.join(', '), n('add') && `${n('add')} to add`, n('update') && `${n('update')} to update`,
+    n('same') && `${n('same')} unchanged`, plan.deletes.length && `${plan.deletes.length} to delete`, noteN && `${count(noteN, 'note', 'notes')} to add`,
+    n('skip') && `${n('skip')} skipped`, warned && `${count(warned, 'row has', 'rows have')} something to check`].filter(Boolean).join(' · ');
+  const btn = document.getElementById('ri-submit');
+  const does = [n('add') && `add ${n('add')}`, n('update') && `update ${n('update')}`, plan.deletes.length && `delete ${plan.deletes.length}`,
+    !n('add') && !n('update') && noteN && `add ${count(noteN, 'note', 'notes')}`].filter(Boolean);
+  btn.disabled = !does.length;
+  btn.textContent = does.length ? `Import: ${does.join(', ')}` : 'Import';
+  document.getElementById('ri-error').textContent = d.conflict
+    ? 'Some dates are written day first and others month first: check the dates in the preview.'
+    : !rimp.map.includes('title') ? 'No column is imported as the title, so only existing entries (matched by ref) can be updated.' : '';
+}
+
+function wireRaidImport() {
+  const dlg = document.getElementById('raid-import-dialog');
+  const close = () => dlg.close();
+  document.getElementById('btn-raid-import').onclick = openRaidImport;
+  document.getElementById('ri-close').onclick = close;
+  document.getElementById('ri-cancel').onclick = close;
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
+  document.getElementById('ri-change').onclick = () => { document.getElementById('ri-file').value = ''; showRaidImportStep('source'); };
+  document.getElementById('ri-file').addEventListener('change', (e) => { if (e.target.files[0]) readRaidImportFile(e.target.files[0]); });
+  const drop = document.getElementById('ri-drop');
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (e.dataTransfer.files[0]) readRaidImportFile(e.dataTransfer.files[0]);
+  });
+  document.getElementById('ri-paste').addEventListener('paste', () => {
+    setTimeout(() => { const t = document.getElementById('ri-paste').value; if (t.trim()) loadRaidImportText(t, 'Pasted rows'); }, 0);
+  });
+  document.getElementById('ri-order').onchange = (e) => { rimp.order = e.target.value; renderRaidImport(); };
+  document.getElementById('ri-kind').onchange = (e) => { rimp.kind = e.target.value; renderRaidImport(); };
+  document.getElementById('ri-mode').addEventListener('change', (e) => { rimp.mode = e.target.value; renderRaidImport(); });
+  document.getElementById('ri-cols').addEventListener('change', (e) => {
+    const i = +e.target.dataset.col, k = e.target.value;
+    if (k && !RI_MULTI.includes(k)) rimp.map = rimp.map.map(x => (x === k ? '' : x)); // one column per field, except those that join
+    rimp.map[i] = k;
+    renderRaidImport();
+  });
+  document.getElementById('raid-import-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    applyRaidImport();
+  });
+}
+
 /* ================= what changed ================= */
 // This workspace now against the start of an earlier day, from the server's daily backups:
 // RAG changes, dates that moved, items added and removed, and reports written since. The
@@ -7801,6 +8573,7 @@ const isShown = (view) => !document.getElementById(`view-${view}`).classList.con
 const currentView = () => VIEWS.find(isShown) || 'gantt';
 
 function switchView(view) {
+  if (view === 'reports' && reportsOff()) view = 'gantt';
   if (view !== 'reports' && isShown('reports') && !leavePaneEdit()) return;
   hideQuick();
   if (view !== 'editor') {
@@ -7866,6 +8639,7 @@ function wireEvents() {
   wireWorkspaces();
   wireOverview();
   wireRaid();
+  wireRaidImport();
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };

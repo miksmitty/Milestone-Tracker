@@ -172,7 +172,7 @@ Notes live in [raid-notes.csv](raid-notes.csv), one row per note (`raid_id` is t
 id,workspace_id,raid_id,at,by,text
 ```
 
-A workspace's own priority and dependency type lists are kept in workspaces.csv (`dep_priorities`, `dep_types`, `;`-separated; blank means the standard lists).
+A workspace's own priority and dependency type lists are kept in workspaces.csv (`dep_priorities`, `dep_types`, `;`-separated; blank means the standard lists). Link fields and features a workspace doesn't use are listed in `hidden` (`gitlab_url`, `use_case_url`, `reports`, `;`-separated): a link field is hidden from Items, the edit dialog and the Gantt chart, and `reports` hides the Reports tab and every Provide report button. Nothing is deleted, so links and reports already entered come back when switched on again.
 
 ### RAG options
 
@@ -241,6 +241,16 @@ RAG and dates change far more often than anything else, so they are the quickest
 - A **preview** shows every row as Add, Update, No change or Skip, with notes on anything it couldn't read (an unreadable date, a RAG the workspace doesn't use, an unknown link, a repeated ref). Nothing changes until you click **Import**
 
 A file from **Download CSV** imports straight back in, matched on ref (or id, as its links are ids), so you can edit a workspace's items in a spreadsheet and bring them back.
+
+**Risks & issues → Import…** does the same for the register, and is built for a **SharePoint list exported to CSV** (or pasted cells, or the register's own Download CSV):
+
+- **Columns** are matched by heading: *Title*, *Risk owner* / *Assigned To*, *Probability* / *Likelihood*, *Impact* / *Severity*, *Mitigation*, *Target date*, *Date raised* (or SharePoint's *Created*), *Workstream*, *Dependent on*, *Related milestones*, *Comments* and so on; SharePoint's internal names (`Risk_x0020_Owner`) work too. SharePoint's own columns (*Item Type*, *Path*, *Created By*, *Modified By*…) are left out. Several columns can go into the description, the response (e.g. *Mitigation* and *Contingency*), the links or the notes; each is kept under its heading. A title row above the headings is passed over
+- **Type**: a *Type* / *RAID type* column (*Risk*, *Issue*, *Dependency*; assumptions, actions and decisions are skipped), else a ref like `R-12` or `DEP3`, else the choice in the dialog (guessed from the file name, e.g. *Issues.csv*)
+- **Ref**: a ref column, or else SharePoint's *ID* with the type's letter (ID 12 → R12, I12, D12). Rows update the entry with the same ref (or, with no ref, the same type and title), so importing a later export of the same list updates the register rather than adding everything again. **Replace those kinds** also deletes entries of the kinds in the file that aren't in it
+- **Values**: rich text loses its formatting, lookups and people lose SharePoint's ids (`12;#Jane Doe` → *Jane Doe*). Likelihood and impact read *Low/Medium/High*, scores (1–3, 1–5 or 1–10, judged from the largest in the file), *Rare … Almost certain*, *Minor … Severe* or percentages. Statuses read the usual words (*Active*, *Mitigating* → In progress; *Resolved*, *Retired*, *Realised* → Closed; *Delivered* → Complete; *Delayed* → At risk); one that can't be placed is kept as written, with a note. Priorities read *P1*, *(1) High*, *Urgent* and so on against the workspace's list. Dates are read as for items, and a date that reads neither way doesn't upset the detection
+- **Notes**: a comments column becomes summary notes. A cell can hold several, each starting with a date (and who wrote it: `Jane Doe (10/14/2026 3:15 PM): …`, `[02/10/2026] …`, or Download CSV's `21 Oct 2026, 14:05 (Jane Doe): …`); otherwise it's one note dated by *Modified*. A note already on the entry isn't added again
+- **Links** name items by ref, "ref title" or title, or a stream by name, separated by `;`, `,` or new lines; they're added to an entry's links, never removed. A risk or issue's stream becomes a link to the stream
+- The **preview** shows each row as Add, Update, No change or Skip, what it'll be rated, and anything to check. Import offers Undo
 
 Edit items in the app — in the **Items** table or by clicking an item on the chart. Every change saves to the CSV automatically. In the table, click a column header to sort (▲ / ▼ / off), use the filter row to narrow the list, and drag a header edge to resize a column (double-click to reset); sort and column widths are remembered per browser and never change the CSV order. You can also edit the CSV in a spreadsheet tool; hit *Reload* in the app afterwards.
 

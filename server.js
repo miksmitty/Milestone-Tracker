@@ -37,7 +37,7 @@ const DATASETS = {
   '/api/workspaces': {
     file: path.join(DATA_DIR, 'workspaces.csv'),
     legacy: path.join(DATA_DIR, 'programs.csv'), // read until workspaces.csv is first saved
-    header: 'id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,dep_priorities,dep_types,created,updated\n',
+    header: 'id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,dep_priorities,dep_types,hidden,created,updated\n',
   },
   '/api/statuses': {
     file: path.join(DATA_DIR, 'statuses.csv'),
