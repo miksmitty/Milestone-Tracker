@@ -6257,6 +6257,8 @@ function applyWorkspaceChrome() {
     .map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${escAttr(x.name)}</option>`).join('');
   document.getElementById('workspace-dot').style.background = pal(p.status).base;
   document.getElementById('workspace-dot').title = `Workspace RAG: ${p.status}`;
+  document.getElementById('workspace-code').textContent = p.code || p.name.slice(0, 4); // the collapsed menu shows this
+  document.querySelector('.workspace-pick').title = p.name;
   renderTableHead(grid);
   renderTableHead(rptTable);
   renderReportRagChoices();
@@ -9596,6 +9598,11 @@ function wireEvents() {
   document.querySelectorAll('.nav-item[data-view]').forEach(b => { b.onclick = () => switchView(b.dataset.view.split(' ')[0]); });
   document.querySelectorAll('input[name^="pf-mode"]').forEach(r => r.addEventListener('change', () => switchView(r.value)));
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
+  document.querySelector('.workspace-pick').addEventListener('click', (e) => { // collapsed, the workspace mark opens the menu to switch
+    if (!document.body.classList.contains('nav-collapsed') || e.target.closest('.ws-gear')) return;
+    setNavCollapsed(false);
+    document.getElementById('workspace-select').focus();
+  });
   document.getElementById('nav-hide').onclick = () => setNavHidden(true);
   document.getElementById('nav-show').onclick = () => setNavHidden(false);
   document.querySelectorAll('[data-png]').forEach(b => { b.onclick = downloadPagePNG; });

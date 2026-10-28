@@ -120,7 +120,7 @@ Theme · Menu
 
 ## Proposed phases
 
-*Phases 1–3 were done on 28 Oct 2026 (three commits after this review). Phases 4–7 are still to do.*
+*All seven phases were done on 28 Oct 2026, one commit each, after this review. Two deviations: the RAG field kept its name (risks and dependencies already have a Status field of their own, so renaming would have created the clash it was meant to remove), and the plan's toolbar keeps its own layout rather than the shared one, since it already followed the pattern.*
 
 Each phase is a commit on its own and leaves the app working.
 
