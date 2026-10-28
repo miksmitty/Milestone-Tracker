@@ -1283,6 +1283,7 @@ body.nav-collapsed .nav-badge { display: none; }
 .due-late { color: var(--accent); font-weight: 600; }
 .due-act { text-align: right; white-space: nowrap; }
 .due-empty { padding: 28px; font-size: 13.5px; color: var(--muted); }
+.ov-none { font-size: 13px; }
 .wk-table tr[data-update] { cursor: pointer; }
 .wk-table tr[data-update]:hover td { background: var(--hover); }
 .wk-table tr[data-update]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

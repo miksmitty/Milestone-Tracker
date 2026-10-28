@@ -2169,11 +2169,13 @@ function setKbItem(id) {
   g.classList.add('kb');
   g.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   focusLinks(itemById(id));
-  setTimeout(() => { // once scrolling has settled (scrolling hides the card)
-    if (kbId !== id) return;
-    const r = g.getBoundingClientRect();
+  setTimeout(() => { // once scrolling (and, from a link, the first fit) has settled
+    const el = kbId === id && isShown('gantt') && document.querySelector(`#gantt-container .gantt-item[data-id="${id}"]`); // afresh: the chart may have been redrawn
+    if (!el) return;
+    const r = el.getBoundingClientRect(), v = document.getElementById('gantt-scroll').getBoundingClientRect();
+    if (!r.width || r.right < v.left || r.left > v.right || r.bottom < v.top || r.top > v.bottom) return; // not in view: no card
     showTip(itemById(id), { clientX: r.right, clientY: r.top + r.height / 2 });
-  }, 60);
+  }, 160);
 }
 
 // Everything linked to an item, however distantly: upstream is what it waits on and what rolls up
@@ -6900,11 +6902,12 @@ function overviewRow(sub) {
   return { sub, cur, prev, ov, html: `
     <tr ${key} style="--rag:${sub.forStream ? 'var(--border)' : pal(p.status, rg.map).base}">
       ${nameCell}
-      <td class="ov-lead">${rec.lead ? escAttr(rec.lead) : '<span class="muted">—</span>'}</td>
+      ${cur ? `<td class="ov-lead">${rec.lead ? escAttr(rec.lead) : '<span class="muted">—</span>'}</td>
       <td class="ov-rag">${ragCell(prev, false)}</td>
       <td class="ov-rag">${ragCell(cur, true)}</td>
       <td class="ov-trend">${trendBadge(rec.trend)}</td>
-      <td class="ov-summary">${cur?.summary ? `<div class="md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No update yet</span>'}</td>
+      <td class="ov-summary">${cur.summary ? `<div class="md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No summary</span>'}</td>`
+      : `<td colspan="5" class="ov-none muted">No weekly update yet${rec.lead ? ` · area lead ${escAttr(rec.lead)}` : ''}</td>`}
       ${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}${ov[k] ? '' : ' zero'}">${ov[k] ? `<button type="button" class="ov-count" data-bucket="${k}" title="Show these on the plan">${ov[k]}</button>` : 0}</td>`).join('')}
       <td class="ov-act">${canUpdate ? `<button type="button" class="btn btn-sm" data-update>Weekly update</button>` : ''}</td>
     </tr>` };
@@ -7059,13 +7062,14 @@ function dashHero(items) {
     return dashCard('hero', 'Progress', '', dashEmpty(g.tasks ? `The ${T.tasks} have no dates yet, so there’s nothing to measure.` : `Progress is measured from ${T.tasks}; this workspace has none yet.`), { span: 5, cls: 'dash-hero' });
   }
   const diff = g.elapsed == null ? null : g.pct - g.elapsed;
-  const verdict = diff == null ? '' : diff >= 5 ? `<b class="ok">${diff} points ahead</b> of the time gone` : diff <= -5 ? `<b class="ra">${-diff} points behind</b> the time gone` : '<b>In step</b> with the time gone';
+  const why = `${g.pct}% of the work is done and ${g.elapsed}% of the plan’s time has passed`;
+  const verdict = diff == null ? '' : diff >= 5 ? `<b class="ok" title="${escAttr(why)}">Ahead of the plan</b> by ${diff} points` : diff <= -5 ? `<b class="ra" title="${escAttr(why)}">Behind the plan</b> by ${-diff} points` : `<b title="${escAttr(why)}">On pace</b> with the plan`;
   return dashCard('hero', 'Progress', `${count(g.tasks, T.task, T.tasks)}`, `
     <div class="dash-hero-row"><span class="dash-hero-n">${g.pct}%</span><span class="dash-hero-of">of the work complete<br><small>${g.doneDays} of ${g.totalDays} ${T.task}-days</small></span></div>
     <div class="dv-meter" role="img" aria-label="${escAttr(`${g.pct}% complete; ${g.elapsed ?? 0}% of the time has gone`)}">
       <i class="dv-meter-fill" style="width:${g.pct}%"></i>${g.elapsed != null ? `<i class="dv-meter-mark" style="left:${g.elapsed}%" title="Today: ${g.elapsed}% of the plan’s time has gone"></i>` : ''}
     </div>
-    <div class="dash-hero-foot">${g.elapsed != null ? `<span><b>${g.elapsed}%</b> of the time gone · ${fmtShort(g.first)} – ${fmtNice(g.last)}</span>` : ''}<span>${verdict}</span></div>`,
+    <div class="dash-hero-foot">${g.elapsed != null ? `<span><b>${g.elapsed}%</b> of the plan’s time has passed <span class="muted">· ${fmtShort(g.first)} – ${fmtNice(g.last)}</span></span>` : ''}<span>${verdict}</span></div>`,
   { span: 5, cls: 'dash-hero' });
 }
 
@@ -7095,7 +7099,7 @@ function dashTiles(p, items) {
     tile('raid', 'Open risks & issues', ri.length, high ? `${count(high, 'rated High', 'rated High')}` : ri.length ? 'none rated High' : 'Register is clear', { k: 'raid' }, high ? 'bad' : ''),
     tile('deps', 'Open dependencies', deps.length, blocked || atRisk ? [blocked && `${blocked} blocked`, atRisk && `${atRisk} at risk`].filter(Boolean).join(' · ') : deps.length ? 'none blocked' : 'None open',
       { k: 'raid', kind: 'dependency' }, blocked ? 'bad' : atRisk ? 'warn' : ''),
-    tile('dates', 'Dates moved', '<span class="dash-tile-wait">…</span>', 'in the last 30 days', { k: 'view', view: 'dates' }),
+    tile('dates', 'Date changes', '<span class="dash-tile-wait">…</span>', 'in the last 30 days', { k: 'view', view: 'dates' }),
   ];
   return `<div class="dash-tiles" style="--span:12">${tiles.join('')}</div>`;
 }
@@ -7272,7 +7276,7 @@ function dashDateChanges() {
     const saves = new Set(rows.map(r => `${r.at}|${r.item_id}`)), items = new Set(rows.map(r => r.item_id));
     const knock = new Set(rows.filter(r => r.action === 'Knock-on').map(r => `${r.at}|${r.item_id}`)).size;
     el.textContent = saves.size;
-    el.nextElementSibling.textContent = saves.size ? `${count(items.size, T.item, T.items)}${knock ? ` · ${knock} knock-on` : ''} · 30 days` : 'in the last 30 days';
+    el.nextElementSibling.textContent = saves.size ? `in 30 days, on ${count(items.size, T.item, T.items)}${knock ? ` (${knock} knock-on)` : ''}` : 'in the last 30 days';
   }).catch(() => {
     const el = document.querySelector('#dash-tile-dates .dash-tile-v');
     if (el) el.textContent = '—';
@@ -8978,6 +8982,10 @@ async function renderChanges() {
       <h3>${title} <span class="muted">${rows.length || ''}</span></h3>
       ${rows.length ? `<ul>${rows.join('')}</ul>` : `<p class="muted">${empty}</p>`}
     </section>`;
+  if (!n && !reports.length) {
+    body.innerHTML = `<p class="due-empty">Nothing has changed since the start of ${fmtNice(chSince)}: no RAG changes, no dates moved, no ${escAttr(T.items)} added or removed and no reports written.</p>`;
+    return;
+  }
   body.innerHTML = `
     <div class="ch-grid">
       ${section('RAG changes', d.rag.map(x => `<li>${link(x.m)}<span class="ch-what">${statusPill(x.from)} <span class="ch-arrow">→</span> ${statusPill(x.to)}</span></li>`), 'No RAG changes.')}
@@ -9504,6 +9512,7 @@ function switchView(view) {
   if (view === 'reports' && reportsOff()) view = 'dash';
   if (view !== 'reports' && isShown('reports') && !leavePaneEdit()) return;
   hideQuick();
+  if (document.getElementById('palette').open) document.getElementById('palette').close();
   if (view !== 'editor') {
     syncEditorToState();
     // Clear the hidden table so a later sync can't overwrite edits made elsewhere.
@@ -9822,7 +9831,7 @@ async function loadConfig() {
   if (link?.filter) Object.assign(ganttFilter, link.filter);
   switchView(link?.view || (VIEWS.includes(prefs.view) ? prefs.view : 'dash'));
   setTimescale(prefs.timescale); // Quarters fits; the ResizeObserver keeps it fitted as layout settles
-  if (link?.item && itemById(link.item)) showItemOnGantt(link.item);
+  if (link?.item && itemById(link.item)) requestAnimationFrame(() => showItemOnGantt(link.item)); // after the fit, so the card lands beside the item
   routeReady = true;
   writeHash();
   window.addEventListener('hashchange', () => { if (location.hash !== lastHash) followHash(); });
