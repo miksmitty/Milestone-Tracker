@@ -2120,7 +2120,7 @@ async function onDragEnd() {
   if (res.error) return showToast(res.error);
   const msg = [`${itemLabel(m)}: ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
   offerUndo(snap, msg);
-  await saveData(msg, 'Dragged on the Gantt chart');
+  await saveData(msg, 'Dragged on the plan');
 }
 
 /* ---- keyboard on the chart ---- */
@@ -2568,7 +2568,7 @@ function openEditDialog(m) {
   const hist = document.getElementById('ed-history');
   hist.hidden = !m || reportsOff();
   hist.disabled = !n;
-  hist.textContent = `View reports (${n})`;
+  hist.textContent = `Reports (${n})`;
   document.getElementById('ed-dates').hidden = !m;
   const raidN = m ? raidLinkedTo(`item:${m.id}`).filter(r => !isClosed(r)).length : 0;
   document.getElementById('ed-raid').hidden = !m;
@@ -3437,7 +3437,7 @@ function renderEditor(highlight = [], keepOrder = false) {
         : `<select data-i="${i}" data-k="status" class="status-sel" style="color:${pal(m.status).dark}">${statusOptions(m.status)}</select>`,
       parent: `<select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select>`,
       deps: `<div class="deps">${chips}<select data-adddep="${i}" class="add-dep"><option value="">+ add</option>${depOpts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select></div>`,
-      actions: quick ? (reportsOff() ? '' : `<button class="btn btn-sm" data-report="${m.id}" title="Provide a report on this ${escAttr(T.item)}">Report…</button>`)
+      actions: quick ? (reportsOff() ? '' : `<button class="btn btn-sm" data-report="${m.id}" title="Write a report on this ${escAttr(T.item)}">New report</button>`)
         : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
     };
     cols.forEach((c, j) => setCell(tr.children[j], cells[c.key]));
@@ -3924,9 +3924,9 @@ function renderQuick() {
       <button type="submit" class="btn btn-primary">Save</button>
     </div>
     <div class="q-foot">
-      ${reportsOff() ? '' : `<button type="button" class="btn" data-act="report">Provide report…</button>
+      ${reportsOff() ? '' : `<button type="button" class="btn" data-act="report">New report…</button>
       <button type="button" class="btn" data-act="history" ${n ? '' : 'disabled'}>Reports (${n})</button>`}
-      <button type="button" class="btn" data-act="dates">Date history</button>
+      <button type="button" class="btn" data-act="dates">Date log</button>
       <button type="button" class="btn" data-act="edit">Edit details…</button>
     </div>
     </form>`;
@@ -4427,8 +4427,8 @@ function openReportDialog({ report = null, itemId = '' } = {}) {
   for (const k of REPORT_TEXTS) edLoad(f[k]);
   f.sync_status.checked = true;
 
-  document.getElementById('rp-heading').textContent = report ? 'Edit report' : 'Provide report';
-  document.getElementById('rp-submit').textContent = report ? 'Save changes' : 'Submit report';
+  document.getElementById('rp-heading').textContent = report ? 'Edit report' : 'New report';
+  document.getElementById('rp-submit').textContent = 'Save report';
   document.getElementById('rp-delete').hidden = !report;
   document.getElementById('rp-meta').textContent = report
     ? `Submitted ${fmtStamp(report.created)}` + (report.updated !== report.created ? ` · last edited ${fmtStamp(report.updated)}` : '')
@@ -4474,7 +4474,7 @@ function refreshReportForm() {
   const n = rpItemId ? reportsFor(rpItemId).length : 0;
   const hist = document.getElementById('rp-history');
   hist.hidden = !n;
-  hist.textContent = `View all reports (${n})`;
+  hist.textContent = `Reports (${n})`;
 
   const strip = document.getElementById('rp-item');
   strip.hidden = !rpItemId;
@@ -4806,7 +4806,7 @@ function renderDue() {
               <td>${d.cadence}</td>
               <td>${fmtNice(d.end)}</td>
               <td>${when(d)}</td>
-              <td class="due-act"><button type="button" class="btn btn-sm" data-due-report="${d.m.id}">Provide report…</button></td>
+              <td class="due-act"><button type="button" class="btn btn-sm" data-due-report="${d.m.id}">New report…</button></td>
             </tr>`).join('')}
         </tbody>`).join('')}
     </table>`
@@ -4865,7 +4865,7 @@ function renderReports() {
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="${cols.length}" class="grid-empty">${state.reports.length
       ? 'No reports match the filters.'
-      : `No reports in this workspace yet. Click ${escAttr(withArticle(T.item))} on the Gantt chart and choose <b>Provide report</b>, or use <b>+ New report</b>.`}</td></tr>`;
+      : `No reports in this workspace yet. Click ${escAttr(withArticle(T.item))} on the plan and choose <b>New report</b>, or use <b>+ New report</b>.`}</td></tr>`;
   }
   document.getElementById('rp-count').textContent = filtered
     ? `Showing ${rows.length} of ${state.reports.length}`
@@ -6187,7 +6187,7 @@ async function switchWorkspace(id, view) {
     state.userZoomed = false;
     applyWorkspaceChrome();
   }
-  switchView(view || (APP_VIEWS.includes(currentView()) ? 'gantt' : currentView()));
+  switchView(view || (APP_VIEWS.includes(currentView()) ? 'dash' : currentView()));
 }
 
 // Sidebar, headings and every label that uses the workspace's own terms.
@@ -6196,7 +6196,7 @@ function applyWorkspaceChrome() {
   document.querySelectorAll('[data-term]').forEach(el => { el.textContent = T[el.dataset.term]; });
   document.getElementById('nav-editor').title = T.Items;
   document.getElementById('nav-reports').hidden = reportsOff();
-  if (reportsOff() && isShown('reports')) switchView('gantt');
+  if (reportsOff() && isShown('reports')) switchView('dash');
   document.getElementById('workspace-select').innerHTML = state.workspaces
     .map(x => `<option value="${x.id}" ${x.id === p.id ? 'selected' : ''}>${escAttr(x.name)}</option>`).join('');
   document.getElementById('workspace-dot').style.background = pal(p.status).base;
@@ -6217,7 +6217,7 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { overview: () => 'Program overview', streams: () => 'Stream overview', workspaces: () => 'Workspaces', dash: () => 'Dashboard', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date history', raid: () => 'Risks, issues & dependencies' };
+const VIEW_TITLES = { overview: () => 'Portfolio', streams: () => 'Streams', workspaces: () => 'Portfolio', dash: () => 'Dashboard', gantt: () => 'Plan', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date log', raid: () => 'Risks & issues' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
@@ -6278,7 +6278,7 @@ async function openBucket(workspaceId, bucket, stream = '') {
 function milestoneStrip(workspaceId) {
   const ov = milestoneOverview(workspaceId);
   return `<div class="ms-strip">${MS_BUCKETS.map(([k, label]) => ov[k]
-    ? `<button type="button" class="ms-${k}" data-bucket="${k}" title="Show these on the Gantt chart"><b>${ov[k]}</b><span>${label}</span></button>`
+    ? `<button type="button" class="ms-${k}" data-bucket="${k}" title="Show these on the plan"><b>${ov[k]}</b><span>${label}</span></button>`
     : `<div class="ms-${k}"><b>${ov[k]}</b><span>${label}</span></div>`).join('')}</div>`;
 }
 
@@ -6638,7 +6638,7 @@ async function submitWorkspaceDialog(e) {
 async function clearWorkspaceHistory() {
   const p = pgEditing;
   if (!p) return;
-  if (!confirm(`Clear the history of ${p.name}?\n\nIts Date history is emptied and starts again from its ${T.items}’ dates now, and What changed will compare from today. Nothing else changes, and other workspaces keep their history.\n\nThis can’t be undone.`)) return;
+  if (!confirm(`Clear the history of ${p.name}?\n\nIts Date log is emptied and starts again from its ${T.items}’ dates now, and What changed will compare from today. Nothing else changes, and other workspaces keep their history.\n\nThis can’t be undone.`)) return;
   flushSave();
   await saveQueue; // so what's on screen is what the history starts from
   let out;
@@ -6701,7 +6701,7 @@ function wireWorkspaces() {
     const card = e.target.closest('[data-pid]');
     const bucket = e.target.closest('[data-bucket]');
     if (card && bucket) return openBucket(card.dataset.pid, bucket.dataset.bucket);
-    if (card) switchWorkspace(card.dataset.pid, 'gantt');
+    if (card) switchWorkspace(card.dataset.pid, 'dash');
   });
 
   const dlg = document.getElementById('workspace-dialog');
@@ -6833,11 +6833,11 @@ function overviewRow(sub) {
     : '<span class="muted">—</span>');
   const nameCell = sub.forStream
     ? `<td class="ov-prog">${stream
-      ? `<button type="button" class="ov-name" data-open-stream title="Show this stream on the Gantt chart">${escAttr(streamName(stream))}</button>`
+      ? `<button type="button" class="ov-name" data-open-stream title="Show this stream on the plan">${escAttr(streamName(stream))}</button>`
       : '<span class="muted">(No stream)</span>'}</td>`
     : `<td class="ov-num">${p.number ? escAttr(p.number) : '<span class="muted">—</span>'}</td>
       <td class="ov-prog">
-        <button type="button" class="ov-name" data-open-workspace="${p.id}" title="Open the Gantt chart">${escAttr(p.name)}</button>
+        <button type="button" class="ov-name" data-open-workspace="${p.id}" title="Open this workspace">${escAttr(p.name)}</button>
         ${p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : ''}
         <small class="ov-overall">Overall ${statusPill(p.status, rg.map)}</small>
       </td>`;
@@ -6851,8 +6851,8 @@ function overviewRow(sub) {
       <td class="ov-rag">${ragCell(cur, true)}</td>
       <td class="ov-trend">${trendBadge(rec.trend)}</td>
       <td class="ov-summary">${cur?.summary ? `<div class="md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No update yet</span>'}</td>
-      ${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}${ov[k] ? '' : ' zero'}">${ov[k] ? `<button type="button" class="ov-count" data-bucket="${k}" title="Show these on the Gantt chart">${ov[k]}</button>` : 0}</td>`).join('')}
-      <td class="ov-act">${canUpdate ? `<button type="button" class="btn btn-sm" data-update>Update</button>` : ''}</td>
+      ${MS_BUCKETS.map(([k]) => `<td class="ov-ms ms-${k}${ov[k] ? '' : ' zero'}">${ov[k] ? `<button type="button" class="ov-count" data-bucket="${k}" title="Show these on the plan">${ov[k]}</button>` : 0}</td>`).join('')}
+      <td class="ov-act">${canUpdate ? `<button type="button" class="btn btn-sm" data-update>Weekly update</button>` : ''}</td>
     </tr>` };
 }
 
@@ -6873,7 +6873,7 @@ function renderOverviewTable(id, subjects, one, many) {
 
 let overviewRows = [], streamRows = []; // as last rendered, for clicks and the CSV
 function renderOverview() {
-  overviewRows = renderOverviewTable('overview', programsInOrder().map(programSubject), 'program', 'programs');
+  overviewRows = renderOverviewTable('overview', programsInOrder().map(programSubject), 'workspace', 'workspaces');
 }
 function renderStreamOverview() {
   const p = currentWorkspace();
@@ -6882,7 +6882,7 @@ function renderStreamOverview() {
 
 function downloadOverviewCSV(forStream) {
   const rows = forStream ? (renderStreamOverview(), streamRows) : (renderOverview(), overviewRows);
-  const head = [...(forStream ? ['Stream'] : ['Program number', 'Program']), 'Area lead', ...(forStream ? [] : ['Overall RAG']),
+  const head = [...(forStream ? ['Stream'] : ['Program number', 'Workspace']), 'Area lead', ...(forStream ? [] : ['Overall RAG']),
     'Previous weekly RAG', 'Previous week ending', 'Current weekly RAG', 'Current week ending', 'Trend', 'Summary',
     ...MS_BUCKETS.map(([, l]) => `Milestones ${l.toLowerCase()}`)];
   const lines = rows.map(({ sub: { p, stream, rec }, cur, prev, ov }) => [
@@ -6894,7 +6894,7 @@ function downloadOverviewCSV(forStream) {
   const a = document.createElement('a');
   const p = currentWorkspace();
   const slug = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
-  a.download = `${forStream ? `${slug}-stream` : 'program'}-overview-${fmtISO(new Date())}.csv`;
+  a.download = `${forStream ? `${slug}-streams` : 'portfolio'}-${fmtISO(new Date())}.csv`;
   a.href = URL.createObjectURL(blob);
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
@@ -6973,7 +6973,7 @@ function renderDash() {
     if (!reportsOff()) cards.push(dashReports());
   }
   document.getElementById('dash-grid').innerHTML = cards.join('')
-    + (items.length ? '' : dashCard('none', 'Nothing to show yet', '', dashEmpty(`This workspace has no ${T.items} yet. Add some on the Gantt chart or in the ${T.Items} table and the dashboard fills itself in.`), { span: 12 }));
+    + (items.length ? '' : dashCard('none', 'Nothing to show yet', '', dashEmpty(`This workspace has no ${T.items} yet. Add some on the plan or in the ${T.Items} table and the dashboard fills itself in.`), { span: 12 }));
   dashDateChanges();
 }
 
@@ -6995,7 +6995,7 @@ function dashGlance(p, rg) {
     <div class="dash-glance-top">${statusPill(p.status, rg.map)} ${trendBadge(p.trend)}${p.description ? `<p class="dash-desc">${escAttr(p.description)}</p>` : ''}</div>
     ${meta ? `<dl class="dash-meta">${meta}</dl>` : ''}
     <div class="dash-update-label">Latest weekly update</div>${update}`,
-  { span: 7, actions: dashBtn('btn btn-sm', { k: 'update' }, null, 'Update') });
+  { span: 7, actions: dashBtn('btn btn-sm', { k: 'update' }, null, 'Weekly update') });
 }
 
 // The one number the page leads with: how much of the work is done, against how much of the time has gone.
@@ -7083,7 +7083,7 @@ function dashWeekly(p, rg) {
   const subjects = [{ id: '', name: p.code || 'Program', sub: programSubject(p) },
     ...streamsInOrder().filter(id => id && updatesFor(p.id, id).length).map(id => ({ id, name: streamName(id), sub: streamSubject(p, id) }))];
   const ups = subjects.map(s => ({ ...s, byWeek: new Map(updatesFor(p.id, s.id).map(u => [u.week_ending, u])) }));
-  if (!ups.some(s => s.byWeek.size)) return dashCard('weekly', 'Weekly RAG', 'last 12 weeks', dashEmpty('No weekly updates yet. <b>Update</b> on the Program overview or Stream overview records one.'), { span: 7 });
+  if (!ups.some(s => s.byWeek.size)) return dashCard('weekly', 'Weekly RAG', 'last 12 weeks', dashEmpty('No weekly updates yet. <b>Weekly update</b> on the Portfolio or Streams page records one.'), { span: 7 });
   const body = `<div class="dv-weeks" style="--n:${weeks.length}">
     <div class="dv-weeks-row dv-weeks-head"><span></span>${weeks.map((w, i) => `<span class="dv-week${w === end ? ' now' : ''}">${i % 2 || w === end ? fmtShort(w).replace(/ .*/, '') : ''}<br><small>${w === end ? 'this wk' : i % 2 ? fmtShort(w).replace(/^\S+ /, '') : ''}</small></span>`).join('')}</div>
     ${ups.map(s => `<div class="dv-weeks-row"><span class="dv-weeks-name">${dashBtn('dv-name', { k: 'update', stream: s.id }, null, escAttr(s.name))}</span>
@@ -7098,7 +7098,7 @@ function dashWeekly(p, rg) {
 // Movement against the baseline: how far each baselined item's end has moved, late to the right.
 function dashSlip(items) {
   const rows = items.filter(m => m.baseline_end).map(m => ({ m, d: daysBetween(m.baseline_end, m.end) })).sort((a, b) => b.d - a.d || cmpRef(a.m, b.m));
-  if (!rows.length) return dashCard('slip', 'Against the baseline', '', dashEmpty(`No baseline dates yet. Set a baseline on the Gantt chart to see how far each ${T.item} has moved from it.`), { span: 5 });
+  if (!rows.length) return dashCard('slip', 'Against the baseline', '', dashEmpty(`No baseline dates yet. Set a baseline on the plan to see how far each ${T.item} has moved from it.`), { span: 5 });
   const late = rows.filter(r => r.d > 0), early = rows.filter(r => r.d < 0);
   const max = Math.max(1, ...rows.map(r => Math.abs(r.d)));
   const shown = rows.filter(r => r.d).slice(0, 10);
@@ -7357,7 +7357,7 @@ function loadUpdateWeek(opening) {
     : '<span class="muted">No earlier update.</span>';
   document.getElementById('up-mode').textContent = found ? `Editing the update for the week ending ${fmtNice(week)}.` : `New update for the week ending ${fmtNice(week)}.`;
   document.getElementById('up-delete').hidden = !found;
-  document.getElementById('up-submit').textContent = found ? 'Save update' : 'Submit update';
+  document.getElementById('up-submit').textContent = 'Save update';
 }
 
 // Trend from the RAG change since the previous week: better, same or worse.
@@ -7427,7 +7427,7 @@ function wireOverview() {
     const bucket = e.target.closest('[data-bucket]');
     if (bucket) return openBucket(row.dataset.pid, bucket.dataset.bucket);
     const open = e.target.closest('[data-open-workspace]');
-    if (open) switchWorkspace(open.dataset.openWorkspace, 'gantt');
+    if (open) switchWorkspace(open.dataset.openWorkspace, 'dash');
   });
   document.getElementById('streams-body').addEventListener('click', (e) => {
     const row = e.target.closest('[data-stream]');
@@ -7586,9 +7586,9 @@ const linkChip = (link, removable) => {
   const body = `${x.type === 'stream' ? '<i class="raid-link-ico" aria-hidden="true">≡</i>' : ''}<span class="raid-link-text">${escAttr(x.label)}</span>`;
   return removable
     ? `<span class="${cls}" title="${escAttr(x.title)}">${body}<button type="button" data-rdrm="${escAttr(link)}" title="Remove link">×</button></span>`
-    : `<button type="button" class="${cls}" data-raid-go="${escAttr(link)}" title="${escAttr(x.title)}${x.live ? ' — show on the Gantt chart' : ''}" ${x.live ? '' : 'disabled'}>${body}</button>`;
+    : `<button type="button" class="${cls}" data-raid-go="${escAttr(link)}" title="${escAttr(x.title)}${x.live ? ' — show on the plan' : ''}" ${x.live ? '' : 'disabled'}>${body}</button>`;
 };
-const streamGo = (id) => (streamById(id) ? `<button type="button" class="link-btn" data-raid-go="stream:${escAttr(id)}" title="Show this stream on the Gantt chart">${escAttr(streamName(id))}</button>` : '<span class="muted">—</span>');
+const streamGo = (id) => (streamById(id) ? `<button type="button" class="link-btn" data-raid-go="stream:${escAttr(id)}" title="Show this stream on the plan">${escAttr(streamName(id))}</button>` : '<span class="muted">—</span>');
 const noteLine = (n) => `<span class="note-when">${fmtStamp(n.at)}${n.by ? ` · ${escAttr(n.by)}` : ''}</span> ${escAttr(n.text)}`;
 
 /* ---- the register ---- */
@@ -8917,7 +8917,7 @@ async function renderChanges() {
   document.getElementById('ch-count').textContent = `${count(n, `${T.item} changed`, `${T.items} changed`)} · ${count(reports.length, 'report', 'reports')}`;
 
   const lbl = (m) => `<span class="ch-item">${m.ref ? `<b class="ref">${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>`;
-  const link = (m) => `<button type="button" class="link-btn ch-open" data-ch-item="${m.id}" title="Show it on the Gantt chart">${lbl(m)}</button>`;
+  const link = (m) => `<button type="button" class="link-btn ch-open" data-ch-item="${m.id}" title="Show it on the plan">${lbl(m)}</button>`;
   const when = (m) => (isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end));
   const section = (title, rows, empty) => `
     <section class="ch-sec">
@@ -9076,7 +9076,7 @@ function renderDateRows() {
     return `<tr>
       <td class="dl-when">${fmtStamp(g.at)}</td>
       <td class="dl-who">${g.by ? escAttr(g.by) : '<span class="muted">—</span>'}</td>
-      <td>${live ? `<button type="button" class="link-btn ch-open" data-ch-item="${g.item_id}" title="Show it on the Gantt chart">${lbl}</button>` : `<span class="dl-gone" title="No longer in this workspace">${lbl}</span>`}</td>
+      <td>${live ? `<button type="button" class="link-btn ch-open" data-ch-item="${g.item_id}" title="Show it on the plan">${lbl}</button>` : `<span class="dl-gone" title="No longer in this workspace">${lbl}</span>`}</td>
       <td class="dl-change">${dlChange(g)}</td>
       <td class="dl-how">${act}${escAttr(g.via)}${g.note ? `<br>${escAttr(g.note)}` : ''}</td>
     </tr>`;
@@ -9157,10 +9157,10 @@ let palHits = [], palSel = 0;
 function palPages() {
   const ws = currentWorkspace();
   return [
-    ['overview', 'Program overview'], ['workspaces', 'All workspaces'], ['dash', `Dashboard · ${ws.name}`], ['gantt', `Gantt chart · ${ws.name}`],
+    ['overview', 'Portfolio'], ['workspaces', 'Portfolio · cards'], ['dash', `Dashboard · ${ws.name}`], ['gantt', `Plan · ${ws.name}`],
     ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`],
-    ['raid', `Risks, issues & dependencies · ${ws.name}`],
-    ['changes', `What changed · ${ws.name}`], ['dates', `Date history · ${ws.name}`], ['streams', `Stream overview · ${ws.name}`],
+    ['raid', `Risks & issues · ${ws.name}`],
+    ['changes', `What changed · ${ws.name}`], ['dates', `Date log · ${ws.name}`], ['streams', `Streams · ${ws.name}`],
   ].map(([view, label]) => ({ kind: 'page', view, label, hay: label.toLowerCase() }));
 }
 
@@ -9240,7 +9240,7 @@ async function pickPalette(i) {
     if (h.view === 'reports') rptMode = 'all';
     return switchView(h.view);
   }
-  if (h.kind === 'ws') return switchWorkspace(h.p.id, 'gantt');
+  if (h.kind === 'ws') return switchWorkspace(h.p.id, 'dash');
   if (h.kind === 'raid') {
     if (h.p.id !== state.workspaceId) await switchWorkspace(h.p.id, 'raid');
     else switchView('raid');
@@ -9292,8 +9292,12 @@ function wirePalette() {
 let routeReady = false; // until the first view is shown, nothing is written over the address
 let lastHash = '';
 
+// The address uses the page names people see; the names the pages had before still work.
+const ROUTE_NAMES = { overview: 'portfolio', workspaces: 'workspaces', editor: 'items' };
+const ROUTE_VIEWS = Object.fromEntries(Object.entries(ROUTE_NAMES).map(([v, n]) => [n, v]));
 function readHash() {
   const m = location.hash.match(/^#\/(?:ws\/([^/?]+)\/)?(\w+)(?:\?(.*))?$/);
+  if (m) m[2] = ROUTE_VIEWS[m[2]] || m[2];
   if (!m || !VIEWS.includes(m[2])) return null;
   const q = new URLSearchParams(m[3] || '');
   const filter = {};
@@ -9308,7 +9312,8 @@ function readHash() {
 function writeHash() {
   if (!routeReady) return;
   const view = currentView();
-  let h = APP_VIEWS.includes(view) ? `#/${view}` : `#/ws/${encodeURIComponent(state.workspaceId)}/${view}`;
+  const name = ROUTE_NAMES[view] || view;
+  let h = APP_VIEWS.includes(view) ? `#/${name}` : `#/ws/${encodeURIComponent(state.workspaceId)}/${name}`;
   if (view === 'gantt') {
     const f = ganttFilter, q = new URLSearchParams();
     if (f.q.trim()) q.set('q', f.q.trim());
@@ -9442,7 +9447,7 @@ const isShown = (view) => !document.getElementById(`view-${view}`).classList.con
 const currentView = () => VIEWS.find(isShown) || 'gantt';
 
 function switchView(view) {
-  if (view === 'reports' && reportsOff()) view = 'gantt';
+  if (view === 'reports' && reportsOff()) view = 'dash';
   if (view !== 'reports' && isShown('reports') && !leavePaneEdit()) return;
   hideQuick();
   if (view !== 'editor') {
@@ -9460,11 +9465,13 @@ function switchView(view) {
   else if (view === 'dates') renderDates();
   else if (view === 'raid') renderRaid();
   else renderWorkspaces();
-  for (const v of VIEWS) {
-    document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
-    document.getElementById(`nav-${v}`).classList.toggle('active', v === view);
-    document.getElementById(`nav-${v}`).setAttribute('aria-current', v === view ? 'page' : 'false');
-  }
+  for (const v of VIEWS) document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
+  document.querySelectorAll('.nav-item[data-view]').forEach(b => {
+    const on = b.dataset.view.split(' ').includes(view);
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-current', on ? 'page' : 'false');
+  });
+  document.querySelectorAll('input[name^="pf-mode"]').forEach(r => { r.checked = r.value === view; });
   document.getElementById('app-main').scrollTop = 0;
   updatePageHead();
   saveAppPrefs({ view });
@@ -9503,7 +9510,8 @@ function setNavHidden(hidden) {
 }
 
 function wireEvents() {
-  for (const v of VIEWS) document.getElementById(`nav-${v}`).onclick = () => switchView(v);
+  document.querySelectorAll('.nav-item[data-view]').forEach(b => { b.onclick = () => switchView(b.dataset.view.split(' ')[0]); });
+  document.querySelectorAll('input[name^="pf-mode"]').forEach(r => r.addEventListener('change', () => switchView(r.value)));
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
   document.getElementById('nav-hide').onclick = () => setNavHidden(true);
   document.getElementById('nav-show').onclick = () => setNavHidden(false);
@@ -9738,7 +9746,7 @@ async function loadConfig() {
   applyWorkspaceChrome();
   const link = readHash();
   if (link?.filter) Object.assign(ganttFilter, link.filter);
-  switchView(link?.view || (VIEWS.includes(prefs.view) ? prefs.view : 'gantt'));
+  switchView(link?.view || (VIEWS.includes(prefs.view) ? prefs.view : 'dash'));
   setTimescale(prefs.timescale); // Quarters fits; the ResizeObserver keeps it fitted as layout settles
   if (link?.item && itemById(link.item)) showItemOnGantt(link.item);
   routeReady = true;

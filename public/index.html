@@ -33,14 +33,13 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
         <span class="nav-text">Find…</span><kbd class="nav-text nav-kbd" id="nav-kbd">⌘K</kbd>
       </button>
-      <button id="nav-overview" class="nav-item" title="Program overview">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M8 7.5v9"/></svg>
-        <span class="nav-text">Program overview</span>
-      </button>
-      <button id="nav-workspaces" class="nav-item" title="Workspaces">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>
-        <span class="nav-text">All workspaces</span>
-      </button>
+      <div class="nav-section">
+        <span class="nav-label nav-text">Portfolio</span>
+        <button id="nav-portfolio" class="nav-item" data-view="overview workspaces" title="Portfolio: every workspace, as a table or as cards">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><rect x="11" y="11" width="6" height="6" rx="1.5"/></svg>
+          <span class="nav-text">Portfolio</span>
+        </button>
+      </div>
 
       <div class="nav-section">
         <label class="nav-label nav-text" for="workspace-select">Workspace</label>
@@ -51,40 +50,43 @@
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
           </button>
         </div>
+        <button id="nav-dash" class="nav-item" data-view="dash" title="Dashboard: how this workspace is doing">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6.5" height="8" rx="1.5"/><rect x="11.5" y="3" width="5.5" height="4.5" rx="1.5"/><rect x="11.5" y="9.5" width="5.5" height="7.5" rx="1.5"/><rect x="3" y="13" width="6.5" height="4" rx="1.5"/></svg>
+          <span class="nav-text">Dashboard</span>
+        </button>
+        <button id="nav-gantt" class="nav-item" data-view="gantt" title="Plan: the Gantt chart">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3v14h14"/><rect x="5.5" y="5" width="6" height="2.6" rx="1"/><rect x="8.5" y="9" width="7" height="2.6" rx="1"/><rect x="6.5" y="13" width="4" height="2.6" rx="1"/></svg>
+          <span class="nav-text">Plan</span>
+        </button>
+        <button id="nav-editor" class="nav-item" data-view="editor" title="Items">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5h9.5M7.5 10h9.5M7.5 15h9.5"/><circle cx="4" cy="5" r="1.2"/><circle cx="4" cy="10" r="1.2"/><circle cx="4" cy="15" r="1.2"/></svg>
+          <span class="nav-text" data-term="Items">Items</span>
+        </button>
+        <button id="nav-reports" class="nav-item" data-view="reports" title="Reports: status reports on items, and what's due">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5.5M7.5 13h5.5"/></svg>
+          <span class="nav-text">Reports</span><span id="nav-due" class="nav-badge" hidden></span>
+        </button>
+        <button id="nav-raid" class="nav-item" data-view="raid" title="Risks, issues &amp; dependencies">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 17.6 16H2.4z"/><path d="M10 7.8v3.8"/><circle cx="10" cy="13.7" r=".6"/></svg>
+          <span class="nav-text">Risks &amp; issues</span><span id="nav-raid-count" class="nav-badge nav-badge-quiet" hidden></span>
+        </button>
+        <button id="nav-streams" class="nav-item" data-view="streams" title="Streams: weekly RAG and summary per stream">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M7 3.5v13"/><path d="M10 9.75h4.5M10 14.25h3"/></svg>
+          <span class="nav-text">Streams</span>
+        </button>
       </div>
 
-      <button id="nav-dash" class="nav-item" title="Dashboard">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6.5" height="8" rx="1.5"/><rect x="11.5" y="3" width="5.5" height="4.5" rx="1.5"/><rect x="11.5" y="9.5" width="5.5" height="7.5" rx="1.5"/><rect x="3" y="13" width="6.5" height="4" rx="1.5"/></svg>
-        <span class="nav-text">Dashboard</span>
-      </button>
-      <button id="nav-gantt" class="nav-item" title="Gantt chart">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3v14h14"/><rect x="5.5" y="5" width="6" height="2.6" rx="1"/><rect x="8.5" y="9" width="7" height="2.6" rx="1"/><rect x="6.5" y="13" width="4" height="2.6" rx="1"/></svg>
-        <span class="nav-text">Gantt chart</span>
-      </button>
-      <button id="nav-editor" class="nav-item" title="Items">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5h9.5M7.5 10h9.5M7.5 15h9.5"/><circle cx="4" cy="5" r="1.2"/><circle cx="4" cy="10" r="1.2"/><circle cx="4" cy="15" r="1.2"/></svg>
-        <span class="nav-text" data-term="Items">Items</span>
-      </button>
-      <button id="nav-reports" class="nav-item" title="Reports">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5.5M7.5 13h5.5"/></svg>
-        <span class="nav-text">Reports</span><span id="nav-due" class="nav-badge" hidden></span>
-      </button>
-      <button id="nav-raid" class="nav-item" title="Risks, issues &amp; dependencies">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 17.6 16H2.4z"/><path d="M10 7.8v3.8"/><circle cx="10" cy="13.7" r=".6"/></svg>
-        <span class="nav-text">Risks &amp; issues</span><span id="nav-raid-count" class="nav-badge nav-badge-quiet" hidden></span>
-      </button>
-      <button id="nav-changes" class="nav-item" title="What changed">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10a6.5 6.5 0 1 0 2-4.7"/><path d="M3 2.8v3.4h3.4"/><path d="M10 6.5V10l2.5 1.8"/></svg>
-        <span class="nav-text">What changed</span>
-      </button>
-      <button id="nav-dates" class="nav-item" title="Date history">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="13" rx="1.5"/><path d="M3 8h14M7 2.5v3M13 2.5v3M6.5 11.5h3M6.5 14h6"/></svg>
-        <span class="nav-text">Date history</span>
-      </button>
-      <button id="nav-streams" class="nav-item" title="Stream overview">
-        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M7 3.5v13"/><path d="M10 9.75h4.5M10 14.25h3"/></svg>
-        <span class="nav-text">Stream overview</span>
-      </button>
+      <div class="nav-section">
+        <span class="nav-label nav-text">History</span>
+        <button id="nav-changes" class="nav-item" data-view="changes" title="What changed since an earlier day">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10a6.5 6.5 0 1 0 2-4.7"/><path d="M3 2.8v3.4h3.4"/><path d="M10 6.5V10l2.5 1.8"/></svg>
+          <span class="nav-text">What changed</span>
+        </button>
+        <button id="nav-dates" class="nav-item" data-view="dates" title="Date log: every change to an item's dates">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="13" rx="1.5"/><path d="M3 8h14M7 2.5v3M13 2.5v3M6.5 11.5h3M6.5 14h6"/></svg>
+          <span class="nav-text">Date log</span>
+        </button>
+      </div>
     </nav>
 
     <div class="nav-foot">
@@ -92,13 +94,13 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5v13a6.5 6.5 0 0 0 0-13z" fill="currentColor" stroke="none"/></svg>
         <span class="nav-text" id="nav-theme-label">Theme: Auto</span>
       </button>
-      <button id="nav-collapse" class="nav-collapse" title="Collapse menu" aria-expanded="true">
+      <button id="nav-collapse" class="nav-collapse" title="Collapse the menu to icons" aria-expanded="true">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5 7.5 10l5 5"/></svg>
-        <span class="nav-text">Collapse</span>
+        <span class="nav-text">Collapse menu</span>
       </button>
       <button id="nav-hide" class="nav-collapse" title="Hide the menu (the Menu button at the top brings it back)">
         <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M8 4v12M5.5 7.5h0M5.5 10h0"/></svg>
-        <span class="nav-text">Hide</span>
+        <span class="nav-text">Hide menu</span>
       </button>
     </div>
   </aside>
@@ -111,7 +113,7 @@
     </button>
     <div class="page-titles">
       <span id="page-workspace" class="page-workspace"></span>
-      <h1 id="page-title">Gantt chart</h1>
+      <h1 id="page-title">Dashboard</h1>
     </div>
     <span id="save-status" class="save-status"></span>
   </header>
@@ -120,20 +122,24 @@
   <main id="view-overview" class="view hidden">
     <div class="toolbar">
       <div class="toolbar-group">
+        <div class="mode-seg" role="radiogroup" aria-label="Show as">
+          <label title="One row per workspace, with its weekly RAG and summary"><input type="radio" name="pf-mode-table" value="overview" /><span>Table</span></label>
+          <label title="A card per workspace"><input type="radio" name="pf-mode-table" value="workspaces" /><span>Cards</span></label>
+        </div>
         <button id="btn-overview-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
         <button class="btn btn-primary btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
         <span id="overview-count" class="grid-count"></span>
       </div>
       <div class="toolbar-group toolbar-right">
-        <span class="autosave-note">Use <b>Update</b> on a row to record its weekly RAG and summary</span>
+        <span class="autosave-note">Use <b>Weekly update</b> on a row to record its weekly RAG and summary</span>
       </div>
     </div>
     <div class="table-wrap">
       <table id="overview-table" class="ov-table">
         <thead>
           <tr>
-            <th rowspan="2" class="ov-num">Program no.</th>
-            <th rowspan="2">Program</th>
+            <th rowspan="2" class="ov-num">No.</th>
+            <th rowspan="2">Workspace</th>
             <th rowspan="2">Area lead</th>
             <th rowspan="2">Previous weekly RAG</th>
             <th rowspan="2">Current weekly RAG</th>
@@ -168,7 +174,7 @@
         <span id="streams-count" class="grid-count"></span>
       </div>
       <div class="toolbar-group toolbar-right">
-        <span class="autosave-note">Use <b>Update</b> on a row to record its weekly RAG and summary</span>
+        <span class="autosave-note">Use <b>Weekly update</b> on a row to record its weekly RAG and summary</span>
       </div>
     </div>
     <div class="table-wrap">
@@ -282,11 +288,15 @@
   <main id="view-workspaces" class="view hidden">
     <div class="toolbar">
       <div class="toolbar-group">
+        <div class="mode-seg" role="radiogroup" aria-label="Show as">
+          <label title="One row per workspace, with its weekly RAG and summary"><input type="radio" name="pf-mode-cards" value="overview" /><span>Table</span></label>
+          <label title="A card per workspace"><input type="radio" name="pf-mode-cards" value="workspaces" /><span>Cards</span></label>
+        </div>
         <button id="btn-new-workspace" class="btn btn-primary">+ New workspace</button>
         <span id="workspace-count" class="grid-count"></span>
       </div>
       <div class="toolbar-group toolbar-right">
-        <span class="autosave-note">Open a workspace to see its Gantt chart, items and reports</span>
+        <span class="autosave-note">Open a workspace to see its dashboard, plan, items and reports</span>
       </div>
     </div>
     <div id="workspace-cards" class="prog-grid"></div>
@@ -577,9 +587,9 @@
       <p id="ed-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
-        <button type="button" id="ed-report" class="btn">Provide report</button>
-        <button type="button" id="ed-history" class="btn">View reports</button>
-        <button type="button" id="ed-dates" class="btn">Date history</button>
+        <button type="button" id="ed-report" class="btn">New report</button>
+        <button type="button" id="ed-history" class="btn">Reports</button>
+        <button type="button" id="ed-dates" class="btn">Date log</button>
         <button type="button" id="ed-raid" class="btn" title="Risks, issues and dependencies linked to this">Risks &amp; issues</button>
         <span class="spacer"></span>
         <button type="button" id="ed-cancel" class="btn">Cancel</button>
@@ -593,7 +603,7 @@
     <form id="report-form" novalidate>
       <header class="dlg-head">
         <span class="type-badge rpt">Report</span>
-        <h2 id="rp-heading">Provide report</h2>
+        <h2 id="rp-heading">New report</h2>
         <button type="button" id="rp-close" class="dlg-close" title="Close">✕</button>
       </header>
       <div id="rp-item" class="rp-item"></div>
@@ -623,10 +633,10 @@
       <p id="rp-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="rp-delete" class="btn btn-danger">Delete report</button>
-        <button type="button" id="rp-history" class="btn">View reports</button>
+        <button type="button" id="rp-history" class="btn">Reports</button>
         <span class="spacer"></span>
         <button type="button" id="rp-cancel" class="btn">Cancel</button>
-        <button type="submit" id="rp-submit" class="btn btn-primary">Submit report</button>
+        <button type="submit" id="rp-submit" class="btn btn-primary">Save report</button>
       </footer>
     </form>
   </dialog>
@@ -668,17 +678,17 @@
           <legend>Fields and features this workspace uses</legend>
           <input type="hidden" name="hidden" />
           <label class="pg-check"><input type="checkbox" data-show-field="gitlab_url" /> GitLab URL</label>
-          <label class="pg-check"><input type="checkbox" data-show-field="use_case_url" /> Use case URL <small>badge on the Gantt chart</small></label>
-          <label class="pg-check"><input type="checkbox" data-show-field="reports" /> Reports <small>the Reports tab and Provide report buttons</small></label>
+          <label class="pg-check"><input type="checkbox" data-show-field="use_case_url" /> Use case URL <small>badge on the plan</small></label>
+          <label class="pg-check"><input type="checkbox" data-show-field="reports" /> Reports <small>the Reports page and New report buttons</small></label>
           <p class="pg-term-preview">Untick one to hide it from this workspace. Nothing is deleted: links and reports already entered are kept and come back when it’s ticked again.</p>
         </fieldset>
         <div id="pg-history" class="span3 pg-history">
-          <div><strong class="pg-history-title">Start the history afresh</strong><span>After deleting demo or test data: clears this workspace’s <b>Date history</b> and makes <b>What changed</b> compare from today, so nothing that’s gone still shows. It can’t be undone.</span></div>
+          <div><strong class="pg-history-title">Start the history afresh</strong><span>After deleting demo or test data: clears this workspace’s <b>Date log</b> and makes <b>What changed</b> compare from today, so nothing that’s gone still shows. It can’t be undone.</span></div>
           <button type="button" id="pg-clear-history" class="btn btn-danger btn-sm">Clear history…</button>
         </div>
       </div>
       <div id="pg-panel-rag" class="pg-rag" role="tabpanel" hidden>
-        <p class="pg-rag-intro">The RAG statuses this workspace uses, in order. They set the colours on the Gantt chart and in its key, the RAG buttons, filters and report form.</p>
+        <p class="pg-rag-intro">The RAG statuses this workspace uses, in order. They set the colours on the plan and in its key, the RAG buttons, filters and report form.</p>
         <table class="pg-rag-table">
           <thead><tr><th></th><th>Colour</th><th>Name</th><th>Meaning <small>(shown in the key)</small></th><th title="Reports at this status must include a get to green plan">Get to green plan</th><th title="The status new items start at">Default</th><th></th></tr></thead>
           <tbody id="pg-statuses"></tbody>
@@ -747,7 +757,7 @@
         <button type="button" id="up-delete" class="btn btn-danger">Delete update</button>
         <span class="spacer"></span>
         <button type="button" id="up-cancel" class="btn">Cancel</button>
-        <button type="submit" id="up-submit" class="btn btn-primary">Submit update</button>
+        <button type="submit" id="up-submit" class="btn btn-primary">Save update</button>
       </footer>
     </form>
   </dialog>
