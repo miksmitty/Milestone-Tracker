@@ -92,11 +92,19 @@
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5 7.5 10l5 5"/></svg>
         <span class="nav-text">Collapse</span>
       </button>
+      <button id="nav-hide" class="nav-collapse" title="Hide the menu (the Menu button at the top brings it back)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M8 4v12M5.5 7.5h0M5.5 10h0"/></svg>
+        <span class="nav-text">Hide</span>
+      </button>
     </div>
   </aside>
 
   <div id="app-main" class="app-main">
   <header class="page-head">
+    <button id="nav-show" class="nav-show" title="Show the menu" hidden>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.5h13M3.5 10h13M3.5 14.5h13"/></svg>
+      <span>Menu</span>
+    </button>
     <div class="page-titles">
       <span id="page-workspace" class="page-workspace"></span>
       <h1 id="page-title">Gantt chart</h1>
@@ -187,7 +195,7 @@
     <p class="hint">One row per stream of this workspace, in the order the Gantt chart lists them. Click a stream to see just its items on the Gantt chart.
       <b>Current weekly RAG</b> and the summary come from the stream’s latest weekly update, and <b>Previous weekly RAG</b> from the one before it; a week-ending date in red means there’s no update for this week yet.
       The milestones overview counts the stream’s milestones as on the program overview. Use <b>Update</b> to record the week’s update and to set the stream’s area lead and trend.
-      Stream updates are stored in <code>updates.csv</code> (with the stream’s name) and area leads and trends in <code>streams.csv</code>. Renaming a stream starts it afresh.</p>
+      Streams are records in <code>streams.csv</code>, with their area leads and trends; updates in <code>updates.csv</code> point at them, so a stream can be renamed in <b>Workspace settings</b> without losing anything.</p>
   </main>
 
 
@@ -531,7 +539,7 @@
         <label>Ref<input name="ref" placeholder="e.g. 4.1" /></label>
         <label class="span2">Title<input name="title" placeholder="Title" /></label>
         <label class="span3">Description<textarea name="description" rows="2" placeholder="Description"></textarea></label>
-        <label>Stream<select name="stream"></select><input name="newstream" placeholder="New stream name" title="Esc to pick an existing stream" hidden /></label>
+        <label>Stream<select name="stream_id"></select><input name="newstream" placeholder="New stream name" title="Esc to pick an existing stream" hidden /></label>
         <label>Sub-stream<input name="substream" list="substream-list" /></label>
         <label>Owner<input name="owner" list="owner-list" /></label>
         <label>Type<select name="type"></select></label>
@@ -613,6 +621,7 @@
         <button type="button" role="tab" data-pg-tab="details" aria-selected="true">Details</button>
         <button type="button" role="tab" data-pg-tab="rag" aria-selected="false">RAG options</button>
         <button type="button" role="tab" data-pg-tab="deps" aria-selected="false">Dependencies</button>
+        <button type="button" role="tab" data-pg-tab="streams" aria-selected="false">Streams</button>
       </div>
       <div id="pg-panel-details" class="form-grid" role="tabpanel">
         <label class="span3">Name<input name="name" placeholder="e.g. Platform Replacement" /></label>
@@ -674,6 +683,16 @@
           </section>
         </div>
       </div>
+      <div id="pg-panel-streams" class="pg-streams" role="tabpanel" hidden>
+        <p class="pg-rag-intro">The workspace’s streams. Renaming one renames it everywhere: on its items, its weekly updates and the risks, issues and dependencies linked to it. A stream that’s in use can be removed by moving what it holds to another stream. Typing a new name on an item also adds a stream.</p>
+        <table class="pg-rag-table pg-streams-table">
+          <thead><tr><th>Name</th><th>Area lead</th><th>In use</th><th></th></tr></thead>
+          <tbody id="pg-streams"></tbody>
+        </table>
+        <div class="pg-rag-actions">
+          <button type="button" id="pg-add-stream" class="btn btn-sm">+ Add stream</button>
+        </div>
+      </div>
       <p id="pg-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="pg-delete" class="btn btn-danger">Delete workspace</button>
@@ -726,7 +745,7 @@
         <label class="span3">Description<textarea name="description" rows="3" placeholder="What it is, and what it would mean for the plan"></textarea></label>
         <label>Owner<input name="owner" list="people-list" /></label>
         <label>Status<select name="status"></select></label>
-        <label>Stream<select name="stream"></select></label>
+        <label>Stream<select name="stream_id"></select></label>
         <label>RAG<select name="rag"></select></label>
         <label>Priority<select name="priority"></select></label>
         <label>Dependency type<select name="dep_type"></select></label>

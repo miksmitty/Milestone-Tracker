@@ -65,7 +65,7 @@ Changes show when the page is reloaded; there's no need to restart the server. I
 
 ## Workspaces
 
-Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Program overview**, **All workspaces**, a workspace switcher (with a ⚙ for **Workspace settings**), and the current workspace's **Gantt chart**, **Items**, **Reports** (with a count of reports due), **What changed**, **Date history** and **Stream overview**. At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, and **Collapse** shrinks the menu to icons; the app remembers the open workspace, view, theme and menu state per browser.
+Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Program overview**, **All workspaces**, a workspace switcher (with a ⚙ for **Workspace settings**), and the current workspace's **Gantt chart**, **Items**, **Reports** (with a count of reports due), **What changed**, **Date history** and **Stream overview**. At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, and **Collapse** shrinks the menu to icons and **Hide** removes it altogether (a **Menu** button at the top of the page brings it back); the app remembers the open workspace, view, theme and menu state per browser.
 
 ### Find (⌘K)
 
@@ -101,19 +101,25 @@ Each count in the milestones overview (here, on the stream overview and on the w
 
 ### Stream overview
 
-**Stream overview** is the same table for the current workspace, one row per stream in the order the Gantt chart lists them: **Stream** (click to show just that stream on the Gantt chart), **Area lead**, **Previous / Current weekly RAG**, **Trend**, the **summary** and the **milestones overview** of that stream's milestones, with a totals row that matches the program's. Each stream has its own weekly updates, area lead and trend, recorded with **Update** exactly as for a program. Streams are matched by name, so renaming one starts it afresh.
+**Stream overview** is the same table for the current workspace, one row per stream in the order the Gantt chart lists them: **Stream** (click to show just that stream on the Gantt chart), **Area lead**, **Previous / Current weekly RAG**, **Trend**, the **summary** and the **milestones overview** of that stream's milestones, with a totals row that matches the program's. Each stream has its own weekly updates, area lead and trend, recorded with **Update** exactly as for a program.
 
-Weekly updates live in [updates.csv](updates.csv), one row per program or stream per week (`stream` is blank for the program itself):
+### Streams
 
-```
-id,workspace_id,stream,week_ending,rag,summary,author,created,updated
-```
+A stream is a record of its own, with an id: items, weekly updates and the risks, issues and dependencies point at it, so **renaming a stream keeps everything that belongs to it**. Streams are added by giving an item one (type a new name in the Items table, or choose **+ New stream…** in the edit dialog) or in **Workspace settings → Streams**, which lists the workspace's streams with their area leads and what each holds. There a stream can be renamed, given a lead, added, or removed: one that's in use is removed by moving its items, updates and links to another stream.
 
-A stream's area lead and trend live in [streams.csv](streams.csv), created the first time one is set:
+Streams live in [streams.csv](streams.csv):
 
 ```
-workspace_id,name,lead,trend
+id,workspace_id,name,lead,trend
 ```
+
+Weekly updates live in [updates.csv](updates.csv), one row per program or stream per week (`stream_id` is blank for the program itself):
+
+```
+id,workspace_id,stream_id,week_ending,rag,summary,author,created,updated
+```
+
+Files from before streams had ids (a `stream` column naming the stream on each item, update and RAID entry) are converted once, when the server starts: every name in use becomes a stream, the rows point at it, and the day's backup of each file is taken first.
 
 ### What changed
 
@@ -158,12 +164,12 @@ Each entry can be **linked to any number of items and whole streams** of its wor
 - Filter by type, by status (*Not closed* by default) or by searching any text, including notes and what an entry is linked to. Showing **Dependencies** alone switches to their own columns: type, stream, priority, RAG, status and the latest note. **Download CSV** saves the entries shown, with all their notes
 - **Risks & issues** in an item's edit dialog opens the register showing just what's linked to that item (with the number open), and **+ Add** there links the new entry to it. An item's hover card on the Gantt chart says what's open against it
 - The menu shows how many entries are open in the workspace, and **Find (⌘K)** searches them too
-- A link to an item that's since been deleted is kept and shown struck through; streams are matched by name, so renaming a stream leaves its links pointing at the old name (also struck through)
+- A link to an item or stream that's since been deleted is kept and shown struck through; a renamed stream keeps its links
 
-Entries live in [raid.csv](raid.csv), created when the first is added. `links` holds `item:<id>` and `stream:<name>` references, `;`-separated:
+Entries live in [raid.csv](raid.csv), created when the first is added. `stream_id` is a dependency's own stream; `links` holds `item:<id>` and `stream:<id>` references, `;`-separated:
 
 ```
-id,workspace_id,kind,ref,title,description,stream,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,links,raised,created,updated
+id,workspace_id,kind,ref,title,description,stream_id,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,links,raised,created,updated
 ```
 
 Notes live in [raid-notes.csv](raid-notes.csv), one row per note (`raid_id` is the entry's `id`):
@@ -206,7 +212,7 @@ Items and reports carry a `workspace_id`. Ids stay unique across all workspaces,
 Items live in [milestones.csv](milestones.csv) with columns:
 
 ```
-id,workspace_id,ref,title,type,description,stream,substream,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url
+id,workspace_id,ref,title,type,description,stream_id,substream,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url
 ```
 
 - **workspace_id**: the workspace the item belongs to (`id` in workspaces.csv)
@@ -216,7 +222,8 @@ id,workspace_id,ref,title,type,description,stream,substream,owner,start,end,rag,
 - **type**: `top` (a top level milestone: one date, under change control — anything that would move, delete or retype it asks for confirmation first — drawn as a diamond in a ring), `milestone` (one date, drawn as a diamond) or `task` (a start and end date, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to its end date. Files without a type column still load: a start before the end makes a task, otherwise a milestone. Older files with a `top_level` column (yes/no) and a `shape` column still load: top level milestones become `top`, and shape is ignored
 - **start / end**: `YYYY-MM-DD`. A milestone's start and end are always the same, and **changing either one moves the milestone**. A task's dates are inclusive, so its bar runs to the end of its end date, and a one-day task can start and end on the same day
 - **rag**: one of the workspace's RAG options (by default `Green` | `Amber` | `Red` | `Complete` | `Not Started`). Matching ignores case; a status that isn't in the list is kept and shown in grey. Files with the older `status` column still load
-- **stream / substream**: free text — each distinct value becomes a stream / nested sub-stream
+- **stream_id**: the item's stream (`id` in streams.csv; see **Streams**). An older file or backup with a `stream` column naming the stream still loads, matched by name. **Download CSV** writes the stream's name, as Import expects
+- **substream**: free text — each distinct value becomes a nested sub-stream within the stream
 - **parent**: id of the milestone this item rolls up to (the milestone can't fall before it finishes)
 - **depends_on**: `;`-separated ids this item depends on (finish-to-start)
 - **baseline_start / baseline_end**: the dates recorded by **View → Baseline → Set from current dates** on the Gantt chart, to measure slippage against (blank until a baseline is set). Files without these columns still load
@@ -249,7 +256,7 @@ A file from **Download CSV** imports straight back in, matched on ref (or id, as
 - **Ref**: a ref column, or else SharePoint's *ID* with the type's letter (ID 12 → R12, I12, D12). Rows update the entry with the same ref (or, with no ref, the same type and title), so importing a later export of the same list updates the register rather than adding everything again. **Replace those kinds** also deletes entries of the kinds in the file that aren't in it
 - **Values**: rich text loses its formatting, lookups and people lose SharePoint's ids (`12;#Jane Doe` → *Jane Doe*). Likelihood and impact read *Low/Medium/High*, scores (1–3, 1–5 or 1–10, judged from the largest in the file), *Rare … Almost certain*, *Minor … Severe* or percentages. Statuses read the usual words (*Active*, *Mitigating* → In progress; *Resolved*, *Retired*, *Realised* → Closed; *Delivered* → Complete; *Delayed* → At risk); one that can't be placed is kept as written, with a note. Priorities read *P1*, *(1) High*, *Urgent* and so on against the workspace's list. Dates are read as for items, and a date that reads neither way doesn't upset the detection
 - **Notes**: a comments column becomes summary notes. A cell can hold several, each starting with a date (and who wrote it: `Jane Doe (10/14/2026 3:15 PM): …`, `[02/10/2026] …`, or Download CSV's `21 Oct 2026, 14:05 (Jane Doe): …`); otherwise it's one note dated by *Modified*. A note already on the entry isn't added again
-- **Links** name items by ref, "ref title" or title, or a stream by name, separated by `;`, `,` or new lines; they're added to an entry's links, never removed. A risk or issue's stream becomes a link to the stream
+- **Links** name items by ref, "ref title" or title, or a stream by name, separated by `;`, `,` or new lines; they're added to an entry's links, never removed. A risk or issue's stream becomes a link to the stream; a stream the workspace doesn't have yet is added
 - The **preview** shows each row as Add, Update, No change or Skip, what it'll be rated, and anything to check. Import offers Undo
 
 Edit items in the app — in the **Items** table or by clicking an item on the chart. Every change saves to the CSV automatically. In the table, click a column header to sort (▲ / ▼ / off), use the filter row to narrow the list, and drag a header edge to resize a column (double-click to reset); sort and column widths are remembered per browser and never change the CSV order. You can also edit the CSV in a spreadsheet tool; hit *Reload* in the app afterwards.

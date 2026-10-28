@@ -46,7 +46,7 @@ const DATASETS = {
   },
   '/api/milestones': {
     file: path.join(DATA_DIR, 'milestones.csv'),
-    header: 'id,workspace_id,ref,title,type,description,stream,substream,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url\n',
+    header: 'id,workspace_id,ref,title,type,description,stream_id,substream,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url\n',
     audited: true, // date changes are logged to date-changes.csv
   },
   '/api/reports': {
@@ -55,15 +55,15 @@ const DATASETS = {
   },
   '/api/updates': {
     file: path.join(DATA_DIR, 'updates.csv'),
-    header: 'id,workspace_id,stream,week_ending,rag,summary,author,created,updated\n',
+    header: 'id,workspace_id,stream_id,week_ending,rag,summary,author,created,updated\n',
   },
   '/api/streams': {
     file: path.join(DATA_DIR, 'streams.csv'),
-    header: 'workspace_id,name,lead,trend\n',
+    header: 'id,workspace_id,name,lead,trend\n',
   },
   '/api/raid': {
     file: path.join(DATA_DIR, 'raid.csv'),
-    header: 'id,workspace_id,kind,ref,title,description,stream,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,links,raised,created,updated\n',
+    header: 'id,workspace_id,kind,ref,title,description,stream_id,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,links,raised,created,updated\n',
   },
   '/api/raid-notes': {
     file: path.join(DATA_DIR, 'raid-notes.csv'),
@@ -400,7 +400,7 @@ setInterval(checkFiles, 2000).unref();
 // next number. A browser reserves a few at a time (POST /api/ids?file=milestones&n=20). The last
 // id given out per file is kept in ids.json; the next is always above every id in the file too.
 const IDS_FILE = path.join(DATA_DIR, 'ids.json');
-const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'raid', 'raid-notes', 'report-comments'];
+const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'streams', 'raid', 'raid-notes', 'report-comments'];
 function reserveIds(file, n) {
   let issued = {};
   try { issued = JSON.parse(fs.readFileSync(IDS_FILE, 'utf8')); } catch { /* none issued yet */ }
@@ -438,6 +438,94 @@ function serveIds(req, res) {
   }
   res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify({ ok: true, ids }));
+}
+
+/* ---- Streams as records ---- */
+// A stream is a row of streams.csv with an id; items, weekly updates and RAID entries point at it
+// (stream_id), and a RAID link to a whole stream reads stream:<id>. Files from before named the
+// stream in each row instead, so renaming one lost its lead, trend and updates. Those files are
+// converted once, at start-up, with the day's backup taken first: every name in use becomes a
+// stream (a blank item stream is "General", as the app always showed it), and the rows point at it.
+function migrateStreams() {
+  const norm = (h) => h.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const read = (ds) => { const buf = readDataset(ds); return buf ? parseCSV(decodeCSV(buf)) : []; };
+  const colOf = (header, name) => header.findIndex(h => norm(h) === name);
+  const named = (table) => table.length > 0 && colOf(table[0], 'stream') >= 0 && colOf(table[0], 'stream_id') < 0;
+  const S = DATASETS['/api/streams'], M = DATASETS['/api/milestones'], U = DATASETS['/api/updates'], R = DATASETS['/api/raid'];
+  const tables = { S: read(S), M: read(M), U: read(U), R: read(R) };
+  const streamsLackIds = tables.S.length > 0 && colOf(tables.S[0], 'id') < 0;
+  const todo = { M: named(tables.M), U: named(tables.U), R: named(tables.R) };
+  if (!streamsLackIds && !todo.M && !todo.U && !todo.R) return;
+
+  // The streams, by workspace and name (names differing only in case are one stream).
+  const streams = [], byKey = new Map();
+  const keyOf = (ws, name) => `${ws}\u0000${name.trim().toLowerCase()}`;
+  const [sHeader = [], ...sRows] = tables.S;
+  const sc = Object.fromEntries(['id', 'workspace_id', 'name', 'lead', 'trend'].map(k => [k, colOf(sHeader, k)]));
+  const cell = (r, i) => (i < 0 ? '' : (r[i] ?? '').trim());
+  for (const r of sRows) {
+    const s = { id: /^\d+$/.test(cell(r, sc.id)) ? cell(r, sc.id) : '', workspace_id: cell(r, sc.workspace_id), name: cell(r, sc.name), lead: cell(r, sc.lead), trend: cell(r, sc.trend) };
+    if (!s.workspace_id || !s.name || byKey.has(keyOf(s.workspace_id, s.name))) continue;
+    streams.push(s);
+    byKey.set(keyOf(s.workspace_id, s.name), s);
+  }
+  const streamFor = (ws, name) => {
+    name = name.trim();
+    if (!ws || !name) return null;
+    let s = byKey.get(keyOf(ws, name));
+    if (!s) { s = { id: '', workspace_id: ws, name, lead: '', trend: '' }; streams.push(s); byKey.set(keyOf(ws, name), s); }
+    return s;
+  };
+
+  // Each file's rows point at streams instead of naming them (ids are filled in below).
+  const convert = (table, fallback, links) => {
+    const header = table[0];
+    const si = colOf(header, 'stream'), wi = colOf(header, 'workspace_id') >= 0 ? colOf(header, 'workspace_id') : colOf(header, 'program_id');
+    const li = links ? colOf(header, 'links') : -1;
+    header[si] = 'stream_id';
+    const refs = [];
+    for (const r of table.slice(1)) {
+      const ws = cell(r, wi);
+      const s = streamFor(ws, cell(r, si) || fallback);
+      refs.push(() => { r[si] = s ? s.id : ''; });
+      if (li >= 0 && r[li]) {
+        const parts = r[li].split(';').map(l => l.trim()).filter(Boolean).map(l => {
+          if (!l.startsWith('stream:')) return () => l;
+          const t = streamFor(ws, l.slice(7));
+          return () => (t ? `stream:${t.id}` : '');
+        });
+        refs.push(() => { r[li] = [...new Set(parts.map(p => p()).filter(Boolean))].join(';'); });
+      }
+    }
+    return refs;
+  };
+  const fixes = [];
+  if (todo.M) fixes.push(...convert(tables.M, 'General', false));
+  if (todo.U) fixes.push(...convert(tables.U, '', false));
+  if (todo.R) fixes.push(...convert(tables.R, '', true));
+
+  // Ids for streams that have none, above every id in use and every id ever issued.
+  let issued = {};
+  try { issued = JSON.parse(fs.readFileSync(IDS_FILE, 'utf8')); } catch { /* none issued yet */ }
+  let last = Math.max(+issued.streams || 0, ...streams.map(s => +s.id || 0));
+  for (const s of streams) if (!s.id) s.id = String(++last);
+  for (const fix of fixes) fix();
+
+  // Write the converted files, each with its daily backup taken first.
+  const day = new Date().toISOString().slice(0, 10);
+  const write = (ds, rows) => {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    try { fs.copyFileSync(ds.file, path.join(BACKUP_DIR, `${path.basename(ds.file, '.csv')}.${day}.csv`), fs.constants.COPYFILE_EXCL); } catch (err) { if (err.code !== 'EEXIST' && err.code !== 'ENOENT') throw err; }
+    fs.writeFileSync(ds.file + '.tmp', serialize(rows), 'utf8');
+    fs.renameSync(ds.file + '.tmp', ds.file);
+    console.log(`Converted ${path.basename(ds.file)}: streams are now recorded by id`);
+  };
+  write(S, [['id', 'workspace_id', 'name', 'lead', 'trend'], ...streams.map(s => [s.id, s.workspace_id, s.name, s.lead, s.trend])]);
+  if (todo.M) write(M, tables.M);
+  if (todo.U) write(U, tables.U);
+  if (todo.R) write(R, tables.R);
+  issued.streams = Math.max(+issued.streams || 0, last);
+  fs.writeFileSync(IDS_FILE, JSON.stringify(issued, null, 2) + '\n');
 }
 
 const MIME = {
@@ -595,6 +683,7 @@ function sendJSON(res, status, out) {
   res.end(JSON.stringify(out));
 }
 
+migrateStreams();
 startAudit();
 checkFiles();
 server.listen(PORT, () => {

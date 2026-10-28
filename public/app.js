@@ -97,7 +97,7 @@ const GANTT_THEMES = {
   },
 };
 let G = GANTT_THEMES.light;
-const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'stream', 'substream', 'owner', 'start', 'end', 'rag', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url'];
+const COLUMNS = ['id', 'workspace_id', 'ref', 'title', 'type', 'description', 'stream_id', 'substream', 'owner', 'start', 'end', 'rag', 'parent', 'depends_on', 'baseline_start', 'baseline_end', 'gitlab_url', 'use_case_url'];
 const MS_DAY = 86400000;
 
 const state = {
@@ -220,7 +220,7 @@ function csvEscape(v) {
 function toCSV(items) {
   const lines = [COLUMNS.join(',')];
   for (const m of items) {
-    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.stream, m.substream, m.owner, m.start, m.end,
+    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.stream_id, m.substream, m.owner, m.start, m.end,
       m.status, m.parent, m.deps.join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
@@ -234,7 +234,8 @@ const HEADER_ALIASES = {
   title: ['title', 'name'],
   type: ['type', 'kind', 'itemtype'],
   description: ['description', 'desc'],
-  stream: ['stream'],
+  stream_id: ['streamid'],
+  stream: ['stream'], // files from before named the stream in each row
   substream: ['substream'],
   owner: ['owner'],
   start: ['start', 'startdate'],
@@ -272,7 +273,8 @@ function rowsToItems(rows) {
       ref: get(r, 'ref'),
       title: get(r, 'title'),
       description: get(r, 'description'),
-      stream: get(r, 'stream') || 'General',
+      // a stream named rather than pointed at (an older file or backup) is matched by name
+      stream_id: get(r, 'stream_id') || streamIdFor(get(r, 'workspace_id'), get(r, 'stream'), false),
       substream: get(r, 'substream'),
       owner: get(r, 'owner'),
       start, end,
@@ -359,16 +361,16 @@ async function loadData() {
     synced[file] = { version: r.headers.get('X-Version'), text };
     return text;
   }));
-  const [workspaces, statuses, items, reports, updates, streams, raid, raidNotes, reportComments] = texts;
+  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, reportComments] = texts;
   state.workspaces = rowsToWorkspaces(parseAny(workspaces));
   state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
   const created = !state.workspaces.length;
   if (created) state.workspaces.push(newWorkspace({ name: 'My workspace' }));
+  state.streams = rowsToStreams(parseAny(streams));
   const allItems = rowsToItems(parseAny(items));
   const allReports = rowsToReports(parseAny(reports), allItems);
   state.updates = rowsToUpdates(parseAny(updates));
-  state.streams = rowsToStreams(parseAny(streams));
   state.raid = rowsToRaid(parseAny(raid));
   state.raidNotes = rowsToRaidNotes(parseAny(raidNotes));
   state.reportComments = rowsToComments(parseAny(reportComments));
@@ -468,6 +470,10 @@ const FILES = {
     csv: () => statusesToCSV(state.statuses), key: (g) => g.workspace_id, group: true,
     name: (g) => `RAG options of ${workspaceById(g.workspace_id)?.name || 'a workspace'}`,
   },
+  streams: {
+    parse: (t) => rowsToStreams(parseAny(t)), all: () => state.streams, set: (l) => { state.streams = l; },
+    csv: () => streamsToCSV(state.streams), key: (l) => l.id, name: (l) => `Stream ${l.name}`,
+  },
   milestones: {
     parse: (t) => keepCounters(() => rowsToItems(parseAny(t))), all: () => allItems(), set: (l) => setItems(l),
     csv: () => toCSV(allItems()), key: (m) => m.id, name: (m) => fullLabel(m) || `${T.Item} #${m.id}`,
@@ -480,11 +486,7 @@ const FILES = {
   updates: {
     parse: (t) => rowsToUpdates(parseAny(t)), all: () => state.updates, set: (l) => { state.updates = l; },
     csv: () => updatesToCSV(state.updates), key: (u) => u.id, quiet: ['updated'],
-    name: (u) => `Weekly update for ${[workspaceById(u.workspace_id)?.name, u.stream].filter(Boolean).join(' · ')}, w/e ${fmtShort(u.week_ending)}`,
-  },
-  streams: {
-    parse: (t) => rowsToStreams(parseAny(t)), all: () => state.streams, set: (l) => { state.streams = l; },
-    csv: () => streamsToCSV(state.streams), key: (l) => `${l.workspace_id}\u0000${l.name}`, name: (l) => `Stream ${l.name}`,
+    name: (u) => `Weekly update for ${[workspaceById(u.workspace_id)?.name, streamName(u.stream_id)].filter(Boolean).join(' · ')}, w/e ${fmtShort(u.week_ending)}`,
   },
   raid: {
     parse: (t) => rowsToRaid(parseAny(t)), all: () => state.raid, set: (l) => { state.raid = l; },
@@ -787,7 +789,7 @@ function wireConflicts() {
 // import, a block is fetched so the rest come straight from hand. Ids still in hand when the page
 // closes are never used, so a burst can leave a gap in the numbers. If the server can't be reached,
 // the next number after the highest seen is used.
-const idPool = { workspaces: [], milestones: [], reports: [], updates: [], raid: [], 'raid-notes': [], 'report-comments': [] };
+const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'report-comments': [] };
 const idLastTaken = {};
 function takeId(file, fallback) {
   const burst = Date.now() - (idLastTaken[file] || 0) < 2000;
@@ -1423,7 +1425,7 @@ function rowMetrics() {
 // Label columns grow to fit the longest stream and sub-stream names up to a cap; longer names wrap.
 const hasSubStreams = () => state.items.some(m => m.substream);
 const widest = (names, size, weight) => Math.max(0, ...[...new Set(names)].filter(Boolean).map(n => textW(n, size, weight)));
-const streamColWidth = () => Math.ceil(Math.min(MAX_STREAM_COL_W, Math.max(hasSubStreams() ? MIN_STREAM_COL_W : 170, widest(state.items.map(m => m.stream), 14, 700) + 40)));
+const streamColWidth = () => Math.ceil(Math.min(MAX_STREAM_COL_W, Math.max(hasSubStreams() ? MIN_STREAM_COL_W : 170, widest(state.items.map(m => streamName(m.stream_id)), 14, 700) + 40)));
 const subColWidth = () => Math.ceil(Math.min(MAX_SUB_COL_W, Math.max(MIN_SUB_COL_W, widest(state.items.map(m => m.substream), 12, 600) + 24)));
 const labelWidth = () => streamColWidth() + (hasSubStreams() ? subColWidth() : 0);
 
@@ -1509,10 +1511,10 @@ function layoutStreams(items, xOf, rm, minX, maxX) {
   const streams = [], streamMap = new Map();
   streams.maxRight = 0; // rightmost label edge, so the chart can widen to show it whole
   for (const m of items) {
-    let stream = streamMap.get(m.stream);
+    let stream = streamMap.get(m.stream_id);
     if (!stream) {
-      stream = { name: m.stream, subs: [], subMap: new Map() };
-      streamMap.set(m.stream, stream);
+      stream = { id: m.stream_id, name: streamName(m.stream_id), subs: [], subMap: new Map() };
+      streamMap.set(m.stream_id, stream);
       streams.push(stream);
     }
     let sub = stream.subMap.get(m.substream);
@@ -1531,7 +1533,7 @@ function layoutStreams(items, xOf, rm, minX, maxX) {
   for (const stream of streams) {
     stream.lines = wrapText(stream.name, nameW, 14, 700);
     const nameH = stream.lines.length * STREAM_LINE_H + 14;
-    if (folded.has(stream.name)) {
+    if (folded.has(stream.id)) {
       // folded: one summary row for the whole stream
       const all = stream.subs.flatMap(sub => sub.items);
       for (const m of all) m._row = 0;
@@ -1734,7 +1736,7 @@ function renderGantt() {
     col.appendChild(svgEl('rect', { x: 0, y: y + 4, width: 4, height: stream.h - 8, rx: 2, fill: accent }));
     const streamColW = subCol ? STREAM_COL_W : LABEL_W;
     // click the stream's name to fold it into one summary row (and back)
-    const toggle = svgEl('g', { class: 'stream-toggle', 'data-stream': stream.name, role: 'button', tabindex: 0,
+    const toggle = svgEl('g', { class: 'stream-toggle', 'data-stream': stream.id, role: 'button', tabindex: 0,
       'aria-expanded': String(!stream.collapsed), 'aria-label': `${stream.collapsed ? 'Expand' : 'Collapse'} ${stream.name}` });
     toggle.appendChild(svgEl('rect', { x: 4, y, width: streamColW - 4, height: stream.h, fill: 'transparent' }));
     toggle.appendChild(svgEl('path', {
@@ -2133,7 +2135,7 @@ function ganttKeyNav(e) {
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter', 'Escape', ' '].includes(e.key)) return;
   const gs = [...document.querySelectorAll('#gantt-container .gantt-item')];
   if (!gs.length) return;
-  const at = (g) => { const r = g.getBoundingClientRect(); return { g, x: r.left, y: r.top + r.height / 2, stream: itemById(g.dataset.id)?.stream }; };
+  const at = (g) => { const r = g.getBoundingClientRect(); return { g, x: r.left, y: r.top + r.height / 2, stream: itemById(g.dataset.id)?.stream_id }; };
   const all = gs.map(at);
   const cur = all.find(a => a.g.dataset.id === kbId);
   if (e.key === 'Escape') { if (kbId) { setKbItem(null); e.preventDefault(); } return; }
@@ -2240,12 +2242,12 @@ const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.stream || gan
 
 function ganttMatches(m) {
   const f = ganttFilter, q = f.q.trim().toLowerCase();
-  return (!f.stream || m.stream === f.stream)
+  return (!f.stream || m.stream_id === f.stream)
     && (!f.owner || m.owner === f.owner)
     && (!f.type || (f.type === 'task' ? isTask(m) : f.type === 'top' ? isTopLevel(m) : !isTask(m)))
     && (!f.rag.length || f.rag.includes(m.status))
     && (!f.late || isLate(m) || isLateStart(m))
-    && (!q || [m.ref, m.title, m.description, m.owner, m.stream, m.substream].join(' ').toLowerCase().includes(q));
+    && (!q || [m.ref, m.title, m.description, m.owner, streamName(m.stream_id), m.substream].join(' ').toLowerCase().includes(q));
 }
 
 function clearGanttFilters() {
@@ -2253,19 +2255,20 @@ function clearGanttFilters() {
 }
 
 // Folded streams, per workspace (a per-browser preference).
+// Folded streams, by id, remembered per workspace in this browser.
 function collapsedStreams() {
   return new Set(loadAppPrefs().folded?.[state.workspaceId] || []);
 }
-function toggleStream(name, fold) {
+function toggleStream(id, fold) {
   const all = loadAppPrefs().folded || {};
   const set = new Set(all[state.workspaceId] || []);
-  if (fold ?? !set.has(name)) set.add(name); else set.delete(name);
+  if (fold ?? !set.has(id)) set.add(id); else set.delete(id);
   saveAppPrefs({ folded: { ...all, [state.workspaceId]: [...set] } });
   renderGantt();
 }
 function foldAllStreams(fold) {
   const all = loadAppPrefs().folded || {};
-  saveAppPrefs({ folded: { ...all, [state.workspaceId]: fold ? [...new Set(state.items.map(m => m.stream))] : [] } });
+  saveAppPrefs({ folded: { ...all, [state.workspaceId]: fold ? [...new Set(state.items.map(m => m.stream_id))] : [] } });
   renderGantt();
 }
 
@@ -2314,7 +2317,11 @@ function renderGanttFilters() {
     document.getElementById(id).innerHTML = `<option value="">${all}</option>` + values.map(v =>
       `<option value="${escAttr(v)}" ${v === value ? 'selected' : ''}>${escAttr(v)}</option>`).join('');
   };
-  fill('gf-stream', 'All streams', distinct('stream'), f.stream);
+  const streamsHere = workspaceStreams().filter(l => state.items.some(m => m.stream_id === l.id))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  if (f.stream && !streamsHere.some(l => l.id === f.stream)) streamsHere.push(streamById(f.stream) || { id: f.stream, name: '(deleted stream)' });
+  document.getElementById('gf-stream').innerHTML = '<option value="">All streams</option>' + streamsHere.map(l =>
+    `<option value="${escAttr(l.id)}" ${l.id === f.stream ? 'selected' : ''}>${escAttr(l.name)}</option>`).join('');
   fill('gf-owner', 'All owners', distinct('owner'), f.owner);
   const types = [['', 'All'], ['top', 'Top level'], ['milestone', T.Milestones], ['task', T.Tasks]];
   document.getElementById('gf-type').innerHTML = types.map(([v, label]) =>
@@ -2328,7 +2335,7 @@ function renderGanttFilters() {
   if (document.activeElement !== q) q.value = f.q; // don't disturb the caret while typing
 
   const chips = [
-    f.stream && ['stream', 'Stream', f.stream],
+    f.stream && ['stream', 'Stream', streamName(f.stream) || '(deleted stream)'],
     f.owner && ['owner', 'Owner', f.owner],
     f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : f.type === 'top' ? T.Tops : T.Milestones],
     f.rag.length && ['rag', 'RAG', f.rag.join(', ')],
@@ -2440,7 +2447,7 @@ function showTip(m, e) {
   const when = task
     ? `${fmtShort(m.start)} – ${fmtNice(m.end)} <span class="tip-muted">(${days} days)</span>`
     : fmtNice(m.end);
-  const where = [m.owner, [m.stream, m.substream].filter(Boolean).join(' › ')].filter(Boolean).map(escAttr).join(' · ');
+  const where = [m.owner, [streamName(m.stream_id), m.substream].filter(Boolean).join(' › ')].filter(Boolean).map(escAttr).join(' · ');
   const prog = !task && milestoneProgress(m);
   const progress = prog ? `<div class="tip-row"><b>${prog.pct}% complete</b><span class="tip-muted">${prog.doneDays} of ${prog.total} days · ${prog.doneCount} of ${prog.count} ${prog.count === 1 ? T.task : T.tasks} done</span></div>` : '';
   tip.innerHTML = `
@@ -2509,7 +2516,7 @@ let editing = null; // item being edited; null when adding a new one
 let editOpened = null; // its values when the dialog opened
 let edDeps = [];
 
-const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'stream', 'substream', 'owner', 'start', 'end', 'status', 'parent',
+const EDIT_FIELDS = ['ref', 'title', 'type', 'description', 'stream_id', 'substream', 'owner', 'start', 'end', 'status', 'parent',
   'gitlab_url', 'use_case_url'];
 const URL_FIELDS = { gitlab_url: 'GitLab URL', use_case_url: 'Use case URL' };
 
@@ -2537,7 +2544,7 @@ function openEditDialog(m) {
   const last = state.items.at(-1);
   const today = fmtISO(new Date());
   const v = m || {
-    ref: '', title: '', description: '', stream: last?.stream || 'General', substream: '', owner: '', gitlab_url: '', use_case_url: '',
+    ref: '', title: '', description: '', stream_id: last?.stream_id || workspaceStreams()[0]?.id || '', substream: '', owner: '', gitlab_url: '', use_case_url: '',
     type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, parent: '', deps: [],
   };
   f.type.innerHTML = typeOptions(v.type);
@@ -2546,11 +2553,12 @@ function openEditDialog(m) {
   if (v.parent && !parents.some(p => p.id === v.parent)) parents.push(state.items.find(p => p.id === v.parent));
   f.parent.innerHTML = '<option value="">— none —</option>' +
     parents.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('');
-  f.stream.innerHTML = streamOptions(v.stream);
+  f.stream_id.innerHTML = streamOptions(v.stream_id);
   for (const k of EDIT_FIELDS) f[k].value = v[k] ?? '';
   for (const k of LINK_FIELDS) f[k].closest('label').hidden = linkHidden(k);
-  f.stream.dataset.prev = f.stream.value;
+  f.stream_id.dataset.prev = f.stream_id.value;
   closeNewStream(f);
+  if (!v.stream_id) { pickEdStream(f.stream_id, true); f.newstream.value = m ? '' : 'General'; } // no streams yet: name the first
   edDeps = [...v.deps];
 
   document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : `New ${T.item}`;
@@ -2573,27 +2581,27 @@ function openEditDialog(m) {
   f.title.focus();
 }
 
-// The workspace's existing streams (A–Z), plus a way to start a new one.
+// The workspace's streams (A–Z) by id, plus a way to start a new one.
 function streamOptions(current) {
-  const names = [...new Set([...streamsInOrder(), ...state.streams.filter(l => l.workspace_id === state.workspaceId).map(l => l.name), current])]
-    .filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  return names.map(n => `<option value="${escAttr(n)}">${escAttr(n)}</option>`).join('') +
+  const streams = [...workspaceStreams()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  if (current && !streams.some(l => l.id === current)) streams.push({ id: current, name: streamName(current) || '(deleted stream)' });
+  return streams.map(l => `<option value="${escAttr(l.id)}">${escAttr(l.name)}</option>`).join('') +
     '<option value="" data-new>+ New stream…</option>';
 }
 // Choosing "+ New stream…" swaps the list for a name box; Esc (or leaving it empty) swaps back.
-function pickEdStream(sel) {
-  if (!('new' in sel.selectedOptions[0].dataset)) return (sel.dataset.prev = sel.value);
+function pickEdStream(sel, force) {
+  if (!force && !('new' in sel.selectedOptions[0].dataset)) return (sel.dataset.prev = sel.value);
   const box = sel.form.elements.newstream;
   sel.hidden = true;
   box.hidden = false;
   box.value = '';
-  box.focus();
+  if (!force) box.focus();
 }
 function closeNewStream(f) {
   f.newstream.hidden = true;
   f.newstream.value = '';
-  f.stream.hidden = false;
-  f.stream.value = f.stream.dataset.prev || '';
+  f.stream_id.hidden = false;
+  f.stream_id.value = f.stream_id.dataset.prev || '';
 }
 
 function renderEdDeps() {
@@ -2623,8 +2631,8 @@ async function submitEditDialog(e) {
   const changes = {};
   for (const k of EDIT_FIELDS) changes[k] = f[k].value.trim();
   changes.deps = edDeps;
-  if (!f.newstream.hidden) changes.stream = f.newstream.value.trim();
-  if (!changes.stream) { (f.newstream.hidden ? f.stream : f.newstream).focus(); return (err.textContent = 'Name the new stream.'); }
+  const newStream = f.newstream.hidden ? null : f.newstream.value.trim();
+  if (newStream === '' || (newStream === null && !changes.stream_id)) { (f.newstream.hidden ? f.stream_id : f.newstream).focus(); return (err.textContent = 'Name the new stream.'); }
 
   if (!changes.title) return (err.textContent = 'Title is required.');
   for (const k in URL_FIELDS) {
@@ -2637,20 +2645,21 @@ async function submitEditDialog(e) {
 
   if (editing && !state.items.includes(editing)) return (err.textContent = `Someone else has just deleted this ${T.item}.`);
   const snap = snapshotData();
+  // A new stream is made now, once everything else has checked out (and unmade if the change is dropped).
+  const madeStream = newStream !== null && !streamIdFor(state.workspaceId, newStream, false);
+  if (newStream !== null) changes.stream_id = streamIdFor(state.workspaceId, newStream);
+  const dropped = () => {
+    if (!editing) removeItem(m.id);
+    if (madeStream) { state.streams = state.streams.filter(l => l.id !== changes.stream_id); saveStreams(); }
+  };
   let m = editing;
   if (!m) {
     m = { id: nextId(), workspace_id: state.workspaceId, ...changes, parent: '', deps: [] };
     state.items.push(m);
   }
   const res = await guardChange(() => updateItem(m, changedFrom(changes, editOpened)));
-  if (!res) { // cancelled: the dialog stays open with the change in it
-    if (!editing) removeItem(m.id);
-    return;
-  }
-  if (res.error) {
-    if (!editing) removeItem(m.id);
-    return (err.textContent = res.error);
-  }
+  if (!res) { dropped(); return; } // cancelled: the dialog stays open with the change in it
+  if (res.error) { dropped(); return (err.textContent = res.error); }
   document.getElementById('edit-dialog').close();
   if (res.moved.length) flashMoved([m.id, ...res.moved]);
   rerenderCurrentView();
@@ -2726,7 +2735,7 @@ function setDatalist(id, values) {
 }
 
 function refreshDatalists() {
-  setDatalist('stream-list', state.items.map(m => m.stream));
+  setDatalist('stream-list', workspaceStreams().map(l => l.name));
   setDatalist('substream-list', state.items.map(m => m.substream));
   setDatalist('owner-list', state.items.map(m => m.owner));
   setDatalist('people-list', [...allItems().map(m => m.owner), ...state.workspaces.flatMap(p => [p.owner, p.lead])].sort());
@@ -3416,7 +3425,7 @@ function renderEditor(highlight = [], keepOrder = false) {
       title: `<input data-i="${i}" data-k="title" value="${escAttr(m.title)}" placeholder="Title" ${m.description ? `title="${escAttr(m.description)}"` : ''} />`,
       type: `<select data-i="${i}" data-k="type" class="type-sel type-${m.type}">${typeOptions(m.type)}</select>`,
       description: `<input data-i="${i}" data-k="description" value="${escAttr(m.description)}" placeholder="Description" />`,
-      stream: `<input data-i="${i}" data-k="stream" value="${escAttr(m.stream)}" list="stream-list" placeholder="Stream" />`,
+      stream: `<input data-i="${i}" data-k="stream" value="${escAttr(streamName(m.stream_id))}" list="stream-list" placeholder="Stream" />`,
       substream: `<input data-i="${i}" data-k="substream" value="${escAttr(m.substream)}" list="substream-list" placeholder="Sub-stream" />`,
       owner: `<input data-i="${i}" data-k="owner" value="${escAttr(m.owner)}" list="owner-list" placeholder="Owner" />`,
       gitlab_url: `<input data-i="${i}" data-k="gitlab_url" type="url" value="${escAttr(m.gitlab_url)}" placeholder="https://…" />`,
@@ -3465,7 +3474,11 @@ const pendingDates = new WeakSet(); // date cells typed into but not yet applied
 function syncEditorToState(skip) {
   document.querySelectorAll('#editor-body [data-k]').forEach(el => {
     // A date still being typed is left alone: applyDateEdit moves it, with its dependants, on leaving the field.
-    if (el !== skip && !pendingDates.has(el)) state.items[+el.dataset.i][el.dataset.k] = el.type === 'checkbox' ? (el.checked ? 'yes' : '') : el.value;
+    if (el === skip || pendingDates.has(el)) return;
+    const m = state.items[+el.dataset.i];
+    // the stream cell is typed as a name: an existing stream of the workspace, or a new one
+    if (el.dataset.k === 'stream') { if (el.value.trim() !== streamName(m.stream_id)) m.stream_id = streamIdFor(m.workspace_id, el.value); return; }
+    m[el.dataset.k] = el.type === 'checkbox' ? (el.checked ? 'yes' : '') : el.value;
   });
 }
 
@@ -3671,7 +3684,7 @@ async function applyBulk() {
     done = skipped = 0;
     for (const m of items) {
       if (bulkField === 'parent' && v === m.id) { skipped++; continue; } // can't roll up to itself
-      if (updateItem(m, { [bulkField]: v }).error) skipped++; else done++;
+      if (updateItem(m, bulkField === 'stream' ? { stream_id: streamIdFor(m.workspace_id, v) } : { [bulkField]: v }).error) skipped++; else done++;
     }
     return true;
   });
@@ -5556,13 +5569,13 @@ function wireReports() {
 // Downloads the items currently listed on the Items tab (filters and sort applied), in the
 // milestones.csv columns except that links name items by ref, as Import expects, so the file
 // loads straight back in (into this workspace or another). An item without a ref is named #id.
-const EXPORT_COLUMNS = COLUMNS.map(c => (c === 'parent' ? 'rolls_up_to' : c));
+const EXPORT_COLUMNS = COLUMNS.map(c => (c === 'parent' ? 'rolls_up_to' : c === 'stream_id' ? 'stream' : c)); // streams by name, for people
 function itemsExportCSV(items) {
   const byId = new Map(state.items.map(m => [m.id, m]));
   const name = (id) => { const x = byId.get(id); return x?.ref || `#${id}`; };
   const lines = [EXPORT_COLUMNS.join(',')];
   for (const m of items) {
-    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, m.stream, m.substream, m.owner, m.start, m.end,
+    lines.push([m.id, m.workspace_id, m.ref, m.title, m.type, m.description, streamName(m.stream_id), m.substream, m.owner, m.start, m.end,
       m.status, m.parent ? name(m.parent) : '', m.deps.map(name).join(';'), m.baseline_start, m.baseline_end, m.gitlab_url, m.use_case_url].map(csvEscape).join(','));
   }
   return lines.join('\n') + '\n';
@@ -5831,6 +5844,7 @@ function planImport() {
       }
     } else if (!t) f.status = DEFAULT_STATUS;
     if (!t && !f.stream) f.stream = 'General';
+    if (t && f.stream && f.stream.toLowerCase() === streamName(t.stream_id).toLowerCase()) delete f.stream;
     if (has('parent') && cell('parent')) row.links = { ...row.links, parent: cell('parent') };
     if (has('deps') && cell('deps')) row.links = { ...row.links, deps: readLinks(cell('deps')) };
     row.fileId = cell('id');
@@ -5893,13 +5907,15 @@ async function applyImport() {
       let m = r.target;
       if (!m) {
         m = {
-          id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: '', description: '', stream: 'General',
+          id: nextId(), workspace_id: state.workspaceId, type: 'milestone', ref: '', title: '', description: '', stream_id: '',
           substream: '', owner: '', start: '', end: '', status: DEFAULT_STATUS, parent: '', deps: [],
         };
         state.items.push(m);
         added++;
       } else if (r.action === 'update') updated++;
-      Object.assign(m, r.fields);
+      const { stream, ...fields } = r.fields;
+      Object.assign(m, fields);
+      if (stream !== undefined) m.stream_id = streamIdFor(state.workspaceId, stream);
       itemOf.set(r, m);
     }
     const target = (x) => (x && (itemOf.get(x) || (state.items.includes(x) ? x : null)));
@@ -6022,7 +6038,7 @@ function renderImport() {
     `<th>${escAttr(heads[k])}</th>`).join('')}<th>Links</th><th>Notes</th></tr>`;
   const actLabel = { add: 'Add', update: 'Update', same: 'No change', skip: 'Skip', delete: 'Delete' };
   const cellFor = (r, k) => {
-    const v = k in r.fields ? r.fields[k] : r.target ? r.target[k] : '';
+    const v = k in r.fields ? r.fields[k] : r.target ? (k === 'stream' ? streamName(r.target.stream_id) : r.target[k]) : '';
     const text = k === 'type' ? (v === 'task' ? T.Task : v ? T.Milestone : '') : IMPORT_DATES.includes(k) ? (v ? fmtNice(v) : '') : v;
     return `<td class="${k === 'title' ? 'im-title' : ''} ${r.target && k in r.fields ? 'changed' : ''}">${escAttr(text)}</td>`;
   };
@@ -6034,7 +6050,7 @@ function renderImport() {
       <td><span class="im-act ${r.action === 'same' ? 'skip' : r.action}">${actLabel[r.action]}</span></td>
       ${shown.map(k => cellFor(r, k)).join('')}<td>${escAttr(links(r))}</td><td class="im-notes">${escAttr(r.notes.join('. '))}</td></tr>`).join('')
     + plan.deletes.map(m => `<tr class="delete"><td></td><td><span class="im-act delete">Delete</span></td>${shown.map(k =>
-      `<td>${escAttr(k === 'type' ? typeName(m) : IMPORT_DATES.includes(k) ? (m[k] ? fmtNice(m[k]) : '') : m[k])}</td>`).join('')}<td></td>
+      `<td>${escAttr(k === 'type' ? typeName(m) : IMPORT_DATES.includes(k) ? (m[k] ? fmtNice(m[k]) : '') : k === 'stream' ? streamName(m.stream_id) : m[k])}</td>`).join('')}<td></td>
       <td class="im-notes">Not in the file${reportsFor(m.id).length ? `; its ${count(reportsFor(m.id).length, 'report is', 'reports are')} kept` : ''}</td></tr>`).join('');
 
   const n = (a) => plan.rows.filter(r => r.action === a).length;
@@ -6220,11 +6236,11 @@ function msBucket(status, workspaceId, rg = ragOf(workspaceId)) {
   if (status === rg.def || /^not\s*started$/i.test(status)) return 'notStarted';
   return 'green';
 }
-function milestoneOverview(workspaceId, stream = null) { // stream: only that stream's milestones
+function milestoneOverview(workspaceId, stream = null) { // stream: only that stream's milestones (by id)
   const rg = ragOf(workspaceId);
   const out = { notStarted: 0, green: 0, redAmber: 0, closed: 0, total: 0 };
   for (const m of allItems()) {
-    if (m.workspace_id !== workspaceId || isTask(m) || (stream != null && m.stream !== stream)) continue;
+    if (m.workspace_id !== workspaceId || isTask(m) || (stream != null && m.stream_id !== stream)) continue;
     out.total++;
     out[msBucket(m.status, workspaceId, rg)]++;
   }
@@ -6334,6 +6350,7 @@ function openWorkspaceDialog(p) {
   for (const box of document.querySelectorAll('[data-show-field]')) box.checked = !hidden.includes(box.dataset.showField);
   loadPgStatuses(p);
   loadPgDepLists(p);
+  loadPgStreams(p);
   showPgTab('details');
   document.getElementById('pg-heading').textContent = p ? `Edit ${p.name}` : 'New workspace';
   document.getElementById('pg-submit').textContent = p ? 'Save' : 'Create workspace';
@@ -6489,7 +6506,8 @@ function showPgTab(tab) {
   document.getElementById('pg-panel-details').hidden = tab !== 'details';
   document.getElementById('pg-panel-rag').hidden = tab !== 'rag';
   document.getElementById('pg-panel-deps').hidden = tab !== 'deps';
-  document.getElementById('workspace-dialog').classList.toggle('wide', tab === 'rag');
+  document.getElementById('pg-panel-streams').hidden = tab !== 'streams';
+  document.getElementById('workspace-dialog').classList.toggle('wide', tab === 'rag' || tab === 'streams');
 }
 
 // Check the edited list; returns an error message or null.
@@ -6567,6 +6585,8 @@ async function submitWorkspaceDialog(e) {
   for (const k of Object.keys(DEFAULT_TERMS)) v[k] ||= DEFAULT_TERMS[k];
   const ragErr = checkPgStatuses();
   if (ragErr) { showPgTab('rag'); return (err.textContent = ragErr); }
+  const streamErr = checkPgStreams();
+  if (streamErr) { showPgTab('streams'); return (err.textContent = streamErr); }
   v.status = f.status.value === 'stray' ? pgStrayStatus : pgStatusesSelected?.name ?? activePgStatuses()[0].name;
 
   document.getElementById('workspace-dialog').close();
@@ -6574,11 +6594,14 @@ async function submitWorkspaceDialog(e) {
   if (!pgEditing) state.workspaces.push(p);
   const res = applyPgStatuses(p.id);
   const depRenamed = applyPgDepRenames(p.id);
+  const st = applyPgStreams(p.id);
   Object.assign(p, changedFrom(v, pgOpened), { updated: new Date().toISOString() });
   const saves = [saveWorkspaces(pgEditing ? 'Workspace saved' : 'Workspace created')];
-  if (depRenamed) saves.push(saveRaid());
+  if (depRenamed || st.raid) saves.push(saveRaid());
   if (res.listChanged) saves.push(saveStatuses());
-  if (res.records) saves.push(saveData('', 'Workspace settings'), saveReports());
+  if (st.streams) saves.push(saveStreams());
+  if (st.updates) saves.push(saveUpdates());
+  if (res.records || st.items) saves.push(saveData('', 'Workspace settings'), saveReports());
   if (!pgEditing) {
     await Promise.all(saves);
     return switchWorkspace(p.id, 'editor'); // an empty workspace starts on its items
@@ -6689,8 +6712,8 @@ function wireWorkspaces() {
 // one per program or stream per week (stream blank for the program); the newest is "current".
 // A program's area lead and trend are workspace fields; a stream's are kept in streams.csv.
 
-const UPDATE_COLUMNS = ['id', 'workspace_id', 'stream', 'week_ending', 'status', 'summary', 'author', 'created', 'updated'];
-const STREAM_COLUMNS = ['workspace_id', 'name', 'lead', 'trend'];
+const UPDATE_COLUMNS = ['id', 'workspace_id', 'stream_id', 'week_ending', 'status', 'summary', 'author', 'created', 'updated'];
+const STREAM_COLUMNS = ['id', 'workspace_id', 'name', 'lead', 'trend'];
 
 function rowsToUpdates(rows) {
   if (!rows.length) return [];
@@ -6715,29 +6738,48 @@ function updatesToCSV(updates) {
 }
 const nextUpdateId = () => takeId('updates', () => String(Math.max(0, ...state.updates.map(u => +u.id || 0)) + 1));
 
+// A stream is a record of its own: {id, workspace_id, name, lead, trend}. Items, weekly updates and
+// RAID entries point at it by id, so renaming it keeps everything that belongs to it.
 function rowsToStreams(rows) {
   if (!rows.length) return [];
   const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
   const ids = new Set(state.workspaces.map(p => p.id));
-  return rows.slice(1).map(r => {
+  const out = rows.slice(1).map(r => {
     const o = {};
     for (const k of STREAM_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
     return o;
   }).filter(l => ids.has(l.workspace_id) && l.name);
+  const seen = new Set();
+  return out.filter(l => { if (!/^\d+$/.test(l.id) || seen.has(l.id)) return false; seen.add(l.id); return true; });
 }
 function streamsToCSV(streams) {
   return [STREAM_COLUMNS.join(','), ...streams.map(l => STREAM_COLUMNS.map(k => csvEscape(l[k])).join(','))].join('\n') + '\n';
 }
-// A stream's details; a blank one (not yet stored) when it has none.
-const streamRecord = (workspaceId, name) => state.streams.find(l => l.workspace_id === workspaceId && l.name === name)
-  || { workspace_id: workspaceId, name, lead: '', trend: '' };
+const streamById = (id) => (id ? state.streams.find(l => l.id === id) : undefined);
+const streamName = (id) => streamById(id)?.name || '';
+const workspaceStreams = (workspaceId = state.workspaceId) => state.streams.filter(l => l.workspace_id === workspaceId);
+const nextStreamId = () => takeId('streams', () => String(Math.max(0, ...state.streams.map(l => +l.id || 0)) + 1));
+// The id of the workspace's stream called `name` (two names differing only in case are one stream).
+// When there's no such stream it's created, and streams.csv saved, unless `create` is false. '' for no name.
+function streamIdFor(workspaceId, name, create = true) {
+  name = String(name ?? '').trim();
+  if (!name || !workspaceId) return '';
+  const low = name.toLowerCase();
+  const hit = state.streams.find(l => l.workspace_id === workspaceId && l.name.toLowerCase() === low);
+  if (hit) return hit.id;
+  if (!create) return '';
+  const l = { id: nextStreamId(), workspace_id: workspaceId, name, lead: '', trend: '' };
+  state.streams.push(l);
+  if (dataLoaded) saveStreams();
+  return l.id;
+}
 
-// What a row is about: a program, or one stream of it. `rec` holds its area lead and trend.
+// What a row is about: a program, or one stream of it (by id). `rec` holds its area lead and trend.
 const programSubject = (p) => ({ p, stream: '', rec: p, label: programLabel(p) });
-const streamSubject = (p, name) => ({ p, stream: name, rec: streamRecord(p.id, name), label: `${p.code || p.name} · ${name}` });
+const streamSubject = (p, id) => ({ p, stream: id, rec: streamById(id) || { id, workspace_id: p.id, name: '', lead: '', trend: '' }, label: `${p.code || p.name} · ${streamName(id)}` });
 
-// Weekly updates for a program (stream '') or one of its streams, newest first.
-const updatesFor = (workspaceId, stream = '') => state.updates.filter(u => u.workspace_id === workspaceId && (u.stream || '') === stream)
+// Weekly updates for a program (stream '') or one of its streams (by id), newest first.
+const updatesFor = (workspaceId, stream = '') => state.updates.filter(u => u.workspace_id === workspaceId && (u.stream_id || '') === stream)
   .sort((a, b) => b.week_ending.localeCompare(a.week_ending) || b.updated.localeCompare(a.updated));
 
 // Programs in number order (numbers compared naturally), unnumbered ones last by name.
@@ -6746,15 +6788,18 @@ function programsInOrder() {
     || a.number.localeCompare(b.number, undefined, { numeric: true }) || a.name.localeCompare(b.name));
 }
 // The current workspace's streams in the order the Gantt chart lists them (its Sort setting).
+// The workspace's stream ids as the Gantt chart orders them; streams with no items follow, A–Z.
+// Items whose stream is gone come under '' (shown as no stream).
 function streamsInOrder() {
-  const streams = [], byName = new Map();
+  const streams = [], byId = new Map();
   for (const m of state.items) {
-    let stream = byName.get(m.stream);
-    if (!stream) byName.set(m.stream, stream = { name: m.stream, items: [], subs: [] }), streams.push(stream);
+    let stream = byId.get(m.stream_id);
+    if (!stream) byId.set(m.stream_id, stream = { id: m.stream_id, name: streamName(m.stream_id), items: [], subs: [] }), streams.push(stream);
     stream.items.push({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end) });
   }
   sortStreams(streams);
-  return streams.map(l => l.name);
+  const empty = workspaceStreams().filter(l => !byId.has(l.id)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  return [...streams.map(l => l.id), ...empty.map(l => l.id)];
 }
 
 const isStale = (u) => !u || u.week_ending < addDays(defaultPeriodEnd('Weekly'), -6);
@@ -6770,7 +6815,7 @@ function overviewRow(sub) {
     : '<span class="muted">—</span>');
   const nameCell = sub.forStream
     ? `<td class="ov-prog">${stream
-      ? `<button type="button" class="ov-name" data-open-stream="${escAttr(stream)}" title="Show this stream on the Gantt chart">${escAttr(stream)}</button>`
+      ? `<button type="button" class="ov-name" data-open-stream title="Show this stream on the Gantt chart">${escAttr(streamName(stream))}</button>`
       : '<span class="muted">(No stream)</span>'}</td>`
     : `<td class="ov-num">${p.number ? escAttr(p.number) : '<span class="muted">—</span>'}</td>
       <td class="ov-prog">
@@ -6814,7 +6859,7 @@ function renderOverview() {
 }
 function renderStreamOverview() {
   const p = currentWorkspace();
-  streamRows = renderOverviewTable('streams', streamsInOrder().map(name => ({ ...streamSubject(p, name), forStream: true })), 'stream', 'streams');
+  streamRows = renderOverviewTable('streams', streamsInOrder().map(id => ({ ...streamSubject(p, id), forStream: true })), 'stream', 'streams');
 }
 
 function downloadOverviewCSV(forStream) {
@@ -6823,7 +6868,7 @@ function downloadOverviewCSV(forStream) {
     'Previous weekly RAG', 'Previous week ending', 'Current weekly RAG', 'Current week ending', 'Trend', 'Summary',
     ...MS_BUCKETS.map(([, l]) => `Milestones ${l.toLowerCase()}`)];
   const lines = rows.map(({ sub: { p, stream, rec }, cur, prev, ov }) => [
-    ...(forStream ? [stream] : [p.number, p.name]), rec.lead, ...(forStream ? [] : [p.status]),
+    ...(forStream ? [streamName(stream)] : [p.number, p.name]), rec.lead, ...(forStream ? [] : [p.status]),
     prev?.status, prev?.week_ending, cur?.status, cur?.week_ending, rec.trend,
     mdToText(cur?.summary || ''), ...MS_BUCKETS.map(([k]) => ov[k]),
   ].map(csvEscape).join(','));
@@ -6926,13 +6971,12 @@ async function submitUpdate(e) {
   const v = { week_ending: week, status, summary: f.summary.value.trim(), author: f.author.value.trim(), updated: now };
   if (upEditing && !state.updates.includes(upEditing)) return (err.textContent = 'Someone else has just deleted this update.');
   if (upEditing) Object.assign(upEditing, changedFrom(v, upOpened), { updated: now });
-  else state.updates.push({ id: nextUpdateId(), workspace_id: p.id, stream: stream, created: now, ...v });
+  else state.updates.push({ id: nextUpdateId(), workspace_id: p.id, stream_id: stream, created: now, ...v });
   const saves = [saveUpdates(upEditing ? 'Update saved' : 'Update submitted')];
   const changes = changedFrom({ lead: f.lead.value.trim(), trend: f.trend.value }, upRecOpened);
   if (Object.keys(changes).length) {
     Object.assign(rec, changes);
     if (stream) {
-      if (!state.streams.includes(rec)) state.streams.push(rec);
       saves.push(saveStreams());
     } else {
       p.updated = now;
@@ -6954,10 +6998,10 @@ async function deleteUpdate() {
   await saveUpdates('Update deleted');
 }
 
-// Show one stream on the Gantt chart.
-function openStreamOnGantt(name) {
+// Show one stream (by id) on the Gantt chart.
+function openStreamOnGantt(id) {
   clearGanttFilters();
-  ganttFilter.stream = name;
+  ganttFilter.stream = id;
   switchView('gantt');
 }
 
@@ -6997,7 +7041,7 @@ function wireOverview() {
 // Each workspace keeps a register (raid.csv) of risks (what might happen), issues (what has
 // happened) and dependencies (what the plan needs from others, or others need from it). An entry
 // can be linked to any number of the workspace's items and streams: `links` holds them as
-// `item:<id>` and `stream:<name>`, ;-separated in the file. A link to an item that's since been
+// `item:<id>` and `stream:<id>`, ;-separated in the file. A link to an item that's since been
 // deleted is kept and shown as deleted, as reports are. A risk is rated by likelihood × impact,
 // an issue by its impact. A dependency has its own statuses, a stream, a RAG (one of the
 // workspace's RAG options), and a priority and type from lists set in Workspace settings.
@@ -7022,7 +7066,7 @@ const RAID_KINDS = {
   },
 };
 const RAID_LEVELS = ['Low', 'Medium', 'High'];
-const RAID_COLUMNS = ['id', 'workspace_id', 'kind', 'ref', 'title', 'description', 'stream', 'owner', 'status', 'rag', 'priority', 'dep_type',
+const RAID_COLUMNS = ['id', 'workspace_id', 'kind', 'ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type',
   'likelihood', 'impact', 'due', 'party', 'response', 'links', 'raised', 'created', 'updated'];
 const NOTE_COLUMNS = ['id', 'workspace_id', 'raid_id', 'at', 'by', 'text'];
 // A workspace's dependency priorities (highest first) and types, until it sets its own.
@@ -7119,7 +7163,7 @@ const raidStatusBadge = (r) => `<span class="raid-status raid-status-${r.status.
 function linkInfo(link) {
   const [type, ...rest] = link.split(':');
   const key = rest.join(':');
-  if (type === 'stream') return { type, key, label: key, title: `Stream: ${key}`, live: state.items.some(m => m.stream === key) || state.streams.some(l => l.workspace_id === state.workspaceId && l.name === key) };
+  if (type === 'stream') { const l = streamById(key); return { type, key, label: l?.name || 'Deleted stream', title: `Stream: ${l?.name || '(deleted)'}`, live: !!l && l.workspace_id === state.workspaceId }; }
   const m = itemById(key);
   return { type, key, label: m ? fullLabel(m) : `#${key}`, title: m ? fullLabel(m) : `Deleted ${T.item} #${key}`, live: !!m };
 }
@@ -7131,7 +7175,7 @@ const linkChip = (link, removable) => {
     ? `<span class="${cls}" title="${escAttr(x.title)}">${body}<button type="button" data-rdrm="${escAttr(link)}" title="Remove link">×</button></span>`
     : `<button type="button" class="${cls}" data-raid-go="${escAttr(link)}" title="${escAttr(x.title)}${x.live ? ' — show on the Gantt chart' : ''}" ${x.live ? '' : 'disabled'}>${body}</button>`;
 };
-const streamGo = (name) => (name ? `<button type="button" class="link-btn" data-raid-go="stream:${escAttr(name)}" title="Show this stream on the Gantt chart">${escAttr(name)}</button>` : '<span class="muted">—</span>');
+const streamGo = (id) => (streamById(id) ? `<button type="button" class="link-btn" data-raid-go="stream:${escAttr(id)}" title="Show this stream on the Gantt chart">${escAttr(streamName(id))}</button>` : '<span class="muted">—</span>');
 const noteLine = (n) => `<span class="note-when">${fmtStamp(n.at)}${n.by ? ` · ${escAttr(n.by)}` : ''}</span> ${escAttr(n.text)}`;
 
 /* ---- the register ---- */
@@ -7142,10 +7186,10 @@ function raidMatches(r, ignoreKind) {
   const f = raidFilter;
   if (!ignoreKind && f.kind && r.kind !== f.kind) return false;
   if (f.status === 'open' ? isClosed(r) : f.status === 'done' && !isClosed(r)) return false;
-  if (f.link && !r.links.includes(f.link) && !(f.link === `stream:${r.stream}`)) return false;
+  if (f.link && !r.links.includes(f.link) && !(r.stream_id && f.link === `stream:${r.stream_id}`)) return false;
   const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
-  const hay = [r.ref, r.title, r.description, r.owner, r.party, r.response, r.stream, r.rag, r.priority, r.dep_type, RAID_KINDS[r.kind].one, r.status,
+  const hay = [r.ref, r.title, r.description, r.owner, r.party, r.response, streamName(r.stream_id), r.rag, r.priority, r.dep_type, RAID_KINDS[r.kind].one, r.status,
     ...notesOf(r).map(n => n.text), ...r.links.map(l => { const x = linkInfo(l); return `${x.label} ${x.title}`; })].join(' ').toLowerCase();
   return words.every(w => hay.includes(w));
 }
@@ -7173,7 +7217,7 @@ const RAID_TABLES = {
     ['Ref', '', (r) => (r.ref ? escAttr(r.ref) : dash), 'raid-ref'],
     ['Title', 'raid-title', (r) => raidTitleCell(r), 'raid-title'],
     ['Type', '', (r) => cellOr(r.dep_type)],
-    ['Stream', '', (r) => streamGo(r.stream)],
+    ['Stream', '', (r) => streamGo(r.stream_id)],
     ['Linked to', '', (r) => r.links.map(l => linkChip(l)).join('') || dash, 'raid-links'],
     ['Owner', '', (r) => cellOr(r.owner)],
     ['Priority', '', (r) => ratingPill(raidRating(r))],
@@ -7246,7 +7290,7 @@ function downloadRaidCSV() {
   renderRaid();
   const head = ['Ref', 'Type', 'Title', 'Description', 'Stream', 'Linked to', 'Owner', 'Status', 'RAG', 'Priority', 'Dependency type', 'Likelihood', 'Impact', 'Rating',
     'Due', 'Raised', 'Other party', 'Response', 'Summary notes'];
-  const lines = raidRows.map(r => [r.ref, RAID_KINDS[r.kind].one, r.title, r.description, r.stream, r.links.map(l => linkInfo(l).title).join('; '), r.owner,
+  const lines = raidRows.map(r => [r.ref, RAID_KINDS[r.kind].one, r.title, r.description, streamName(r.stream_id), r.links.map(l => linkInfo(l).title).join('; '), r.owner,
     r.status, r.rag, r.priority, r.dep_type, r.likelihood, r.impact, raidRating(r).label, r.due, r.raised, r.party, r.response,
     notesOf(r).map(n => `${fmtStamp(n.at)}${n.by ? ` (${n.by})` : ''}: ${n.text}`).join('\n')].map(csvEscape).join(','));
   const blob = new Blob(['﻿' + [head.map(csvEscape).join(','), ...lines].join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
@@ -7263,9 +7307,9 @@ function downloadRaidCSV() {
 let rdEditing = null; // entry being edited; null for a new one
 let rdOpened = null;  // it as the dialog showed it, so only what's changed here is saved
 let rdLinks = [];
-const RD_FIELDS = ['ref', 'title', 'description', 'stream', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact', 'due', 'raised', 'party', 'response'];
+const RD_FIELDS = ['ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact', 'due', 'raised', 'party', 'response'];
 // Fields only some kinds have: cleared on saving any other kind.
-const RD_ONLY = { likelihood: ['risk'], impact: ['risk', 'issue'], stream: ['dependency'], rag: ['dependency'], priority: ['dependency'], dep_type: ['dependency'], party: ['dependency'] };
+const RD_ONLY = { likelihood: ['risk'], impact: ['risk', 'issue'], stream_id: ['dependency'], rag: ['dependency'], priority: ['dependency'], dep_type: ['dependency'], party: ['dependency'] };
 
 // Options for a select, keeping a value that isn't in the list so it can't be lost.
 const keepOptions = (list, selected, blank = '—') => `<option value="">${blank}</option>`
@@ -7281,15 +7325,16 @@ function openRaidDialog(r, preset = {}) {
   const kind = r?.kind || preset.kind || raidFilter.kind || 'risk';
   const linkedStream = preset.links?.find(l => l.startsWith('stream:'))?.slice(7) || '';
   const v = r || {
-    kind, ref: nextRaidRef(state.workspaceId, kind), title: '', description: '', stream: linkedStream, owner: '', status: '', rag: ragOf(state.workspaceId).def,
+    kind, ref: nextRaidRef(state.workspaceId, kind), title: '', description: '', stream_id: linkedStream, owner: '', status: '', rag: ragOf(state.workspaceId).def,
     priority: '', dep_type: '', likelihood: 'Medium', impact: 'Medium', due: '', raised: fmtISO(new Date()), party: '', response: '', links: preset.links || [],
   };
   document.getElementById('rd-kind').innerHTML = Object.entries(RAID_KINDS).map(([k, d]) =>
     `<label><input type="radio" name="kind" value="${k}" ${k === v.kind ? 'checked' : ''} /><span>${d.one}</span></label>`).join('');
   f.likelihood.innerHTML = keepOptions(RAID_LEVELS, v.likelihood);
   f.impact.innerHTML = keepOptions(RAID_LEVELS, v.impact);
-  const streams = [...new Set([...streamsInOrder(), ...state.streams.filter(l => l.workspace_id === state.workspaceId).map(l => l.name)])].filter(Boolean);
-  f.stream.innerHTML = keepOptions(streams, v.stream);
+  const streams = streamsInOrder().filter(Boolean);
+  f.stream_id.innerHTML = `<option value="">—</option>` + [...streams, ...(v.stream_id && !streams.includes(v.stream_id) ? [v.stream_id] : [])]
+    .map(id => `<option value="${escAttr(id)}" ${id === v.stream_id ? 'selected' : ''}>${escAttr(streamName(id) || '(deleted stream)')}</option>`).join('');
   f.rag.innerHTML = keepOptions(ragOf(state.workspaceId).names, v.rag);
   f.priority.innerHTML = keepOptions(depList(state.workspaceId, 'dep_priorities'), v.priority);
   f.dep_type.innerHTML = keepOptions(depList(state.workspaceId, 'dep_types'), v.dep_type);
@@ -7330,14 +7375,14 @@ function updateRdKind(status) {
 // Linked items and streams as chips, and a list to add more: whole streams first, then each
 // stream's items.
 function renderRdLinks() {
-  const streams = [...new Set([...streamsInOrder(), ...state.streams.filter(l => l.workspace_id === state.workspaceId).map(l => l.name)])].filter(Boolean);
+  const streams = streamsInOrder().filter(Boolean);
   const free = (l) => !rdLinks.includes(l);
-  const streamOpts = streams.filter(n => free(`stream:${n}`)).map(n => `<option value="stream:${escAttr(n)}">${escAttr(n)} (whole stream)</option>`).join('');
-  const groups = streams.map(n => {
-    const items = state.items.filter(m => m.stream === n && free(`item:${m.id}`)).sort(cmpRef);
-    return items.length ? `<optgroup label="${escAttr(n)}">${items.map(m => `<option value="item:${m.id}">${escAttr(fullLabel(m))}</option>`).join('')}</optgroup>` : '';
+  const streamOpts = streams.filter(id => free(`stream:${id}`)).map(id => `<option value="stream:${escAttr(id)}">${escAttr(streamName(id))} (whole stream)</option>`).join('');
+  const groups = streams.map(id => {
+    const items = state.items.filter(m => m.stream_id === id && free(`item:${m.id}`)).sort(cmpRef);
+    return items.length ? `<optgroup label="${escAttr(streamName(id))}">${items.map(m => `<option value="item:${m.id}">${escAttr(fullLabel(m))}</option>`).join('')}</optgroup>` : '';
   }).join('');
-  const loose = state.items.filter(m => !m.stream && free(`item:${m.id}`)).sort(cmpRef);
+  const loose = state.items.filter(m => !streamById(m.stream_id) && free(`item:${m.id}`)).sort(cmpRef);
   document.getElementById('rd-links').innerHTML = rdLinks.map(l => linkChip(l, true)).join('') +
     `<select id="rd-addlink" class="add-dep"><option value="">+ link ${escAttr(T.item)} or stream</option>
       ${streamOpts ? `<optgroup label="Streams">${streamOpts}</optgroup>` : ''}${groups}
@@ -7487,6 +7532,114 @@ function wirePgDepLists() {
   });
 }
 
+/* ---- Streams tab ---- */
+// pgStreams is the list being edited: { id (null for a new one), orig (name when the dialog opened),
+// name, lead, used (items, updates and RAID entries pointing at it), deleted, replace (the entry
+// what it holds moves to) }. A stream in use is only removed by moving what it holds to another.
+let pgStreams = [];
+
+function streamUsage(workspaceId, id) {
+  const items = allItems().filter(m => m.workspace_id === workspaceId && m.stream_id === id).length;
+  const updates = state.updates.filter(u => u.workspace_id === workspaceId && u.stream_id === id).length;
+  const raid = state.raid.filter(r => r.workspace_id === workspaceId && (r.stream_id === id || r.links.includes(`stream:${id}`))).length;
+  return { items, updates, raid, total: items + updates + raid };
+}
+function loadPgStreams(p) {
+  pgStreams = (p ? workspaceStreams(p.id) : [])
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+    .map(l => ({ id: l.id, orig: l.name, name: l.name, lead: l.lead, used: streamUsage(p.id, l.id), deleted: false, replace: null }));
+  renderPgStreams();
+}
+function renderPgStreams() {
+  const active = pgStreams.filter(x => !x.deleted);
+  const usedText = (u) => (u.total ? [u.items && count(u.items, T.item, T.items), u.updates && count(u.updates, 'update', 'updates'), u.raid && `${u.raid} RAID`].filter(Boolean).join(' · ') : '—');
+  document.getElementById('pg-streams').innerHTML = pgStreams.map((x, i) => (x.deleted ? `
+    <tr class="pg-deleted" data-idx="${i}">
+      <td colspan="3" class="pg-deleted-cell"><s>${escAttr(x.orig)}</s> holds ${usedText(x.used)} — move them to
+        <select data-sreplace="${i}">${active.map(a => `<option value="${pgStreams.indexOf(a)}" ${a === x.replace ? 'selected' : ''}>${escAttr(a.name || '(unnamed)')}</option>`).join('')}</select></td>
+      <td><button type="button" class="link-btn" data-sundo="${i}">Undo</button></td>
+    </tr>` : `
+    <tr data-idx="${i}">
+      <td><input data-sf="name" value="${escAttr(x.name)}" placeholder="Stream name" aria-label="Name" /></td>
+      <td><input data-sf="lead" value="${escAttr(x.lead)}" list="owner-list" placeholder="Area lead" aria-label="Area lead" /></td>
+      <td class="pg-used-cell">${usedText(x.used)}</td>
+      <td><button type="button" class="btn btn-sm btn-ghost" data-sremove="${i}" title="${x.used.total ? 'Remove, moving what it holds to another stream' : 'Remove'}" ${active.length < 2 && x.used.total ? 'disabled' : ''}>✕</button></td>
+    </tr>`)).join('') || '<tr><td colspan="4" class="muted">No streams yet — they’re added here or by giving an item one.</td></tr>';
+  // a removed stream's things go to the first other stream unless another is chosen
+  document.querySelectorAll('#pg-streams [data-sreplace]').forEach(el => {
+    const x = pgStreams[+el.dataset.sreplace];
+    if (!x.replace || x.replace.deleted) x.replace = active[0] || null;
+    el.value = String(pgStreams.indexOf(x.replace));
+  });
+}
+// An error message, or null when the list is sound.
+function checkPgStreams() {
+  const seen = new Set();
+  for (const x of pgStreams) {
+    if (x.deleted) { if (x.used.total && (!x.replace || x.replace.deleted)) return `Choose where the things in “${x.orig}” should go.`; continue; }
+    x.name = x.name.trim();
+    x.lead = x.lead.trim();
+    if (!x.name) return 'Every stream needs a name.';
+    if (seen.has(x.name.toLowerCase())) return `There are two streams called “${x.name}”.`;
+    seen.add(x.name.toLowerCase());
+  }
+  return null;
+}
+// Make the edits: renames and leads, new streams, and removed streams' items, updates and links
+// moved to the chosen stream. Says which files changed.
+function applyPgStreams(workspaceId) {
+  const out = { streams: false, items: false, updates: false, raid: false };
+  for (const x of pgStreams) {
+    if (x.deleted) continue;
+    if (!x.id) {
+      x.id = nextStreamId();
+      state.streams.push({ id: x.id, workspace_id: workspaceId, name: x.name, lead: x.lead, trend: '' });
+      out.streams = true;
+      continue;
+    }
+    const l = streamById(x.id);
+    if (l && (l.name !== x.name || l.lead !== x.lead)) { l.name = x.name; l.lead = x.lead; out.streams = true; }
+  }
+  for (const x of pgStreams) {
+    if (!x.deleted || !x.id) continue;
+    const to = x.used.total ? x.replace.id : '';
+    for (const m of allItems()) if (m.workspace_id === workspaceId && m.stream_id === x.id) { m.stream_id = to; out.items = true; }
+    for (const u of state.updates) if (u.workspace_id === workspaceId && u.stream_id === x.id) { u.stream_id = to; out.updates = true; }
+    for (const r of state.raid) {
+      if (r.workspace_id !== workspaceId) continue;
+      if (r.stream_id === x.id) { r.stream_id = to; out.raid = true; }
+      if (r.links.includes(`stream:${x.id}`)) { r.links = [...new Set(r.links.map(l => (l === `stream:${x.id}` ? `stream:${to}` : l)))]; out.raid = true; }
+    }
+    state.streams = state.streams.filter(l => l.id !== x.id);
+    out.streams = true;
+  }
+  return out;
+}
+function wirePgStreams() {
+  const body = document.getElementById('pg-streams');
+  body.addEventListener('input', (e) => {
+    const f = e.target.dataset.sf;
+    if (f) pgStreams[+e.target.closest('tr').dataset.idx][f] = e.target.value;
+  });
+  body.addEventListener('change', (e) => {
+    if (e.target.dataset.sreplace != null) pgStreams[+e.target.dataset.sreplace].replace = pgStreams[+e.target.value];
+  });
+  body.addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-sremove]'), un = e.target.closest('[data-sundo]');
+    if (rm) {
+      const x = pgStreams[+rm.dataset.sremove];
+      if (!x.id) pgStreams.splice(pgStreams.indexOf(x), 1); // never saved: just drop it
+      else { x.deleted = true; x.replace = null; }
+      renderPgStreams();
+    } else if (un) { pgStreams[+un.dataset.sundo].deleted = false; renderPgStreams(); }
+  });
+  document.getElementById('pg-add-stream').onclick = () => {
+    pgStreams.push({ id: null, orig: null, name: '', lead: '', used: { items: 0, updates: 0, raid: 0, total: 0 }, deleted: false, replace: null });
+    renderPgStreams();
+    document.querySelector('#pg-streams tr:last-child input').focus();
+  };
+}
+
 function wireRaid() {
   document.getElementById('raid-kind').addEventListener('change', (e) => { raidFilter.kind = e.target.value; renderRaid(); });
   document.getElementById('raid-status').onchange = (e) => { raidFilter.status = e.target.value; renderRaid(); };
@@ -7521,6 +7674,7 @@ function wireRaid() {
   document.getElementById('rd-delete').onclick = deleteRaid;
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   wirePgDepLists();
+  wirePgStreams();
 }
 
 /* ---- import (built for SharePoint list exports) ---- */
@@ -7766,10 +7920,10 @@ const noteKey = (t) => t.toLowerCase().replace(/\s+/g, ' ').trim();
 
 // Links: an item by ref, "ref title", title or #id, or a stream by name ("Stream: Design" as
 // Download CSV writes it). `loose` also takes a ref followed by anything. Returns the link, or null.
-function riStreamName(name) {
+// The id of the workspace's stream the file names, or '' when there's no such stream.
+function riStreamId(name) {
   const k = riNorm(name);
-  const all = [...new Set([...streamsInOrder(), ...state.streams.filter(l => l.workspace_id === state.workspaceId).map(l => l.name)])].filter(Boolean);
-  return all.find(n => riNorm(n) === k) || '';
+  return workspaceStreams().find(l => riNorm(l.name) === k)?.id || '';
 }
 function resolveRaidLink(tok, loose) {
   const t = tok.trim();
@@ -7777,7 +7931,7 @@ function resolveRaidLink(tok, loose) {
   let m;
   if ((m = t.match(/^(item|stream):(.+)$/i))) {
     if (m[1].toLowerCase() === 'item') return itemById(m[2].trim()) ? `item:${m[2].trim()}` : null;
-    const n = riStreamName(m[2]);
+    const n = riStreamId(m[2]);
     return n ? `stream:${n}` : null;
   }
   if ((m = t.match(/^#(\d+)$/))) return itemById(m[1]) ? `item:${m[1]}` : null;
@@ -7786,7 +7940,7 @@ function resolveRaidLink(tok, loose) {
   const hit = items.find(x => x.ref && x.ref.toLowerCase() === low) || items.find(x => riNorm(fullLabel(x)) === k)
     || (items.filter(x => riNorm(x.title) === k).length === 1 && items.find(x => riNorm(x.title) === k));
   if (hit) return `item:${hit.id}`;
-  const n = riStreamName(t);
+  const n = riStreamId(t);
   if (n) return `stream:${n}`;
   // "M12 – Build the thing": a ref, then anything.
   const first = loose && t.match(/^(\S+?)[\s:–-]+\S/);
@@ -7942,11 +8096,11 @@ function planRaidImport() {
     for (const k of ['description', 'response']) if (joined(k)) f[k] = joined(k);
 
     // Stream: a dependency's own field; for a risk or issue, a link to the stream.
+    // A stream the workspace doesn't have yet is created when the import is applied (see applyRaidImport).
     const streamRaw = cell('stream');
-    const stream = streamRaw && (riStreamName(streamRaw) || streamRaw);
-    if (streamRaw && !riStreamName(streamRaw)) row.warn.push(`Stream “${streamRaw}” isn't one of this workspace's streams yet`);
-    if (stream && kind === 'dependency') f.stream = stream;
-    else if (stream) row.links.push(`stream:${stream}`);
+    if (streamRaw && !riStreamId(streamRaw)) row.warn.push(`Stream “${streamRaw}” isn't one of this workspace's streams yet, so it will be added`);
+    if (streamRaw && kind === 'dependency') f.stream_id = riStreamId(streamRaw) || `new:${streamRaw}`;
+    else if (streamRaw) row.links.push(riStreamId(streamRaw) ? `stream:${riStreamId(streamRaw)}` : `stream:new:${streamRaw}`);
 
     // Status: in the kind's own words. Blank keeps what's there (carried across a change of kind).
     const st = cell('status');
@@ -8053,12 +8207,16 @@ async function applyRaidImport() {
     if (r && !state.raid.includes(r)) continue; // deleted by someone else meanwhile
     if (!r) {
       r = {
-        id: nextRaidId(), workspace_id: state.workspaceId, kind: row.kind, ref: '', title: '', description: '', stream: '', owner: '', status: '',
+        id: nextRaidId(), workspace_id: state.workspaceId, kind: row.kind, ref: '', title: '', description: '', stream_id: '', owner: '', status: '',
         rag: '', priority: '', dep_type: '', likelihood: '', impact: '', due: '', raised: '', party: '', response: '', links: [], created: now, updated: now,
       };
       state.raid.push(r);
       added++;
     } else if (Object.keys(row.fields).length || row.links.length) updated++;
+    // streams named in the file that the workspace didn't have yet
+    const fresh = (v) => (v.startsWith('new:') ? streamIdFor(state.workspaceId, v.slice(4)) : v);
+    if (row.fields.stream_id) row.fields.stream_id = fresh(row.fields.stream_id);
+    row.links = row.links.map(l => (l.startsWith('stream:') ? `stream:${fresh(l.slice(7))}` : l));
     Object.assign(r, row.fields);
     if (row.links.length) r.links = [...new Set([...r.links, ...row.links])];
     if (row.target && (Object.keys(row.fields).length || row.links.length)) r.updated = now;
@@ -8390,7 +8548,7 @@ function showItemOnGantt(id) {
   if (!m) return;
   switchView('gantt');
   if (!ganttMatches(m)) clearGanttFilters();
-  if (collapsedStreams().has(m.stream)) toggleStream(m.stream, false);
+  if (collapsedStreams().has(m.stream_id)) toggleStream(m.stream_id, false);
   const d = parseDate(m.start), e = parseDate(m.end);
   if (d < state.rangeStart || e > state.rangeEnd) { autoRange(); }
   renderGantt();
@@ -8609,7 +8767,7 @@ function palSearch(q) {
   }
   for (const m of allItems()) {
     const p = workspaceById(m.workspace_id);
-    const s = score(m.ref, m.title, [m.ref, m.title, m.owner, m.stream, m.substream, p?.code, p?.name].join(' ').toLowerCase());
+    const s = score(m.ref, m.title, [m.ref, m.title, m.owner, streamName(m.stream_id), m.substream, p?.code, p?.name].join(' ').toLowerCase());
     if (s >= 0) hits.push({ kind: 'item', m, p, s });
   }
   for (const r of state.raid) {
@@ -8629,7 +8787,7 @@ function renderPalette() {
     if (h.kind === 'item') {
       const rg = ragOf(h.p.id);
       main = `${h.m.ref ? `<b class="ref">${escAttr(h.m.ref)}</b> ` : ''}${escAttr(h.m.title)}`;
-      sub = `${statusPill(h.m.status, rg.map)} <span>${escAttr([h.p.code || h.p.name, h.m.stream, h.m.owner].filter(Boolean).join(' · '))}</span>`;
+      sub = `${statusPill(h.m.status, rg.map)} <span>${escAttr([h.p.code || h.p.name, streamName(h.m.stream_id), h.m.owner].filter(Boolean).join(' · '))}</span>`;
     } else if (h.kind === 'raid') {
       main = `${h.r.ref ? `<b class="ref">${escAttr(h.r.ref)}</b> ` : ''}${escAttr(h.r.title)}`;
       sub = `<span>${escAttr([RAID_KINDS[h.r.kind].one, h.r.status, h.p.code || h.p.name, h.r.owner].filter(Boolean).join(' · '))}</span>`;
@@ -8725,7 +8883,8 @@ function readHash() {
   if (!m || !VIEWS.includes(m[2])) return null;
   const q = new URLSearchParams(m[3] || '');
   const filter = {};
-  for (const k of ['q', 'stream', 'owner']) if (q.has(k)) filter[k] = q.get(k);
+  for (const k of ['q', 'owner']) if (q.has(k)) filter[k] = q.get(k);
+  if (q.has('stream')) filter.streamName = q.get('stream'); // by name, for readable links; matched once the workspace is known
   if (TYPES.includes(q.get('type'))) filter.type = q.get('type');
   if (q.get('rag')) filter.rag = q.get('rag').split(',').filter(Boolean);
   if (q.get('late') === '1') filter.late = true;
@@ -8739,7 +8898,7 @@ function writeHash() {
   if (view === 'gantt') {
     const f = ganttFilter, q = new URLSearchParams();
     if (f.q.trim()) q.set('q', f.q.trim());
-    if (f.stream) q.set('stream', f.stream);
+    if (f.stream) q.set('stream', streamName(f.stream) || f.stream);
     if (f.owner) q.set('owner', f.owner);
     if (f.type) q.set('type', f.type);
     if (f.rag.length) q.set('rag', f.rag.join(','));
@@ -8756,7 +8915,12 @@ async function followHash() {
   const link = readHash();
   if (!link) return;
   if (link.ws && link.ws !== state.workspaceId && workspaceById(link.ws)) await switchWorkspace(link.ws, link.view);
-  if (link.view === 'gantt') { clearGanttFilters(); Object.assign(ganttFilter, link.filter || {}); }
+  if (link.view === 'gantt') {
+    clearGanttFilters();
+    const { streamName: name, ...filter } = link.filter || {};
+    Object.assign(ganttFilter, filter);
+    if (name) ganttFilter.stream = streamIdFor(state.workspaceId, name, false) || name;
+  }
   switchView(link.view);
   if (link.item && itemById(link.item)) showItemOnGantt(link.item);
 }
@@ -8915,10 +9079,19 @@ function setNavCollapsed(collapsed) {
   btn.setAttribute('aria-expanded', !collapsed);
   saveAppPrefs({ navCollapsed: collapsed });
 }
+// The menu can also be hidden altogether; a Menu button in the page header brings it back.
+function setNavHidden(hidden) {
+  document.body.classList.toggle('nav-hidden', hidden);
+  document.getElementById('nav-show').hidden = !hidden;
+  saveAppPrefs({ navHidden: hidden });
+  if (state.rangeStart && isShown('gantt')) renderGantt(); // the chart takes the width freed up
+}
 
 function wireEvents() {
   for (const v of VIEWS) document.getElementById(`nav-${v}`).onclick = () => switchView(v);
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));
+  document.getElementById('nav-hide').onclick = () => setNavHidden(true);
+  document.getElementById('nav-show').onclick = () => setNavHidden(false);
   document.querySelectorAll('[data-png]').forEach(b => { b.onclick = downloadPagePNG; });
   document.getElementById('nav-theme').onclick = () => {
     const next = THEMES[(THEMES.indexOf(loadAppPrefs().theme || 'auto') + 1) % THEMES.length];
@@ -8984,7 +9157,7 @@ function wireEvents() {
   gc.addEventListener('pointerdown', (e) => {
     const g = e.button === 0 && !e.ctrlKey && e.target.closest('.gantt-item');
     const m = g && itemById(g.dataset.id);
-    if (!m || collapsedStreams().has(m.stream)) return;
+    if (!m || collapsedStreams().has(m.stream_id)) return;
     e.preventDefault(); // no text selection while dragging
     drag = { m, g, mode: dragModeAt(g, m, e.clientX), x0: e.clientX, days: 0, active: false };
   });
@@ -8997,7 +9170,7 @@ function wireEvents() {
     if (drag) return;
     const g = e.target.closest('.gantt-item');
     const m = g && itemById(g.dataset.id);
-    gc.style.cursor = m && !collapsedStreams().has(m.stream) && dragModeAt(g, m, e.clientX) !== 'move' ? 'ew-resize' : '';
+    gc.style.cursor = m && !collapsedStreams().has(m.stream_id) && dragModeAt(g, m, e.clientX) !== 'move' ? 'ew-resize' : '';
   });
   gc.tabIndex = 0;
   gc.setAttribute('aria-label', 'Chart: use the arrow keys to move between items and Enter to update one');
@@ -9016,12 +9189,12 @@ function wireEvents() {
   const form = document.getElementById('edit-form');
   form.addEventListener('submit', submitEditDialog);
   form.elements.type.addEventListener('change', updateEdType);
-  form.elements.stream.addEventListener('change', (e) => pickEdStream(e.target));
+  form.elements.stream_id.addEventListener('change', (e) => pickEdStream(e.target));
   form.elements.newstream.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     e.preventDefault(); // keep the dialog open
     closeNewStream(form.elements);
-    form.elements.stream.focus();
+    form.elements.stream_id.focus();
   });
   form.elements.newstream.addEventListener('blur', (e) => { if (!e.target.value.trim()) closeNewStream(form.elements); });
   form.elements.end.addEventListener('input', updateEdType); // keeps a milestone's hidden start in step
@@ -9129,6 +9302,7 @@ async function loadConfig() {
   document.getElementById('row-slider').value = state.rowH;
   const prefs = loadAppPrefs();
   setNavCollapsed(!!prefs.navCollapsed);
+  setNavHidden(!!prefs.navHidden);
   applyTheme();
   if (['all', 'hover', 'none'].includes(prefs.linkMode)) state.linkMode = prefs.linkMode;
   if (prefs.showBaseline === false) state.showBaseline = false;
