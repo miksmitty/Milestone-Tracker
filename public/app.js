@@ -2395,6 +2395,7 @@ function wireMenus() {
     if (!pop.hidden) pop.querySelector('select, input, button')?.focus();
   }));
   document.addEventListener('mousedown', (e) => { if (!e.target.closest('.tb-menu')) closeMenus(); });
+  document.querySelectorAll('.tb-pop-list').forEach(pop => pop.addEventListener('click', (e) => { if (e.target.closest('button')) closeMenus(); }));
   document.addEventListener('keydown', (e) => {
     const open = document.querySelector('[data-menu][aria-expanded="true"]');
     if (e.key === 'Escape' && open) { closeMenus(); open.focus(); }
@@ -4827,10 +4828,11 @@ function renderReports() {
   const due = rptMode === 'due';
   document.getElementById('rp-due').hidden = !due;
   document.getElementById('rp-split').hidden = due;
-  document.querySelector('#view-reports .rp-filters').hidden = due;
+  for (const el of document.querySelectorAll('#view-reports .rp-list-only')) el.hidden = due; // search and preview belong to the list
   document.getElementById('rp-hint').classList.toggle('help-off', due);
   document.getElementById('rp-due-hint').classList.toggle('help-off', !due);
-  for (const id of ['btn-reports-csv', 'rp-count']) document.getElementById(id).hidden = due;
+  document.getElementById('rp-count').hidden = due;
+  document.getElementById('ex-reports').parentElement.hidden = due; // nothing to export from the Due list
   if (due) {
     document.getElementById('btn-rp-orphans').hidden = true;
     return renderDue();
@@ -6692,7 +6694,7 @@ async function deleteWorkspace() {
 
 function wireWorkspaces() {
   document.getElementById('workspace-select').onchange = (e) => switchWorkspace(e.target.value);
-  document.getElementById('btn-new-workspace').onclick = () => openWorkspaceDialog(null);
+  document.querySelectorAll('.btn-new-workspace').forEach(b => { b.onclick = () => openWorkspaceDialog(null); });
   document.getElementById('nav-settings').onclick = () => openWorkspaceDialog(currentWorkspace());
   document.getElementById('workspace-cards').addEventListener('click', (e) => {
     const edit = e.target.closest('[data-edit-workspace]');
@@ -9324,8 +9326,8 @@ function writeHash() {
     if (f.late) q.set('late', '1');
     if (q.toString()) h += `?${q}`;
   }
+  lastHash = h; // remembered even when the address already says so, or the next typed address could be mistaken for ours
   if (h === location.hash) return;
-  lastHash = h;
   history.replaceState(null, '', h);
 }
 

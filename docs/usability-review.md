@@ -120,6 +120,8 @@ Theme · Menu
 
 ## Proposed phases
 
+*Phases 1–3 were done on 28 Oct 2026 (three commits after this review). Phases 4–7 are still to do.*
+
 Each phase is a commit on its own and leaves the app working.
 
 1. **Words and menu** (half a day): rename and regroup the menu, rename Program overview → Portfolio with the cards as its second view, land on the Dashboard, fix `editor` → `items` in URLs (old links still work), settle *Report* vs *Weekly update* in every button and heading, *Status* vs *RAG*.

@@ -130,12 +130,16 @@
           <label title="One row per workspace, with its weekly RAG and summary"><input type="radio" name="pf-mode-table" value="overview" /><span>Table</span></label>
           <label title="A card per workspace"><input type="radio" name="pf-mode-table" value="workspaces" /><span>Cards</span></label>
         </div>
-        <button id="btn-overview-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
-        <button class="btn btn-primary btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
         <span id="overview-count" class="grid-count"></span>
       </div>
-      <div class="toolbar-group toolbar-right">
-        <span class="autosave-note">Use <b>Weekly update</b> on a row to record its weekly RAG and summary</span>
+      <div class="toolbar-actions">
+        <button type="button" class="btn btn-primary btn-new-workspace">+ New workspace</button>
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-overview" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-overview" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="btn-overview-csv" title="Download this table as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button><button type="button" data-png title="Download this page as a PNG image, in the light colours"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download PNG</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="table-wrap">
@@ -173,12 +177,15 @@
   <main id="view-streams" class="view hidden">
     <div class="toolbar">
       <div class="toolbar-group">
-        <button id="btn-streams-csv" class="btn" title="Download this table as a CSV">Download CSV</button>
-        <button class="btn btn-primary btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
         <span id="streams-count" class="grid-count"></span>
       </div>
-      <div class="toolbar-group toolbar-right">
-        <span class="autosave-note">Use <b>Weekly update</b> on a row to record its weekly RAG and summary</span>
+      <div class="toolbar-actions">
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-streams" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-streams" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="btn-streams-csv" title="Download this table as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button><button type="button" data-png title="Download this page as a PNG image, in the light colours"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download PNG</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="table-wrap">
@@ -217,13 +224,6 @@
     <div class="toolbar">
       <div class="toolbar-group">
         <div id="raid-kind" class="mode-seg" role="radiogroup" aria-label="Show"></div>
-        <button id="btn-raid-add" class="btn btn-primary">+ Add</button>
-        <button id="btn-raid-import" class="btn" title="Bring in risks, issues and dependencies from a CSV (such as a SharePoint list export) or cells pasted from a spreadsheet">Import…</button>
-        <button id="btn-raid-csv" class="btn" title="Download the entries shown (filters applied) as a CSV">Download CSV</button>
-        <button class="btn btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
-        <span id="raid-count" class="grid-count"></span>
-      </div>
-      <div class="toolbar-group rp-filters">
         <input id="raid-q" type="search" placeholder="Search title, owner, linked item…" aria-label="Search risks, issues and dependencies" />
         <select id="raid-status" class="tb-select" aria-label="Status">
           <option value="open">Not closed</option>
@@ -231,6 +231,17 @@
           <option value="done">Closed / complete</option>
         </select>
         <span id="raid-link" class="dl-item" hidden></span>
+        <span id="raid-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-actions">
+        <button id="btn-raid-add" class="btn btn-primary">+ Add</button>
+        <button id="btn-raid-import" class="btn" title="Bring in risks, issues and dependencies from a CSV (such as a SharePoint list export) or cells pasted from a spreadsheet">Import…</button>
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-raid" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-raid" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="btn-raid-csv" title="Download the entries shown (filters applied) as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button><button type="button" data-png title="Download this page as a PNG image, in the light colours"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download PNG</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="table-wrap">
@@ -252,10 +263,14 @@
         <select id="ch-since" class="tb-select"></select>
         <span id="ch-count" class="grid-count"></span>
       </div>
-      <div class="toolbar-group toolbar-right">
-        <button class="btn btn-primary btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
-        <button id="ch-copy" class="btn" title="Copy the summary as text (Markdown) to paste into an email or chat">Copy summary</button>
-        <button id="ch-update" class="btn btn-primary" title="Start this week’s program update with the summary">Use in weekly update</button>
+      <div class="toolbar-actions">
+        <button id="ch-update" class="btn btn-primary" title="Start this week’s weekly update with the summary">Use in weekly update</button>
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-changes" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-changes" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="ch-copy" title="Copy the summary as text (Markdown) to paste into an email or chat"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M13 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/></svg> Copy summary</button><button type="button" data-png title="Download this page as a PNG image, in the light colours"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download PNG</button>
+          </div>
+        </div>
       </div>
     </div>
     <div id="ch-body" class="ch-body"></div>
@@ -266,16 +281,21 @@
   <!-- ============ DATE HISTORY ============ -->
   <main id="view-dates" class="view hidden">
     <div class="toolbar">
-      <div class="toolbar-group rp-filters">
-        <input id="dl-q" type="search" placeholder="Search item, person or note…" aria-label="Search the date history" />
+      <div class="toolbar-group">
+        <input id="dl-q" type="search" placeholder="Search item, person or note…" aria-label="Search the date log" />
         <select id="dl-who" class="tb-select" aria-label="Changed by"></select>
         <label class="check" title="Include changes to the baseline dates"><input type="checkbox" id="dl-baseline" /> Baseline</label>
         <label class="check" title="Include the dates items had when logging began"><input type="checkbox" id="dl-started" /> Starting dates</label>
         <span id="dl-item" class="dl-item" hidden></span>
         <span id="dl-count" class="grid-count"></span>
       </div>
-      <div class="toolbar-group toolbar-right">
-        <button id="dl-csv" class="btn" title="Download the changes shown (filters applied) as a CSV">Download CSV</button>
+      <div class="toolbar-actions">
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-dates" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-dates" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="dl-csv" title="Download the changes shown (filters applied) as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="table-wrap">
@@ -296,11 +316,10 @@
           <label title="One row per workspace, with its weekly RAG and summary"><input type="radio" name="pf-mode-cards" value="overview" /><span>Table</span></label>
           <label title="A card per workspace"><input type="radio" name="pf-mode-cards" value="workspaces" /><span>Cards</span></label>
         </div>
-        <button id="btn-new-workspace" class="btn btn-primary">+ New workspace</button>
         <span id="workspace-count" class="grid-count"></span>
       </div>
-      <div class="toolbar-group toolbar-right">
-        <span class="autosave-note">Open a workspace to see its dashboard, plan, items and reports</span>
+      <div class="toolbar-actions">
+        <button type="button" id="btn-new-workspace" class="btn btn-primary btn-new-workspace">+ New workspace</button>
       </div>
     </div>
     <div id="workspace-cards" class="prog-grid"></div>
@@ -316,8 +335,13 @@
         <select id="dash-horizon" class="tb-select" aria-label="How far ahead Coming up and Due in look"></select>
         <span id="dash-asof" class="grid-count"></span>
       </div>
-      <div class="toolbar-group toolbar-right">
-        <button class="btn btn-primary btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
+      <div class="toolbar-actions">
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-dash" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-dash" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" data-png title="Download this page as a PNG image, in the light colours"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download PNG</button>
+          </div>
+        </div>
       </div>
     </div>
     <div id="dash-grid" class="dash-grid"></div>
@@ -449,13 +473,13 @@
         <button id="btn-undo" class="btn" hidden>
           <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5 4 8.5 7.5 12"/><path d="M4 8.5h8a4 4 0 0 1 0 8H9"/></svg> Undo
         </button>
-        <button id="btn-link" class="btn btn-icon" title="Copy a link to this chart with its filters" aria-label="Copy link">
-          <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 11.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M11.5 8.5a3.5 3.5 0 0 0-5 0L4 11a3.5 3.5 0 0 0 5 5l1-1"/></svg>
-        </button>
-        <button id="btn-gantt-add" class="btn">+ Add <span data-term="item">item</span></button>
-        <button id="btn-png" class="btn btn-primary" title="Download the chart as a PNG image">
-          <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG
-        </button>
+        <button id="btn-gantt-add" class="btn btn-primary">+ Add <span data-term="item">item</span></button>
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-plan" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-plan" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="btn-png" title="Download the chart as a PNG image, in the light colours"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download PNG</button><button type="button" id="btn-link" title="Copy a link to this chart with its filters"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 11.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M11.5 8.5a3.5 3.5 0 0 0-5 0L4 11a3.5 3.5 0 0 0 5 5l1-1"/></svg> Copy link</button>
+          </div>
+        </div>
       </div>
       <div id="gf-chips" class="gbar-chips" hidden></div>
     </div>
@@ -490,14 +514,19 @@
           <label title="Just RAG and dates — the things that change week to week"><input type="radio" name="grid-mode" value="quick" /><span>Quick update</span></label>
           <label title="Every field, including title, streams and links"><input type="radio" name="grid-mode" value="full" /><span>All fields</span></label>
         </div>
-        <button id="btn-add" class="btn btn-primary">+ Add <span data-term="item">item</span></button>
         <span id="grid-count" class="grid-count"></span>
         <button id="btn-clear-filters" class="btn btn-ghost" hidden>Clear filters</button>
-      </div>
-      <div class="toolbar-group toolbar-right">
         <span class="autosave-note">Changes save automatically</span>
+      </div>
+      <div class="toolbar-actions">
+        <button id="btn-add" class="btn btn-primary">+ Add <span data-term="item">item</span></button>
         <button id="btn-items-import" class="btn" title="Bring in a list from a CSV file or cells pasted from a spreadsheet">Import…</button>
-        <button id="btn-items-csv" class="btn" title="Download the items shown (filters and sort applied) as a CSV">Download CSV</button>
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-items" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-items" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="btn-items-csv" title="Download the items shown (filters and sort applied) as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button>
+          </div>
+        </div>
         <button id="btn-reload" class="btn btn-ghost" title="Reload the data, e.g. after editing it in a spreadsheet">Reload</button>
       </div>
     </div>
@@ -530,15 +559,20 @@
           <label title="Every report in this workspace"><input type="radio" name="rp-mode" value="all" /><span>All reports</span></label>
           <label title="What still needs a report this period, by owner"><input type="radio" name="rp-mode" value="due" /><span>Due <b id="rp-due-count" class="seg-count"></b></span></label>
         </div>
-        <button id="btn-new-report" class="btn btn-primary">+ New report</button>
-        <button id="btn-reports-csv" class="btn" title="Download the reports shown (filters applied) as a CSV">Download CSV</button>
+        <input id="rpf-q" type="search" class="rp-list-only" placeholder="Search report text…" aria-label="Search the reports" />
+        <button id="rpf-clear" class="btn btn-ghost" hidden>Clear filters</button>
+        <label class="check rp-list-only" title="Show the selected report beside the list"><input type="checkbox" id="rp-preview-toggle" /> Preview</label>
         <span id="rp-count" class="grid-count"></span>
         <button id="btn-rp-orphans" class="btn btn-danger" hidden></button>
       </div>
-      <div class="toolbar-group rp-filters">
-        <input id="rpf-q" type="search" placeholder="Search report text…" />
-        <button id="rpf-clear" class="btn btn-ghost" hidden>Clear filters</button>
-        <label class="check" title="Show the selected report beside the list"><input type="checkbox" id="rp-preview-toggle" /> Preview</label>
+      <div class="toolbar-actions">
+        <button id="btn-new-report" class="btn btn-primary">+ New report</button>
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-reports" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-reports" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="btn-reports-csv" title="Download the reports shown (filters applied) as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button>
+          </div>
+        </div>
       </div>
     </div>
     <div id="rp-split" class="rp-split">

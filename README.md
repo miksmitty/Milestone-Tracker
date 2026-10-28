@@ -14,7 +14,7 @@ No `npm install` needed — plain Node (18+) and vanilla JS.
 
 Always open the app through `node server.js`: it serves both the page and the CSV data, so opening `index.html` as a file or from another web server won't load anything. It works behind a proxy that serves it under a path (e.g. `https://host/proxy/3100/`), and reads CSVs re-saved by Excel (semicolon separated, Windows encoding or with a byte order mark); they are written back as UTF-8 CSV. If data doesn't load, the app shows why and can't be edited until it does (so a half-loaded page never saves over your files); the server's console says more. After updating the app, restart `node server.js` so it knows about any new data files.
 
-**Date log:** every change to an item's dates is added to `date-changes.csv` (see **Date history** below).
+**Date log:** every change to an item's dates is added to `date-changes.csv` (see **Date log** below).
 
 **Backups:** the first time each CSV is saved on a given day, the server copies the day's starting version to `backups/` (e.g. `backups/reports.2026-09-29.csv`), keeping the newest 30 per file. To undo a bad day, copy one back over the CSV and reload.
 
@@ -65,7 +65,7 @@ Changes show when the page is reloaded; there's no need to restart the server. I
 
 ## Workspaces
 
-Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Program overview**, **All workspaces**, a workspace switcher (with a ⚙ for **Workspace settings**), and the current workspace's **Dashboard**, **Gantt chart**, **Items**, **Reports** (with a count of reports due), **What changed**, **Date history** and **Stream overview**. At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, and **Collapse** shrinks the menu to icons and **Hide** removes it altogether (a **Menu** button at the top of the page brings it back); the app remembers the open workspace, view, theme and menu state per browser.
+Everything belongs to a **workspace**. The left-hand menu is in three groups: **Find…**; **Portfolio** (every workspace, as a table or as cards); the **Workspace** group, with a workspace switcher (and a ⚙ for **Workspace settings**) and the current workspace's **Dashboard**, **Plan** (the Gantt chart), **Items**, **Reports** (with a count of reports due), **Risks & issues** and **Streams**; and **History**, with **What changed** and **Date log**. A **?** beside each page's title opens a short note on what the page is for. Every page's toolbar follows the same pattern: what to look at on the left (a switch, search, filters, a count), what to do on the right (the page's main action, **Import…** and an **Export** menu for CSV, PNG, copying). At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, **Collapse menu** shrinks the menu to icons and **Hide menu** removes it altogether (a **Menu** button at the top of the page brings it back); the app remembers the open workspace, view, theme and menu state per browser. A fresh browser opens on the Dashboard.
 
 ### Find (⌘K)
 
@@ -73,13 +73,13 @@ Everything belongs to a **workspace**. The left-hand menu has **Find…**, **Pro
 
 ### Links
 
-The address bar says where you are, so a view can be bookmarked or sent to someone: the workspace, the view and, on the Gantt chart, its search and filters (e.g. `#/ws/1/gantt?stream=Delivery&rag=Red,Amber&late=1`). The link button on the Gantt toolbar copies it. Adding `&item=12` opens the chart on item 12.
+The address bar says where you are, so a view can be bookmarked or sent to someone: the workspace, the view and, on the plan, its search and filters (e.g. `#/ws/1/gantt?stream=Delivery&rag=Red,Amber&late=1`). **Export → Copy link** on the plan copies it. Addresses from before the pages were renamed (`#/overview`, `#/ws/1/editor`) still work. Adding `&item=12` opens the chart on item 12.
 
 ### Undo
 
 Deleting (items, reports, weekly updates, a whole workspace), importing, bulk edits, dragging on the chart, quick updates, one-click RAG changes and setting a baseline all happen straight away, and the message at the foot of the window offers **Undo**; so does ⌘/Ctrl+Z when you're not typing in a box. Undo puts back what that change altered and saves it; anything changed since, by you or someone else, is kept. Closing a form with unsaved changes still asks first, since those changes aren't saved anywhere yet.
 
-**All workspaces** shows a card per workspace: its RAG, code, program number, owner and area lead, trend, timeline, last report, a RAG breakdown of its items, its milestone overview and counts. Click a card to open it, **Edit** to change it, or **+ New workspace**. A workspace has:
+**Portfolio → Cards** shows a card per workspace: its RAG, code, program number, owner and area lead, trend, timeline, last report, a RAG breakdown of its items, its milestone overview and counts. Click a card to open its dashboard, **Edit** to change it, or **+ New workspace**. A workspace has:
 
 - **Name** (required, unique), **Program number** (optional, unique, e.g. `101`), **Code** (e.g. `PLT`, shown beside the name), **Description**
 - **Owner**, **Area lead**, **Overall RAG** and **Trend** (Improving, Stable or Declining)
@@ -90,9 +90,9 @@ Deleting (items, reports, weekly updates, a whole workspace), importing, bulk ed
 
 **Dashboard** answers "how is this workspace doing?" on one page, as of today:
 
-- **At a glance** — the workspace's overall RAG and trend, owner, lead and dates, and its latest weekly update (flagged when there's none for this week); **Update** records one.
+- **At a glance** — the workspace's overall RAG and trend, owner, lead and dates, and its latest weekly update (flagged when there's none for this week); **Weekly update** records one.
 - **Progress** — the page's headline number: the share of all task-days that are complete, against the share of the plan's time that has gone (the *today* marker on the bar), and how far ahead of or behind the time it is.
-- **Tiles** — milestones closed, items overdue (and late starts), items due within the chosen horizon, reports due this period, open risks and issues (and how many are rated High), open dependencies (blocked / at risk) and the number of date changes in the last 30 days. Each opens the Gantt chart, the register or the reports showing just those things.
+- **Tiles** — milestones closed, items overdue (and late starts), items due within the chosen horizon, reports due this period, open risks and issues (and how many are rated High), open dependencies (blocked / at risk) and the number of date changes in the last 30 days. Each opens the plan, the register or the reports showing just those things.
 - **Where things stand** — a stacked bar per kind of item (top level milestones, milestones, tasks) by RAG. **By stream** — the same per stream, with the stream's latest weekly RAG beside its name.
 - **Weekly RAG** — the last 12 weeks of weekly updates as a cell per week for the program and each stream that has them; a cell opens that week's update.
 - **Against the baseline** — how far each baselined item's end date has moved from its baseline, later to the right (red) and earlier to the left (blue).
@@ -100,24 +100,24 @@ Deleting (items, reports, weekly updates, a whole workspace), importing, bulk ed
 - **Open items by owner** — who holds the open items, and how many of theirs are overdue.
 - **Coming up** — what's overdue and what falls due within the horizon, soonest first. **Risks, issues & dependencies** — the open ones that matter most, by rating. **Latest reports** — the reports written most recently.
 
-The **Coming up** selector (next 14, 30, 60 or 90 days) sets how far ahead the dashboard looks, and is remembered per browser. Every bar, cell and count is a way in: click one to see those items on the Gantt chart (with the filters set), the risk in the register, or the report. **Table** on a chart shows its numbers as a table instead, so nothing depends on colour. The charts use the workspace's own RAG colours. **PNG** downloads the page as an image.
+The **Coming up** selector (next 14, 30, 60 or 90 days) sets how far ahead the dashboard looks, and is remembered per browser. Every bar, cell and count is a way in: click one to see those items on the plan (with the filters set), the risk in the register, or the report. **Table** on a chart shows its numbers as a table instead, so nothing depends on colour. The charts use the workspace's own RAG colours. **Export → Download PNG** saves the page as an image.
 
-### Program overview
+### Portfolio
 
-**Program overview** lists every workspace as a program in a table, one row per program, in program number order:
+**Portfolio → Table** lists every workspace in a table, one row per workspace, in program number order (**Cards** shows the same workspaces as cards, above):
 
-- **Program no.**, **Program** (click to open its Gantt chart; its overall RAG is shown underneath) and **Area lead**
+- **No.**, **Workspace** (click to open its dashboard; its overall RAG is shown underneath) and **Area lead**
 - **Previous weekly RAG** and **Current weekly RAG**: from the two most recent weekly updates, with their week-ending dates. The date turns red when there's no update for this week yet
 - **Trend**, shown as an arrow (↑ improving, → stable, ↓ declining; hover for the word), and the **summary of last week's progress** (key points for management) from the latest update
 - **Milestones overview**: the program's milestones counted as **Not started**, **Green**, **Red/Amber**, **Closed** and **Total**. Done statuses (named or described as complete) are Closed, statuses that need a get to green plan (Amber and Red as standard) are Red/Amber, the default status is Not started, and anything else counts as Green, so the four add up to the total. A totals row sums every program
 
-Each count in the milestones overview (here, on the stream overview and on the workspace cards) opens the Gantt chart showing just those milestones. **PNG** downloads the table as an image at 2× resolution, titled and dated, in the light colours and without the Update buttons; the stream overview and **What changed** have the same button.
+Each count in the milestones overview (here, on the stream overview and on the workspace cards) opens the plan showing just those milestones. **Export → Download PNG** saves the table as an image at 2× resolution, titled and dated, in the light colours and without the Weekly update buttons; **Streams** and **What changed** have the same.
 
-**Update** on a row records that program's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend, summary (with formatting) and area lead. If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one; the trend and area lead are saved to the workspace. **Download CSV** saves the table.
+**Weekly update** on a row records that workspace's weekly update: the week ending (defaults to this Friday), the weekly RAG, trend, summary (with formatting) and area lead. If the week already has an update it's opened for editing; a new one starts from last week's RAG, and the previous update is shown for reference. The trend is suggested from the change in RAG since last week until you pick one; the trend and area lead are saved to the workspace. **Export → Download CSV** saves the table.
 
-### Stream overview
+### Streams
 
-**Stream overview** is the same table for the current workspace, one row per stream in the order the Gantt chart lists them: **Stream** (click to show just that stream on the Gantt chart), **Area lead**, **Previous / Current weekly RAG**, **Trend**, the **summary** and the **milestones overview** of that stream's milestones, with a totals row that matches the program's. Each stream has its own weekly updates, area lead and trend, recorded with **Update** exactly as for a program.
+**Streams** is the same table for the current workspace, one row per stream in the order the plan lists them: **Stream** (click to show just that stream on the plan), **Area lead**, **Previous / Current weekly RAG**, **Trend**, the **summary** and the **milestones overview** of that stream's milestones, with a totals row that matches the program's. Each stream has its own weekly updates, area lead and trend, recorded with **Weekly update** exactly as for a workspace.
 
 ### Streams
 
@@ -139,20 +139,20 @@ Files from before streams had ids (a `stream` column naming the stream on each i
 
 ### What changed
 
-**What changed** compares the workspace with how it stood at the start of an earlier day: RAG changes (worst first), dates that moved (by how many days, slips first), items added and removed, and reports written or updated since. Click an item to see it on the Gantt chart. It defaults to about a week ago. The comparison comes from the daily backups (see **Backups** above), so the days you can pick are the days the items file changed, up to 30 back; on a new install there's nothing to compare with until the next day.
+**What changed** compares the workspace with how it stood at the start of an earlier day: RAG changes (worst first), dates that moved (by how many days, slips first), items added and removed, and reports written or updated since. Click an item to see it on the plan. It defaults to about a week ago. The comparison comes from the daily backups (see **Backups** above), so the days you can pick are the days the items file changed, up to 30 back; on a new install there's nothing to compare with until the next day.
 
 The page ends with a **summary** of the changes. **Copy summary** copies it as text (Markdown) for an email or chat, and **Use in weekly update** starts the program's weekly update with it.
 
-### Date history
+### Date log
 
-Every change to an item's dates is logged: its start and end, and its baseline. **Date history** lists them for the workspace, newest first:
+Every change to an item's dates is logged: its start and end, and its baseline. **Date log** lists them for the workspace, newest first:
 
 - **When** and **Who**: the time of the save, and who made it. There's no sign-in yet, so **Who** is blank; once the app is behind a login, `changedBy()` in server.js returns the user's login ID and it's recorded with every change (on the server, so a browser can't claim to be someone else)
-- **Item**: its ref and title at the time (click to see it on the Gantt chart)
+- **Item**: its ref and title at the time (click to see it on the plan)
 - **Change**: from and to, with how many days it moved (a milestone's single date shows as one change)
-- **How**: where the change was made (*Quick update panel*, *Dragged on the Gantt chart*, *Items table*, *Edit dialog*, *Import*, *Undo*, *Baseline*, …) and the message shown at the time. A label marks changes that weren't made to the item directly: **Knock-on** (it moved because something it depends on moved), **Added**, **Deleted**, **Edited outside the app** and **Logging started** (the dates each item had when the log began)
+- **How**: where the change was made (*Quick update panel*, *Dragged on the plan*, *Items table*, *Edit dialog*, *Import*, *Undo*, *Baseline*, …) and the message shown at the time. A label marks changes that weren't made to the item directly: **Knock-on** (it moved because something it depends on moved), **Added**, **Deleted**, **Edited outside the app** and **Logging started** (the dates each item had when the log began)
 
-Search by item, person or note, pick a person (once logins are recorded), and tick **Baseline** or **Starting dates** to include those. **Date history** in an item's quick update panel or edit dialog shows just that item. **Download CSV** saves the changes shown.
+Search by item, person or note, pick a person (once logins are recorded), and tick **Baseline** or **Starting dates** to include those. **Date log** in an item's quick update panel or edit dialog shows just that item. **Export → Download CSV** saves the changes shown.
 
 The log is kept by the server, not the browser: each time milestones.csv is saved it's compared with the file it replaces, so no way of changing a date can skip the log. Edits made to milestones.csv outside the app (in a spreadsheet, say) are noticed and logged, without a name, the next time the app reads or saves the file, or when the server starts. The log lives in [date-changes.csv](date-changes.csv), one row per date field changed, and is only ever added to — the one exception is **Clear history** (below), which empties one workspace's part of it:
 
@@ -162,7 +162,7 @@ id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 
 #### Starting the history afresh
 
-Deleting items (demo or test data, say) leaves them in the history on purpose: Date history keeps their changes and deletion, and What changed lists them as removed. To start a workspace's history again, use **Workspace settings → Clear history…** (it asks first, and can't be undone). It's the one thing that rewrites the log: the workspace's rows are taken out of date-changes.csv, which then starts again from its items' dates now (*Logging started*, via *History cleared*), and in every daily copy in `backups/` the workspace's items, reports and updates are replaced with today's, so What changed shows no change before today. Other workspaces keep their history. Log ids carry on from where they were, so none is reused.
+Deleting items (demo or test data, say) leaves them in the history on purpose: the Date log keeps their changes and deletion, and What changed lists them as removed. To start a workspace's history again, use **Workspace settings → Clear history…** (it asks first, and can't be undone). It's the one thing that rewrites the log: the workspace's rows are taken out of date-changes.csv, which then starts again from its items' dates now (*Logging started*, via *History cleared*), and in every daily copy in `backups/` the workspace's items, reports and updates are replaced with today's, so What changed shows no change before today. Other workspaces keep their history. Log ids carry on from where they were, so none is reused.
 
 ### Risks, issues & dependencies
 
@@ -177,8 +177,8 @@ Deleting items (demo or test data, say) leaves them in the history on purpose: D
 Each entry can be **linked to any number of items and whole streams** of its workspace, and an item or stream can have any number of entries linked to it. Pick them from **Linked to** in the entry's dialog (streams first, then each stream's items); click a link in the register to see it on the Gantt chart.
 
 - **Rating**: a risk's is likelihood × impact (6–9 is *High*, 3–4 *Medium*, 1–2 *Low*); an issue's is its impact, a dependency's its priority. The register lists blocked and at-risk entries first and closed or complete ones last, then highest rated and soonest due. A due date in red has passed while the entry is still open
-- Filter by type, by status (*Not closed* by default) or by searching any text, including notes and what an entry is linked to. Showing **Dependencies** alone switches to their own columns: type, stream, priority, RAG, status and the latest note. **Download CSV** saves the entries shown, with all their notes
-- **Risks & issues** in an item's edit dialog opens the register showing just what's linked to that item (with the number open), and **+ Add** there links the new entry to it. An item's hover card on the Gantt chart says what's open against it
+- Filter by type, by status (*Not closed* by default) or by searching any text, including notes and what an entry is linked to. Showing **Dependencies** alone switches to their own columns: type, stream, priority, RAG, status and the latest note. **Export → Download CSV** saves the entries shown, with all their notes
+- **Risks & issues** in an item's edit dialog opens the register showing just what's linked to that item (with the number open), and **+ Add** there links the new entry to it. An item's hover card on the plan says what's open against it
 - The menu shows how many entries are open in the workspace, and **Find (⌘K)** searches them too
 - A link to an item or stream that's since been deleted is kept and shown struck through; a renamed stream keeps its links
 
@@ -200,7 +200,7 @@ A workspace's own priority and dependency type lists are kept in workspaces.csv 
 
 **Workspace settings → RAG options** sets the RAG statuses a workspace uses. Every workspace starts with the standard five: Green (on track), Amber (at risk), Red (off track), Complete and Not Started, with Amber and Red needing a get to green plan and new items starting at Not Started. For each status you can set:
 
-- **Colour**: used for the Gantt chart shapes and bars, the RAG buttons, pills and the workspace cards
+- **Colour**: used for the plan's shapes and bars, the RAG buttons, pills and the workspace cards
 - **Name** and **Meaning**: shown in the **Gantt key** as “Name — meaning”
 - **Get to green plan**: reports at this status must include one
 - **Default**: the status new items start at
@@ -238,18 +238,18 @@ id,workspace_id,ref,title,type,description,stream_id,substream,owner,start,end,r
 - **type**: `top` (a top level milestone: one date, under change control — anything that would move, delete or retype it asks for confirmation first — drawn as a diamond in a ring), `milestone` (one date, drawn as a diamond) or `task` (a start and end date, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to its end date. Files without a type column still load: a start before the end makes a task, otherwise a milestone. Older files with a `top_level` column (yes/no) and a `shape` column still load: top level milestones become `top`, and shape is ignored
 - **start / end**: `YYYY-MM-DD`. A milestone's start and end are always the same, and **changing either one moves the milestone**. A task's dates are inclusive, so its bar runs to the end of its end date, and a one-day task can start and end on the same day
 - **rag**: one of the workspace's RAG options (by default `Green` | `Amber` | `Red` | `Complete` | `Not Started`). Matching ignores case; a status that isn't in the list is kept and shown in grey. Files with the older `status` column still load
-- **stream_id**: the item's stream (`id` in streams.csv; see **Streams**). An older file or backup with a `stream` column naming the stream still loads, matched by name. **Download CSV** writes the stream's name, as Import expects
+- **stream_id**: the item's stream (`id` in streams.csv; see **Streams**). An older file or backup with a `stream` column naming the stream still loads, matched by name. **Export → Download CSV** writes the stream's name, as Import expects
 - **substream**: free text — each distinct value becomes a nested sub-stream within the stream
 - **parent**: id of the milestone this item rolls up to (the milestone can't fall before it finishes)
 - **depends_on**: `;`-separated ids this item depends on (finish-to-start)
-- **baseline_start / baseline_end**: the dates recorded by **View → Baseline → Set from current dates** on the Gantt chart, to measure slippage against (blank until a baseline is set). Files without these columns still load
+- **baseline_start / baseline_end**: the dates recorded by **View → Baseline → Set from current dates** on the plan, to measure slippage against (blank until a baseline is set). Files without these columns still load
 
 Changing an item's end date in the **Items** screen shifts everything downstream of it by the same number of days; anything that would then start before a predecessor finishes is pushed later. Circular dependencies are rejected. The old `name,date,rag` CSV format still loads.
 
 RAG and dates change far more often than anything else, so they are the quickest to update:
 
-- **Gantt chart**: drag an item to move it, or drag either end of a task's bar to change its start or end (see **Gantt chart** below). Or click (or right-click) an item to open the quick update panel, which opens beside it. Change its RAG, switch it between milestone and task, or change its dates, then **Save** (or Enter) — nothing changes until you do, and **Cancel** / Esc throws the changes away. Switching the type back and forth keeps both dates, and moving a milestone's date keeps the task's length if you switch back. Clicking away with unsaved changes gives the panel a nudge instead of losing them. The panel says how many dependent items will move. From there you can also *Provide report*, see its *Reports* or *Edit details…* for everything else.
-- **Items tab → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. The current RAG shows as a pill and the others as dots (hover for the name): click one to set it, or edit any cell. An end date in red means the item is overdue. Switch to **All fields** for streams, links and so on.
+- **Plan**: drag an item to move it, or drag either end of a task's bar to change its start or end (see **Plan** below). Or click (or right-click) an item to open the quick update panel, which opens beside it. Change its RAG, switch it between milestone and task, or change its dates, then **Save** (or Enter) — nothing changes until you do, and **Cancel** / Esc throws the changes away. Switching the type back and forth keeps both dates, and moving a milestone's date keeps the task's length if you switch back. Clicking away with unsaved changes gives the panel a nudge instead of losing them. The panel says how many dependent items will move. From there you can also write a *New report…*, see its *Reports* and *Date log*, or *Edit details…* for everything else.
+- **Items → Quick update** (the default view): ref, title, type, owner, RAG and dates, all editable. The current RAG shows as a pill and the others as dots (hover for the name): click one to set it, or edit any cell. An end date in red means the item is overdue. Switch to **All fields** for streams, links and so on.
 - The quick update panel on the chart also has a **Type** switch.
 
 ### Importing
@@ -263,7 +263,7 @@ RAG and dates change far more often than anything else, so they are the quickest
 - **Links** (rolls up to, depends on) name items by their **ref** (e.g. a parent of `4` rolls up to the item with ref 4, whether it's in the file or already in the workspace), separated by `;` `,` or spaces; MS Project style `3FS+2d` works too. Links that would make a circular dependency are left out
 - A **preview** shows every row as Add, Update, No change or Skip, with notes on anything it couldn't read (an unreadable date, a RAG the workspace doesn't use, an unknown link, a repeated ref). Nothing changes until you click **Import**
 
-A file from **Download CSV** imports straight back in, matched on ref (or id, as its links are ids), so you can edit a workspace's items in a spreadsheet and bring them back.
+A file from **Export → Download CSV** imports straight back in, matched on ref (or id, as its links are ids), so you can edit a workspace's items in a spreadsheet and bring them back.
 
 **Risks & issues → Import…** does the same for the register, and is built for a **SharePoint list exported to CSV** (or pasted cells, or the register's own Download CSV):
 
@@ -279,7 +279,7 @@ Edit items in the app — in the **Items** table or by clicking an item on the c
 
 ## Reports
 
-Owners provide a regular status report on any milestone or task. **Click an item on the Gantt chart → Provide report**, or use **Report…** on the Items tab. The form has:
+Owners provide a regular status report on any milestone or task. **Click an item on the plan → New report…**, use **New report** on a row of Items, or **+ New report** on the Reports page. The form has:
 
 - **Cadence**: Weekly, Fortnightly or Monthly, plus the **period ending** date. It defaults to the coming Friday, or to month end for monthly reports. The period covered is worked out from these two.
 - **RAG this period**: Green / Amber / Red / Complete / Not Started. It defaults to the item's current RAG. If you change it on the item's latest report, you can update the item's RAG on the chart at the same time.
@@ -289,9 +289,9 @@ Owners provide a regular status report on any milestone or task. **Click an item
 
 The exec summary, achievements, next steps and get to green plan are **formatted text**. Use the toolbar or ⌘/Ctrl+B, I and K for bold, italic and links (plus strikethrough), and bulleted or numbered lists; typing `- `, `1. ` or `> ` at the start of a line starts a list or quote, Tab / Shift+Tab nest a list item, Enter starts a new paragraph and Shift+Enter a new line. Pasted text keeps any Markdown formatting it has, and never brings in other HTML. Behind the scenes the text is stored as **Markdown** in reports.csv (and the CSV download), so it reads cleanly in a spreadsheet; click **Markdown** on a box to see and edit that text directly (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, `#` headings, `- `/`1. ` lists, `> ` quotes, `[links](https://…)`, and `\` to keep a character literal). The Reports list shows the exec summary as plain text.
 
-The item's previous report is shown in a panel beside the form while you write the new one, with ‹ › to step back through older reports. Its sections can be copied across: last period's *next steps* into this period's *achievements*, the *exec summary*, or the *get to green plan* (carried forward). When other items lead up to the one being reported on (a top level milestone, typically), the form and the report preview list **everything that leads up to it**: the items that roll up to it and the ones it depends on, followed all the way back, each with its RAG, dates and owner in date order, so the report can be written with its parts in view. It's the same chain the Gantt chart lights up when the item is hovered. You can only have one report per item per period; if one exists, you'll be offered a link to open it.
+The item's previous report is shown in a panel beside the form while you write the new one, with ‹ › to step back through older reports. Its sections can be copied across: last period's *next steps* into this period's *achievements*, the *exec summary*, or the *get to green plan* (carried forward). When other items lead up to the one being reported on (a top level milestone, typically), the form and the report preview list **everything that leads up to it**: the items that roll up to it and the ones it depends on, followed all the way back, each with its RAG, dates and owner in date order, so the report can be written with its parts in view. It's the same chain the plan lights up when the item is hovered. You can only have one report per item per period; if one exists, you'll be offered a link to open it.
 
-The **Reports** tab lists every report in the current workspace, newest period first. Switch it to **Due** to see what still needs a report this period, grouped by owner, with **Provide report…** on each: anything that has started or already has reports, until it reaches a done status. Each follows the cadence of its latest report (weekly if it has none); a report whose period reaches into the current one covers it, and **periods missed** counts the periods since its last report. The menu shows how many are due. Like the Items grid, click a header to sort, use the filter row (item, RAG, cadence, text…) to narrow the list, and drag a header edge to resize a column; the toolbar search looks through every report field. **View reports** in the item's edit dialog, the quick update panel and the report form jumps here filtered to that item. Select a report to read it in the **preview** beside the list, and use **↑ ↓** to move through the list, like previewing files in a folder. Click into the preview (or press **Enter**, or double-click the row) to edit the report in place: **Save** (⌘/Ctrl+Enter) or **Cancel** (Esc). Moving to another report saves your edits if they're complete, and otherwise asks before discarding them. **Delete** is there too. If some reports belong to items that no longer exist (shown as *Deleted item #…*), **Delete N reports on deleted items** in the toolbar clears them all at once. Drag the divider to resize the list; double-click it to reset. Untick **Preview** to use the full-width list, where clicking a report opens it in the report form. Edits are tracked with `created` / `updated` timestamps. **Download CSV** saves the reports currently listed (filters applied) with the item's `ref` and `title` added for readability.
+The **Reports** page lists every report in the current workspace, newest period first. Switch it to **Due** to see what still needs a report this period, grouped by owner, with **New report…** on each: anything that has started or already has reports, until it reaches a done status. Each follows the cadence of its latest report (weekly if it has none); a report whose period reaches into the current one covers it, and **periods missed** counts the periods since its last report. The menu shows how many are due. Like the Items grid, click a header to sort, use the filter row (item, RAG, cadence, text…) to narrow the list, and drag a header edge to resize a column; the toolbar search looks through every report field. **Reports (n)** in the item's edit dialog, the quick update panel and the report form jumps here filtered to that item. Select a report to read it in the **preview** beside the list, and use **↑ ↓** to move through the list, like previewing files in a folder. Click into the preview (or press **Enter**, or double-click the row) to edit the report in place: **Save** (⌘/Ctrl+Enter) or **Cancel** (Esc). Moving to another report saves your edits if they're complete, and otherwise asks before discarding them. **Delete** is there too. If some reports belong to items that no longer exist (shown as *Deleted item #…*), **Delete N reports on deleted items** in the toolbar clears them all at once. Drag the divider to resize the list; double-click it to reset. Untick **Preview** to use the full-width list, where clicking a report opens it in the report form. Edits are tracked with `created` / `updated` timestamps. **Export → Download CSV** saves the reports currently listed (filters applied) with the item's `ref` and `title` added for readability.
 
 Reports are stored in [reports.csv](reports.csv), one row per report:
 
@@ -321,7 +321,7 @@ id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved
 - **parent_id**: blank on a comment; on a reply, the `id` of the comment it answers (replies have no passage of their own)
 - **at**, **by**: when it was written and by whom; **resolved**: `yes` on a thread that's been resolved
 
-## Gantt chart
+## Plan (Gantt chart)
 
 - Streams with alternating backgrounds and colour accents
 - Streams with nested sub-streams
@@ -346,5 +346,5 @@ id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved
 - **Search** by ref, title, description, owner or stream, and **Filter** by stream, owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
 - **Sort** streams A–Z (the default), as listed, by earliest start, by latest end, or most at risk first (most items at an off-track RAG). Items are packed several to a row by date, or choose one per row sorted by start, end, ref, title, RAG or owner, ascending or descending. A dot on **Sort** shows it's changed from the default, and the sort is remembered per browser
 - **View** toggles the **top** and **bottom timescale**, **today line** (labelled in the timescale header, so it never covers an item) and **baseline**, and sets the dependency lines, folding and baseline
-- **Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the workspace, always in the light colours
-- The link button copies a link to the chart with its filters (see **Links**)
+- **Export → Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the workspace, always in the light colours
+- **Export → Copy link** copies a link to the chart with its filters (see **Links**)
