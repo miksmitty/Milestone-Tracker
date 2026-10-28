@@ -4828,8 +4828,8 @@ function renderReports() {
   document.getElementById('rp-due').hidden = !due;
   document.getElementById('rp-split').hidden = due;
   document.querySelector('#view-reports .rp-filters').hidden = due;
-  document.getElementById('rp-hint').hidden = due;
-  document.getElementById('rp-due-hint').hidden = !due;
+  document.getElementById('rp-hint').classList.toggle('help-off', due);
+  document.getElementById('rp-due-hint').classList.toggle('help-off', !due);
   for (const id of ['btn-reports-csv', 'rp-count']) document.getElementById(id).hidden = due;
   if (due) {
     document.getElementById('btn-rp-orphans').hidden = true;
@@ -9473,6 +9473,7 @@ function switchView(view) {
   });
   document.querySelectorAll('input[name^="pf-mode"]').forEach(r => { r.checked = r.value === view; });
   document.getElementById('app-main').scrollTop = 0;
+  showHelp(false);
   updatePageHead();
   saveAppPrefs({ view });
   writeHash();
@@ -9509,7 +9510,26 @@ function setNavHidden(hidden) {
   if (state.rangeStart && isShown('gantt')) renderGantt(); // the chart takes the width freed up
 }
 
+// The ? beside the page title opens a short note on what the page is for. Each page keeps its
+// note in a hidden .help block (so the workspace's own terms apply to it); the one not marked
+// help-off is shown.
+function showHelp(open) {
+  const pop = document.getElementById('page-help');
+  const btn = document.getElementById('page-help-btn');
+  if (open) pop.innerHTML = document.querySelector(`#view-${currentView()} .help:not(.help-off)`)?.innerHTML || '<p>No notes for this page.</p>';
+  pop.hidden = !open;
+  btn.setAttribute('aria-expanded', open);
+}
+function wireHelp() {
+  const btn = document.getElementById('page-help-btn');
+  const pop = document.getElementById('page-help');
+  btn.onclick = () => showHelp(pop.hidden);
+  document.addEventListener('click', (e) => { if (!pop.hidden && !pop.contains(e.target) && e.target !== btn) showHelp(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) showHelp(false); });
+}
+
 function wireEvents() {
+  wireHelp();
   document.querySelectorAll('.nav-item[data-view]').forEach(b => { b.onclick = () => switchView(b.dataset.view.split(' ')[0]); });
   document.querySelectorAll('input[name^="pf-mode"]').forEach(r => r.addEventListener('change', () => switchView(r.value)));
   document.getElementById('nav-collapse').onclick = () => setNavCollapsed(!document.body.classList.contains('nav-collapsed'));

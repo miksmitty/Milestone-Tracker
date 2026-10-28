@@ -113,7 +113,11 @@
     </button>
     <div class="page-titles">
       <span id="page-workspace" class="page-workspace"></span>
-      <h1 id="page-title">Dashboard</h1>
+      <div class="page-title-row">
+        <h1 id="page-title">Dashboard</h1>
+        <button type="button" id="page-help-btn" class="page-help" title="About this page" aria-label="About this page" aria-expanded="false" aria-controls="page-help">?</button>
+        <div id="page-help" class="help-pop" role="dialog" aria-label="About this page" hidden></div>
+      </div>
     </div>
     <span id="save-status" class="save-status"></span>
   </header>
@@ -160,9 +164,9 @@
         <tfoot id="overview-foot"></tfoot>
       </table>
     </div>
-    <p class="hint">One row per workspace, in program number order. <b>Current weekly RAG</b> and the summary come from the latest weekly update, and <b>Previous weekly RAG</b> from the one before it; a week-ending date in red means there’s no update for this week yet.
-      The milestones overview counts each program’s milestones by RAG: done statuses are <i>Closed</i>, statuses that need a get to green plan are <i>Red/Amber</i>, the default status is <i>Not started</i> and the rest count as <i>Green</i>.
-      Set the program number, area lead and trend in <b>Workspace settings</b>. Weekly updates are stored in <code>updates.csv</code>.</p>
+    <div class="help" hidden><p>One row per workspace, in program number order. The weekly RAG, trend and summary come from its latest weekly update; a week-ending date in red means there’s no update for this week yet.</p>
+      <p>The milestones overview counts milestones by status: done statuses are <i>Closed</i>, statuses that need a get to green plan are <i>Red/Amber</i>, the default status is <i>Not started</i> and the rest are <i>Green</i>. Click a count to see those milestones on the plan.</p>
+      <p>Set the program number, area lead and trend in <b>Workspace settings</b>.</p></div>
   </main>
 
   <!-- ============ STREAM OVERVIEW ============ -->
@@ -202,10 +206,9 @@
         <tfoot id="streams-foot"></tfoot>
       </table>
     </div>
-    <p class="hint">One row per stream of this workspace, in the order the Gantt chart lists them. Click a stream to see just its items on the Gantt chart.
-      <b>Current weekly RAG</b> and the summary come from the stream’s latest weekly update, and <b>Previous weekly RAG</b> from the one before it; a week-ending date in red means there’s no update for this week yet.
-      The milestones overview counts the stream’s milestones as on the program overview. Use <b>Update</b> to record the week’s update and to set the stream’s area lead and trend.
-      Streams are records in <code>streams.csv</code>, with their area leads and trends; updates in <code>updates.csv</code> point at them, so a stream can be renamed in <b>Workspace settings</b> without losing anything.</p>
+    <div class="help" hidden><p>One row per stream, in the order the plan lists them. Click a stream to see just its <span data-term="items">items</span> on the plan.</p>
+      <p>The weekly RAG, trend and summary come from the stream’s latest weekly update; a week-ending date in red means there’s no update for this week yet. <b>Weekly update</b> records the week’s update and sets the stream’s area lead and trend.</p>
+      <p>Rename or add streams in <b>Workspace settings → Streams</b>.</p></div>
   </main>
 
 
@@ -236,10 +239,9 @@
         <tbody id="raid-body"></tbody>
       </table>
     </div>
-    <p class="hint">The workspace’s register of <b>risks</b> (what might happen), <b>issues</b> (what has happened) and <b>dependencies</b> (what the plan needs from others, or others need from it). Each can be linked to any number of <span data-term="items">items</span> and streams; click a link to see it on the Gantt chart, or a row to edit it.
-      A risk’s rating is its likelihood × impact (High is 6 or more out of 9), an issue’s its impact and a dependency’s its priority. A due date in red has passed while the entry is still open.
-      Summary notes are added with the date and time and kept, never edited. A dependency’s priorities and types are set in <b>Workspace settings → Dependencies</b>.
-      <b>Risks &amp; issues</b> in an <span data-term="item">item</span>’s edit dialog shows just the ones linked to it. Stored in <code>raid.csv</code> and <code>raid-notes.csv</code>.</p>
+    <div class="help" hidden><p><b>Risks</b> are what might happen, <b>issues</b> what has happened, <b>dependencies</b> what the plan needs from others or they need from it. Each can be linked to any number of <span data-term="items">items</span> and streams: click a link to see it on the plan, or a row to edit the entry.</p>
+      <p>A risk’s rating is likelihood × impact (6 or more out of 9 is High), an issue’s its impact and a dependency’s its priority. A due date in red has passed while the entry is still open. Summary notes keep their date and time and are never edited.</p>
+      <p>Set a dependency’s priorities and types in <b>Workspace settings → Dependencies</b>.</p></div>
   </main>
 
   <!-- ============ WHAT CHANGED ============ -->
@@ -257,7 +259,8 @@
       </div>
     </div>
     <div id="ch-body" class="ch-body"></div>
-    <p class="hint">Compares this workspace with how it stood at the start of an earlier day: RAG changes, dates that moved, <span data-term="items">items</span> added or removed, and reports written since. The server keeps a copy of each file at the start of every day it changes (in <code>backups/</code>, the last 30 of each), so those are the days you can compare with. <b>Use in weekly update</b> starts the program’s weekly update with the summary.</p>
+    <div class="help" hidden><p>Compares this workspace with how it stood at the start of an earlier day: RAG changes, dates that moved, <span data-term="items">items</span> added or removed, and reports written since. You can compare with any day in the last 30 on which the <span data-term="items">items</span> changed.</p>
+      <p><b>Copy summary</b> copies the summary as text for an email or chat; <b>Use in weekly update</b> starts this week’s update with it.</p></div>
   </main>
 
   <!-- ============ DATE HISTORY ============ -->
@@ -281,7 +284,8 @@
         <tbody id="dl-body"></tbody>
       </table>
     </div>
-    <p class="hint">Every change to a start, end or baseline date is logged here, newest first: who made it, when, from what to what, and how. <b>Knock-on</b> means the dates moved because something they depend on moved. Changes made to <code>milestones.csv</code> outside the app are logged when the app next reads or saves it. The log is kept in <code>date-changes.csv</code>, which the app only ever adds to. To start afresh after deleting demo or test data, use <b>Clear history…</b> in Workspace settings.</p>
+    <div class="help" hidden><p>Every change to a start, end or baseline date, newest first: who made it, when, from what to what, and how. <b>Knock-on</b> means the dates moved because something they depend on moved. Changes made to the data outside the app are logged when the app next reads it.</p>
+      <p>To start afresh after deleting demo or test data, use <b>Clear history…</b> in Workspace settings.</p></div>
   </main>
 
   <!-- ============ WORKSPACES VIEW ============ -->
@@ -300,8 +304,8 @@
       </div>
     </div>
     <div id="workspace-cards" class="prog-grid"></div>
-    <p class="hint">Each workspace has its own items and reports. Use <b>Edit</b> to rename a workspace, set its RAG, dates and people, or choose what it calls its items — for example <i>Checkpoints</i> and <i>Activities</i> instead of milestones and tasks.
-      Workspaces are stored in <code>workspaces.csv</code>; items and reports carry the <code>workspace_id</code> they belong to.</p>
+    <div class="help" hidden><p>A card per workspace: its RAG, trend, people, timeline and a breakdown of its <span data-term="items">items</span>. Click a card to open its dashboard.</p>
+      <p><b>Edit</b> renames a workspace, sets its RAG, dates and people, or chooses what it calls its items — for example <i>Checkpoints</i> and <i>Activities</i> instead of milestones and tasks.</p></div>
   </main>
 
   <!-- ============ DASHBOARD ============ -->
@@ -317,9 +321,8 @@
       </div>
     </div>
     <div id="dash-grid" class="dash-grid"></div>
-    <p class="hint">How the workspace is doing, on one page. <b>Progress</b> is the share of all <span data-term="task">task</span>-days that are complete, set against the share of the plan’s time that has gone (the marker on the bar).
-      Every number and bar is a way in: click one to see just those <span data-term="items">items</span> on the Gantt chart, the risks in the register or the reports. <b>Table</b> on a chart shows its numbers as a table instead.
-      <b>Coming up</b> and <b>Due in</b> look as far ahead as the selector says. The weekly RAG record and the stream pills come from the weekly updates; <b>Against the baseline</b> compares each <span data-term="item">item</span>’s end date with its baseline.</p>
+    <div class="help" hidden><p>How the workspace is doing today. <b>Progress</b> is the share of all <span data-term="task">task</span>-days that are complete, against the share of the plan’s time that has gone (the marker on the bar).</p>
+      <p>Every number and bar is a way in: click one to see just those <span data-term="items">items</span> on the plan, the entries in the register or the reports. <b>Table</b> on a chart shows its numbers as a table. <b>Coming up</b> sets how far ahead the dashboard looks.</p></div>
   </main>
 
   <!-- ============ GANTT VIEW ============ -->
@@ -456,6 +459,11 @@
       </div>
       <div id="gf-chips" class="gbar-chips" hidden></div>
     </div>
+    <div class="help" hidden>
+      <p>Hover <span data-term="item">item</span> for its summary; everything it waits on and holds up lights up with it. Click it to change its RAG or dates, write a report or edit its details.</p>
+      <p>Drag <span data-term="item">item</span> to move it, or either end of a bar to change its start or end: whatever depends on it moves too, and <b>Undo</b> takes it back. Click a stream’s name to fold it.</p>
+      <p><b>Filter</b>, <b>Sort</b> and <b>View</b> set what’s shown and how; the link button copies this view with its filters, and <b>PNG</b> downloads it as an image.</p>
+    </div>
     <div id="gantt-scroll" class="gantt-scroll">
       <div id="gantt-container"></div>
     </div>
@@ -490,7 +498,7 @@
         <span class="autosave-note">Changes save automatically</span>
         <button id="btn-items-import" class="btn" title="Bring in a list from a CSV file or cells pasted from a spreadsheet">Import…</button>
         <button id="btn-items-csv" class="btn" title="Download the items shown (filters and sort applied) as a CSV">Download CSV</button>
-        <button id="btn-reload" class="btn btn-ghost" title="Reload from milestones.csv (e.g. after editing it in a spreadsheet)">Reload</button>
+        <button id="btn-reload" class="btn btn-ghost" title="Reload the data, e.g. after editing it in a spreadsheet">Reload</button>
       </div>
     </div>
     <div id="bulk-bar" class="bulk-bar" hidden>
@@ -509,12 +517,9 @@
         <tbody id="editor-body"></tbody>
       </table>
     </div>
-    <p class="hint"><b>Quick update</b> shows the fields that change most — ref, title, type, owner, RAG and dates: click a RAG to change it, or edit any cell. Switch to <b>All fields</b> for streams, links and the rest.
-      Tick the boxes on the left (shift-click for a range, or the header box for everything shown) to change a field on many rows at once, move their dates, or delete them.
-      Columns work like a spreadsheet's: use the <b>▾</b> on a heading to sort or filter by ticking values, drag a heading to move the column, and drag a heading's edge to resize it (double-click to fit). Click headings to select columns (⌘/Ctrl or shift for several) — resizing one then sizes them all, and right-click offers autofit, distribute evenly and fit to window. <b>ID</b> is the primary key: assigned automatically, never changes or gets reused, and is what links between items point at. <b>Ref</b> is your own label (e.g. 4.1).
-      Data is stored in <code>milestones.csv</code> next to the server — edit it in a spreadsheet if you prefer, then hit Reload.
-      <b>Type</b> says whether something is a <b>top level <span data-term="milestone">milestone</span></b> (a milestone under change control, drawn as a ringed diamond), a <b data-term="milestone">milestone</b> (one date, drawn as a diamond: changing either date moves it) or a <b data-term="task">task</b> (a start and end, drawn as a bar). Change the type to give a milestone a date range, or to collapse a task to one date.
-      Changing an end date shifts everything that depends on it by the same amount.</p>
+    <div class="help" hidden><p><b>Quick update</b> shows the fields that change most — ref, title, type, owner, RAG and dates: click a RAG to change it, or edit any cell. <b>All fields</b> adds streams, links and the rest.</p>
+      <p>Tick rows (shift-click for a range, or the header box for all) to change a field on many at once, move their dates or delete them. Headings work like a spreadsheet’s: <b>▾</b> sorts or filters, drag a heading to move the column or its edge to resize it (double-click to fit), right-click for autofit.</p>
+      <p><b>Type</b>: a <span data-term="milestone">milestone</span> has one date and is drawn as a diamond; a <span data-term="task">task</span> has a start and end and is drawn as a bar; a top level <span data-term="milestone">milestone</span> is under change control. Changing an end date shifts everything that depends on it. If you edit the data in a spreadsheet, <b>Reload</b> picks it up.</p></div>
   </main>
 
   <!-- ============ REPORTS VIEW ============ -->
@@ -548,9 +553,9 @@
       <section id="rp-pane" class="rp-pane" aria-label="Selected report"></section>
     </div>
     <div id="rp-due" class="rp-due" hidden></div>
-    <p id="rp-due-hint" class="hint" hidden><b>Due</b> lists what still needs a report this period, by owner: anything that has started or already has reports, until it reaches a done status. Each follows the cadence of its latest report (weekly if it has none), and a report whose period reaches into the current one covers it. <b>Periods missed</b> counts the periods since its last report.</p>
-    <p id="rp-hint" class="hint">Select a report to read it in the preview, and use <b>↑</b> <b>↓</b> to move through the list. Click into the preview to edit the report. Sort, filter, move and resize columns as on the Items tab. To report on something, <b>click it on the Gantt chart</b> and choose <b>Provide report</b>, or use <b>Report…</b> on the Items tab.
-      Reports are stored in <code>reports.csv</code>, one row per report, linked to what it covers by its ID.</p>
+    <div id="rp-due-hint" class="help help-off" hidden><p><b>Due</b> lists what still needs a report this period, by owner: anything that has started or already has reports, until it reaches a done status. Each follows the cadence of its latest report (weekly if it has none); a report whose period reaches into the current one covers it. <b>Periods missed</b> counts the periods since its last report.</p></div>
+    <div id="rp-hint" class="help" hidden><p>Select a report to read it in the preview; <b>↑</b> <b>↓</b> move through the list. Click into the preview to edit the report in place. Sort, filter, move and resize columns as on <span data-term="Items">Items</span>.</p>
+      <p>To report on <span data-term="item">item</span>, click it on the plan and choose <b>New report</b>, or use <b>New report</b> here or on <span data-term="Items">Items</span>.</p></div>
   </main>
   </div>
 </div>
@@ -574,7 +579,7 @@
         <label>Stream<select name="stream_id"></select><input name="newstream" placeholder="New stream name" title="Esc to pick an existing stream" hidden /></label>
         <label>Sub-stream<input name="substream" list="substream-list" /></label>
         <label>Owner<input name="owner" list="owner-list" /></label>
-        <label>Type<select name="type"></select></label>
+        <label title="A milestone has one date and is drawn as a diamond; a top level milestone is also under change control. A task has a start and end and is drawn as a bar. Change the type to switch between them.">Type<select name="type"></select></label>
         <label id="ed-start">Start<input name="start" type="date" /></label>
         <label><span id="ed-end-label">End</span><input name="end" type="date" /></label>
         <label>RAG<select name="status"></select></label>
@@ -583,7 +588,6 @@
         <label class="span3">GitLab URL<input name="gitlab_url" type="url" placeholder="https://gitlab.example.com/group/project" /></label>
         <label class="span3">Use case URL<input name="use_case_url" type="url" placeholder="https://…" /></label>
       </div>
-      <p class="dlg-hint">A <span data-term="milestone">milestone</span> has one date and is drawn as a diamond; a top level one is also under change control (any change that moves it asks for confirmation) and wears a ring. A <span data-term="task">task</span> has a start and end and is drawn as a bar. Change the type to switch between them. Moving the end date shifts anything that depends on it.</p>
       <p id="ed-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
@@ -680,15 +684,15 @@
           <label class="pg-check"><input type="checkbox" data-show-field="gitlab_url" /> GitLab URL</label>
           <label class="pg-check"><input type="checkbox" data-show-field="use_case_url" /> Use case URL <small>badge on the plan</small></label>
           <label class="pg-check"><input type="checkbox" data-show-field="reports" /> Reports <small>the Reports page and New report buttons</small></label>
-          <p class="pg-term-preview">Untick one to hide it from this workspace. Nothing is deleted: links and reports already entered are kept and come back when it’s ticked again.</p>
+          <p class="pg-term-preview">Untick one to hide it from this workspace; nothing is deleted.</p>
         </fieldset>
         <div id="pg-history" class="span3 pg-history">
-          <div><strong class="pg-history-title">Start the history afresh</strong><span>After deleting demo or test data: clears this workspace’s <b>Date log</b> and makes <b>What changed</b> compare from today, so nothing that’s gone still shows. It can’t be undone.</span></div>
+          <div><strong class="pg-history-title">Start the history afresh</strong><span>Empties this workspace’s <b>Date log</b> and makes <b>What changed</b> compare from today. For after deleting demo or test data; it can’t be undone.</span></div>
           <button type="button" id="pg-clear-history" class="btn btn-danger btn-sm">Clear history…</button>
         </div>
       </div>
       <div id="pg-panel-rag" class="pg-rag" role="tabpanel" hidden>
-        <p class="pg-rag-intro">The RAG statuses this workspace uses, in order. They set the colours on the plan and in its key, the RAG buttons, filters and report form.</p>
+        <p class="pg-rag-intro">The RAG statuses this workspace uses, in order: they set the colours and the key everywhere.</p>
         <table class="pg-rag-table">
           <thead><tr><th></th><th>Colour</th><th>Name</th><th>Meaning <small>(shown in the key)</small></th><th title="Reports at this status must include a get to green plan">Get to green plan</th><th title="The status new items start at">Default</th><th></th></tr></thead>
           <tbody id="pg-statuses"></tbody>
@@ -700,7 +704,7 @@
         <div class="pg-rag-preview"><span class="pg-rag-preview-label">Key preview</span><span id="pg-rag-preview"></span></div>
       </div>
       <div id="pg-panel-deps" class="pg-deps" role="tabpanel" hidden>
-        <p class="pg-rag-intro">The choices a dependency offers in this workspace, in order. Priorities run from highest to lowest: the register sorts and colours them that way. Renaming one renames it on the dependencies that have it; removing one leaves it on any that do.</p>
+        <p class="pg-rag-intro">The choices a dependency offers, in order. Priorities run highest first; renaming one renames it on every dependency that has it.</p>
         <input type="hidden" name="dep_priorities" /><input type="hidden" name="dep_types" />
         <div class="pg-deps-lists">
           <section>
@@ -716,7 +720,7 @@
         </div>
       </div>
       <div id="pg-panel-streams" class="pg-streams" role="tabpanel" hidden>
-        <p class="pg-rag-intro">The workspace’s streams. Renaming one renames it everywhere: on its items, its weekly updates and the risks, issues and dependencies linked to it. A stream that’s in use can be removed by moving what it holds to another stream. Typing a new name on an item also adds a stream.</p>
+        <p class="pg-rag-intro">The workspace’s streams. Renaming one renames it everywhere; a stream in use is removed by moving what it holds to another.</p>
         <table class="pg-rag-table pg-streams-table">
           <thead><tr><th>Name</th><th>Area lead</th><th>In use</th><th></th></tr></thead>
           <tbody id="pg-streams"></tbody>

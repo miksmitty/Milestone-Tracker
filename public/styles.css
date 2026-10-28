@@ -220,8 +220,23 @@ input[type="range"] { width: 130px; accent-color: var(--accent); }
   cursor: pointer; padding: 4px 8px; border-radius: 6px;
 }
 .btn-del:hover { color: var(--accent); background: var(--tint); }
-.hint { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
-.hint code { background: var(--border); padding: 1px 5px; border-radius: 4px; }
+/* page notes: a ? beside the title opens them */
+.page-title-row { position: relative; display: flex; align-items: center; gap: 8px; }
+.page-help {
+  flex: none; width: 20px; height: 20px; border: 1px solid var(--border); border-radius: 50%; background: var(--panel);
+  color: var(--muted); font: 700 12px/1 inherit; font-family: inherit; cursor: pointer; padding: 0;
+}
+.page-help:hover, .page-help[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.page-help:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.help-pop {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 40; width: min(440px, calc(100vw - 40px));
+  padding: 14px 16px; font-size: 13px; line-height: 1.5; color: var(--text);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(28,28,28,.16);
+}
+.help-pop[hidden] { display: none; }
+.help-pop p + p { margin-top: 8px; }
+.help-pop b { font-weight: 600; }
 
 /* ---------- items: tasks, dependencies ---------- */
 .legend { flex-wrap: wrap; }
@@ -877,7 +892,7 @@ button.cm-quote:hover { background: var(--hover); }
 .pg-rag-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 14px; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; font-size: 12.5px; color: var(--muted); }
 .pg-rag-preview > span:last-child { display: contents; }
 .pg-rag-preview-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-#view-reports > :is(.toolbar, .hint) { flex: none; }
+#view-reports > .toolbar { flex: none; }
 
 /* ---------- gantt toolbar: search, menus, range, zoom ---------- */
 .gbar {
