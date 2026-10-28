@@ -1,7 +1,8 @@
 // Tracker — zero-dependency Node server.
 // Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv,
-// updates.csv, streams.csv, raid.csv (risks, issues and dependencies) and raid-notes.csv (their
-// notes), and appends every change to an item's dates to date-changes.csv.
+// updates.csv, streams.csv, raid.csv (risks, issues and dependencies), raid-notes.csv (their
+// notes) and report-comments.csv (comments on passages of a report, with replies), and appends
+// every change to an item's dates to date-changes.csv.
 // Several people can use it at once: each file has a version, a save based on an older version is
 // turned back with the current file for the browser to merge, and every save is pushed to the
 // other browsers straight away (see "Working together" below).
@@ -68,6 +69,14 @@ const DATASETS = {
     file: path.join(DATA_DIR, 'raid-notes.csv'),
     header: 'id,workspace_id,raid_id,at,by,text\n',
     stampBy: true, // new notes are signed with the login ID (see changedBy)
+  },
+  '/api/report-comments': {
+    file: path.join(DATA_DIR, 'report-comments.csv'),
+    // A comment on a passage of a report: `field` is the section (exec_summary …), `quote` the
+    // text selected, `start`/`end` where it sits in the section's plain text. A reply has
+    // `parent_id` set and no passage. `resolved` is 'yes' on a thread that's been dealt with.
+    header: 'id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved\n',
+    stampBy: true,
   },
 };
 
@@ -391,7 +400,7 @@ setInterval(checkFiles, 2000).unref();
 // next number. A browser reserves a few at a time (POST /api/ids?file=milestones&n=20). The last
 // id given out per file is kept in ids.json; the next is always above every id in the file too.
 const IDS_FILE = path.join(DATA_DIR, 'ids.json');
-const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'raid', 'raid-notes'];
+const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'raid', 'raid-notes', 'report-comments'];
 function reserveIds(file, n) {
   let issued = {};
   try { issued = JSON.parse(fs.readFileSync(IDS_FILE, 'utf8')); } catch { /* none issued yet */ }

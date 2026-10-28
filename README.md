@@ -281,6 +281,23 @@ id,workspace_id,item_id,cadence,period_start,period_end,rag,exec_summary,achieve
 - **id**: the report's primary key (never reused)
 - **item_id**: foreign key to the item's `id` in milestones.csv. Deleting an item keeps its reports.
 
+### Comments on a report
+
+Anyone reading a report in the preview can comment on a particular passage, as you would in PowerPoint or Word. **Select some words** in the exec summary, achievements, next steps or get to green plan and click the **Comment** button that appears beside them; write the comment, put your name against it (remembered in this browser) and **Comment** (⌘/Ctrl+Enter). The words are **highlighted** in the report and the thread is listed under it, with the quoted passage. Click a highlight to pick out its thread, or the quote on a thread to find the words in the report. Anyone can **Reply** in a thread. **Resolve** a thread once it's been dealt with: its highlight goes and it's hidden until **Show resolved** is ticked (**Reopen** brings it back). **Delete** removes a thread with its replies (Undo puts it back). The list shows how many threads are open on each report, and the preview's toolbar shows the count too. Comments arrive on everyone's screen as they're added, like other changes.
+
+A comment is pinned to its section, where the words sit in it and the words themselves. If the report is edited, the words are found again wherever they've moved to; if they're no longer there, the thread is kept and marked *text since changed*. Deleting a report deletes its comments.
+
+Comments are stored in [report-comments.csv](report-comments.csv), one row per comment or reply:
+
+```
+id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved
+```
+
+- **report_id**: foreign key to the report's `id` in reports.csv
+- **field**: the section commented on (`exec_summary`, `achievements`, `next_steps` or `get_to_green`); **quote**, **start**, **end**: the words selected and where they sit in that section's plain text
+- **parent_id**: blank on a comment; on a reply, the `id` of the comment it answers (replies have no passage of their own)
+- **at**, **by**: when it was written and by whom; **resolved**: `yes` on a thread that's been resolved
+
 ## Gantt chart
 
 - Streams with alternating backgrounds and colour accents

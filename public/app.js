@@ -107,6 +107,7 @@ const state = {
   streams: [],            // stream details, every workspace: {workspace_id, name, lead, trend}
   raid: [],             // risks, issues and dependencies, every workspace: {id, workspace_id, kind, ref, title, …, links: ['item:12', 'stream:Design']}
   raidNotes: [],        // their notes, only ever added to: {id, workspace_id, raid_id, at, by, text}
+  reportComments: [],   // comments on passages of reports, every workspace: {id, workspace_id, report_id, field, quote, start, end, parent_id, at, by, text, resolved}
   lastWorkspaceId: 0,
   workspaceId: '',        // the workspace being viewed
   otherItems: [],       // items of every other workspace, kept so saves write the whole file
@@ -358,7 +359,7 @@ async function loadData() {
     synced[file] = { version: r.headers.get('X-Version'), text };
     return text;
   }));
-  const [workspaces, statuses, items, reports, updates, streams, raid, raidNotes] = texts;
+  const [workspaces, statuses, items, reports, updates, streams, raid, raidNotes, reportComments] = texts;
   state.workspaces = rowsToWorkspaces(parseAny(workspaces));
   state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
@@ -370,6 +371,7 @@ async function loadData() {
   state.streams = rowsToStreams(parseAny(streams));
   state.raid = rowsToRaid(parseAny(raid));
   state.raidNotes = rowsToRaidNotes(parseAny(raidNotes));
+  state.reportComments = rowsToComments(parseAny(reportComments));
   dataLoaded = true;
   if (created) await saveWorkspaces();
   state.items = allItems;
@@ -441,6 +443,7 @@ const saveUpdates = (msg) => saveCSV('updates', msg);
 const saveStreams = (msg) => saveCSV('streams', msg);
 const saveRaid = (msg) => saveCSV('raid', msg);
 const saveRaidNotes = (msg) => saveCSV('raid-notes', msg);
+const saveComments = (msg) => saveCSV('report-comments', msg);
 
 /* ---- working together ---- */
 // Several people can have the app open at once. Each file is held with the version it was read
@@ -492,6 +495,11 @@ const FILES = {
     parse: (t) => rowsToRaidNotes(parseAny(t)), all: () => state.raidNotes, set: (l) => { state.raidNotes = l; },
     csv: () => raidNotesToCSV(state.raidNotes), key: (n) => n.id,
     name: (n) => `Note on ${state.raid.find(r => r.id === n.raid_id)?.ref || 'an entry'}, ${fmtStamp(n.at)}`,
+  },
+  'report-comments': {
+    parse: (t) => rowsToComments(parseAny(t)), all: () => state.reportComments, set: (l) => { state.reportComments = l; },
+    csv: () => commentsToCSV(state.reportComments), key: (c) => c.id,
+    name: (c) => `${c.parent_id ? 'Reply' : 'Comment'} on ${FILES.reports.name(allReports().find(r => r.id === c.report_id) || { period_end: '' })}, ${fmtStamp(c.at)}`,
   },
 };
 const FILE_NAMES = Object.keys(FILES); // in the order they depend on each other
@@ -779,7 +787,7 @@ function wireConflicts() {
 // import, a block is fetched so the rest come straight from hand. Ids still in hand when the page
 // closes are never used, so a burst can leave a gap in the numbers. If the server can't be reached,
 // the next number after the highest seen is used.
-const idPool = { workspaces: [], milestones: [], reports: [], updates: [], raid: [], 'raid-notes': [] };
+const idPool = { workspaces: [], milestones: [], reports: [], updates: [], raid: [], 'raid-notes': [], 'report-comments': [] };
 const idLastTaken = {};
 function takeId(file, fallback) {
   const burst = Date.now() - (idLastTaken[file] || 0) < 2000;
@@ -826,15 +834,15 @@ function flashStatus(msg, ok, sticky) {
 // to take back). Undo puts the snapshot back and saves what it changes.
 
 const undoStack = []; // [{ label, snap }], newest last
-const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes'];
-const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes' };
+const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'reportComments'];
+const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', reportComments: 'report-comments' };
 
 function snapshotData() {
   syncEditorToState();
   return {
     items: JSON.stringify(allItems()), reports: JSON.stringify(allReports()), updates: JSON.stringify(state.updates),
     workspaces: JSON.stringify(state.workspaces), statuses: JSON.stringify(state.statuses), streams: JSON.stringify(state.streams),
-    raid: JSON.stringify(state.raid), raidNotes: JSON.stringify(state.raidNotes), workspaceId: state.workspaceId,
+    raid: JSON.stringify(state.raid), raidNotes: JSON.stringify(state.raidNotes), reportComments: JSON.stringify(state.reportComments), workspaceId: state.workspaceId,
   };
 }
 
@@ -882,6 +890,7 @@ async function undoLast() {
   state.streams = back.streams;
   state.raid = back.raid;
   state.raidNotes = back.raidNotes;
+  state.reportComments = back.reportComments;
   state.items = []; state.reports = [];
   state.otherItems = back.items;
   state.otherReports = back.reports;
@@ -895,7 +904,7 @@ async function undoLast() {
   showToast(`Undone: ${u.label}${kept ? ' · anything changed again since was left as it is' : ''}`);
   knockOn.clear();
   directEdits.clear();
-  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes };
+  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, reportComments: saveComments };
   await Promise.all(changed.map(k => save[k]('Undone')));
 }
 
@@ -4602,10 +4611,11 @@ async function deleteReport() {
   const snap = snapshotData();
   const label = `Deleted the report${m ? ` on ${itemLabel(m)}` : ''} for ${fmtShort(rpEditing.period_end)}`;
   state.reports = state.reports.filter(r => r !== rpEditing);
+  const hadComments = dropComments([rpEditing.id]);
   document.getElementById('report-dialog').close();
   rerenderCurrentView();
   offerUndo(snap, label);
-  await saveReports('Report deleted');
+  await Promise.all([saveReports('Report deleted'), hadComments && saveComments()]);
 }
 
 // Reports whose item no longer exists, e.g. after the items file was replaced.
@@ -4616,10 +4626,11 @@ async function deleteOrphanReports() {
   if (!gone.size || !leavePaneEdit()) return;
   const snap = snapshotData();
   state.reports = state.reports.filter(r => !gone.has(r));
+  const hadComments = dropComments([...gone].map(r => r.id));
   paneEditing = false;
   rerenderCurrentView();
   offerUndo(snap, `Deleted ${count(gone.size, 'report', 'reports')} on deleted ${T.items}`);
-  await saveReports(`${count(gone.size, 'report', 'reports')} deleted`);
+  await Promise.all([saveReports(`${count(gone.size, 'report', 'reports')} deleted`), hadComments && saveComments()]);
 }
 
 function rerenderCurrentView() {
@@ -4647,6 +4658,7 @@ const RPT_COLS = [
   { key: 'status', label: 'RAG', w: 120, kind: 'status' },
   { key: 'exec_summary', label: 'Exec summary', w: 420, vals: r => mdToText(r.exec_summary) },
   { key: 'author', label: 'Author', w: 130 },
+  { key: 'comments', label: 'Comments', w: 110, sort: r => openThreads(r.id).length, vals: r => (openThreads(r.id).length ? 'Open' : threadsOf(r.id).length ? 'Resolved' : 'None') },
   { key: 'created', label: 'Created', w: 120, kind: 'date', vals: r => stampDay(r.created), show: fmtNice },
   { key: 'updated', label: 'Last updated', w: 120, kind: 'date', vals: r => stampDay(r.updated), show: fmtNice },
 ];
@@ -4806,6 +4818,7 @@ function renderReports() {
     status: r => `<td class="rc-status">${statusPill(r.status)}${rptPreview && r.get_to_green ? '<small class="gtg-flag">Get to green plan</small>' : ''}</td>`,
     exec_summary: r => `<td class="rc-sum"><div>${escAttr(mdToText(r.exec_summary))}</div>${r.get_to_green ? '<small class="gtg-flag">Has get to green plan</small>' : ''}</td>`,
     author: r => `<td class="rc-author">${escAttr(r.author)}</td>`,
+    comments: r => { const n = openThreads(r.id).length, all = threadsOf(r.id).length; return `<td class="rc-cm">${n ? `<span class="cm-badge" title="${count(n, 'open comment thread', 'open comment threads')}">💬 ${n}</span>` : all ? `<small class="muted">${all} resolved</small>` : ''}</td>`; },
     created: r => stampCell(r.created),
     updated: r => stampCell(r.updated),
   };
@@ -4841,6 +4854,266 @@ function renderReports() {
 function renderReportRagChoices() {
   document.getElementById('rp-status').innerHTML = STATUSES.map(st => `
     <label style="--c:${STATUS[st].base};--t:${STATUS[st].text}"><input type="radio" name="status" value="${escAttr(st)}" /><span>${escAttr(st)}</span></label>`).join('');
+}
+
+
+/* ---- report comments ---- */
+// Select some words of a report in the preview and a Comment button appears beside them, as in
+// PowerPoint or Word. The comment is pinned to that passage (its section, where it sits and the
+// words themselves) and shown as a highlight; anyone can reply in the thread, listed under the
+// report. A thread is resolved once it's dealt with (resolved threads are hidden until "Show
+// resolved") or deleted with its replies. Comments are a file of their own (report-comments.csv),
+// so two people commenting at once never clash. If the report is edited the passage is found
+// again by its words; if they're gone the thread says so and stays readable.
+
+const COMMENT_COLUMNS = ['id', 'workspace_id', 'report_id', 'field', 'quote', 'start', 'end', 'parent_id', 'at', 'by', 'text', 'resolved'];
+function rowsToComments(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const ids = new Set(state.workspaces.map(p => p.id));
+  return rows.slice(1).map(r => {
+    const c = Object.fromEntries(COMMENT_COLUMNS.map(k => [k, (r[header.indexOf(k)] ?? '').trim()]));
+    c.resolved = /^(yes|true|1)$/i.test(c.resolved) ? 'yes' : '';
+    return c;
+  }).filter(c => ids.has(c.workspace_id) && c.report_id && c.text);
+}
+function commentsToCSV(list) {
+  return [COMMENT_COLUMNS.join(','), ...list.map(c => COMMENT_COLUMNS.map(k => csvEscape(c[k])).join(','))].join('\n') + '\n';
+}
+const nextCommentId = () => takeId('report-comments', () => String(Math.max(0, ...state.reportComments.map(c => +c.id || 0)) + 1));
+const commentsOf = (reportId) => state.reportComments.filter(c => c.report_id === reportId);
+const byCommentTime = (a, b) => a.at.localeCompare(b.at) || +a.id - +b.id;
+// A report's threads, oldest first: each root comment with its replies.
+function threadsOf(reportId) {
+  const all = commentsOf(reportId);
+  return all.filter(c => !c.parent_id).sort(byCommentTime).map(root => ({ root, replies: all.filter(c => c.parent_id === root.id).sort(byCommentTime) }));
+}
+const openThreads = (reportId) => threadsOf(reportId).filter(t => !t.root.resolved);
+// Deleted reports take their comments with them; true if there were any.
+function dropComments(reportIds) {
+  const gone = new Set(reportIds);
+  const before = state.reportComments.length;
+  state.reportComments = state.reportComments.filter(c => !gone.has(c.report_id));
+  return state.reportComments.length !== before;
+}
+
+let cmDraft = null;    // a comment being written: { field, quote, start, end }
+let cmReplyTo = null;  // the thread a reply is being written in
+let cmDraftText = '';  // what's been typed, kept through a redraw (e.g. someone else's change arriving)
+let cmActive = null;   // the thread picked out in the text and the list
+let cmPending = null;  // what the Comment button beside the selection would comment on
+function resetCommentUi() { cmDraft = null; cmReplyTo = null; cmDraftText = ''; cmActive = null; }
+
+// Where a comment's passage sits in a section's text now: [start, end], or null if the words are gone.
+function anchorIn(text, c) {
+  const a = +c.start, b = +c.end, q = c.quote;
+  if (!q) return null;
+  if (text.slice(a, b) === q) return [a, b];
+  const i = text.indexOf(q);
+  return i < 0 ? null : [i, i + q.length];
+}
+// Wrap the characters [a, b) of an element's text (as textContent counts them) in elements from
+// `make`, one per text node they cross, so the markup around them is left as it is.
+function wrapTextRange(root, a, b, make) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const parts = [];
+  let pos = 0;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const s = pos, e = pos + n.data.length;
+    pos = e;
+    if (e <= a || s >= b || e === s) continue;
+    parts.push([n, Math.max(a, s) - s, Math.min(b, e) - s]);
+  }
+  for (const [n, from, to] of parts) {
+    let t = n;
+    if (to < t.data.length) t.splitText(to);
+    if (from > 0) t = t.splitText(from);
+    const m = make();
+    t.replaceWith(m);
+    m.append(t);
+  }
+}
+// Highlight each thread's passage in the rendered report. Returns the ids of the threads whose
+// words were found (resolved ones are found but only highlighted with "Show resolved").
+function paintComments(el, r) {
+  const found = new Set();
+  const showAll = !!loadAppPrefs().cmShowResolved;
+  const mark = (cls, cid) => () => { const m = document.createElement('mark'); m.className = cls; if (cid) m.dataset.cid = cid; return m; };
+  for (const sec of el.querySelectorAll('.pane-sec')) {
+    const md = sec.querySelector('.md');
+    if (!md) continue;
+    const text = md.textContent;
+    for (const c of commentsOf(r.id).filter(c => !c.parent_id && c.field === sec.dataset.field)) {
+      const at = anchorIn(text, c);
+      if (!at) continue;
+      found.add(c.id);
+      if (c.resolved && !showAll) continue;
+      wrapTextRange(md, at[0], at[1], mark(`cm${c.resolved ? ' resolved' : ''}${c.id === cmActive ? ' active' : ''}`, c.id));
+    }
+    if (cmDraft && cmDraft.field === sec.dataset.field) wrapTextRange(md, cmDraft.start, cmDraft.end, mark('cm draft'));
+  }
+  return found;
+}
+
+const shortQuote = (q) => { const s = q.replace(/\s+/g, ' ').trim(); return s.length > 160 ? s.slice(0, 160) + '…' : s; };
+const sectionLabel = (field) => PANE_TEXTS.find(s => s.key === field)?.label || field;
+function commentsPanelHtml(r, found) {
+  const threads = threadsOf(r.id);
+  const open = threads.filter(t => !t.root.resolved), resolved = threads.length - open.length;
+  const showAll = !!loadAppPrefs().cmShowResolved;
+  const shown = showAll ? threads : open;
+  const who = escAttr(loadAppPrefs().commentAuthor || '');
+  const composer = (kind, ph) => `
+    <form class="cm-form" data-cm-form="${kind}">
+      <textarea name="text" rows="2" placeholder="${ph}">${escAttr(cmDraftText)}</textarea>
+      <div class="cm-form-row"><input name="by" placeholder="Your name" value="${who}" list="owner-list" title="Shown with your comment and remembered in this browser" />
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-sm" data-cm="cancel" title="Esc">Cancel</button>
+        <button type="submit" class="btn btn-sm btn-primary" title="${/Mac/.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter">${kind === 'reply' ? 'Reply' : 'Comment'}</button></div>
+    </form>`;
+  const one = (c, cls = '') => `<div class="cm-c ${cls}" data-cid="${c.id}"><div class="cm-meta"><b>${c.by ? escAttr(c.by) : 'Someone'}</b> · ${fmtStamp(c.at)}</div><div class="cm-text">${escAttr(c.text)}</div></div>`;
+  const thread = ({ root, replies }) => {
+    const lost = !found.has(root.id);
+    return `<li class="cm-thread${root.resolved ? ' resolved' : ''}${lost ? ' lost' : ''}${root.id === cmActive ? ' active' : ''}" data-tid="${root.id}">
+      <button type="button" class="cm-quote" data-cm="goto" title="${lost ? 'The words this was about are no longer in the report' : 'Show these words in the report'}">
+        <span class="cm-sec">${escAttr(sectionLabel(root.field))}${lost ? ' · text since changed' : ''}${root.resolved ? ' · resolved' : ''}</span>“${escAttr(shortQuote(root.quote))}”</button>
+      ${one(root, 'root')}
+      ${replies.map(c => one(c, 'reply')).join('')}
+      ${cmReplyTo === root.id ? composer('reply', 'Reply…') : `<div class="cm-actions">
+        <button type="button" class="link-btn" data-cm="reply">Reply</button>
+        <button type="button" class="link-btn" data-cm="resolve">${root.resolved ? 'Reopen' : 'Resolve'}</button>
+        <button type="button" class="link-btn cm-del" data-cm="delete">Delete</button></div>`}
+    </li>`;
+  };
+  return `<section class="pane-comments" aria-label="Comments">
+    <div class="cm-head"><h3>Comments${open.length ? ` <span class="cm-n">${open.length} open</span>` : ''}</h3>
+      ${resolved ? `<label class="check"><input type="checkbox" data-cm="show-resolved" ${showAll ? 'checked' : ''} /> Show resolved (${resolved})</label>` : ''}</div>
+    ${cmDraft ? `<div class="cm-thread draft"><div class="cm-quote"><span class="cm-sec">${escAttr(sectionLabel(cmDraft.field))}</span>“${escAttr(shortQuote(cmDraft.quote))}”</div>${composer('new', 'Your comment on these words…')}</div>` : ''}
+    ${shown.length ? `<ol class="cm-threads">${shown.map(thread).join('')}</ol>` : ''}
+    ${!shown.length && !cmDraft ? `<p class="cm-hint">${threads.length ? 'Every thread is resolved.' : 'Select some words in the report and click <b>Comment</b> to start a thread on them.'}</p>` : ''}
+  </section>`;
+}
+
+// What the current selection would comment on, if it's some words of the report being previewed.
+function selectionAnchor() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount || paneEditing) return null;
+  const range = sel.getRangeAt(0);
+  const node = range.commonAncestorContainer;
+  const md = (node.nodeType === 1 ? node : node.parentElement)?.closest('#rp-pane .pane-sec .md');
+  if (!md) return null;
+  const quote = range.toString();
+  if (!quote.trim()) return null;
+  const pre = document.createRange();
+  pre.selectNodeContents(md);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length;
+  const lead = quote.length - quote.trimStart().length, trail = quote.length - quote.trimEnd().length;
+  return { field: md.closest('.pane-sec').dataset.field, quote: quote.trim(), start: start + lead, end: start + quote.length - trail, rect: range.getBoundingClientRect() };
+}
+// The Comment button floats just above (or below) the selected words, and goes when they're
+// deselected or scrolled out of the pane.
+function updateCommentFloat() {
+  const btn = document.getElementById('cm-float');
+  if (!btn) return;
+  const a = isShown('reports') && rptPreview && !document.querySelector('dialog[open]') ? selectionAnchor() : null;
+  cmPending = a;
+  const pane = document.getElementById('rp-pane').getBoundingClientRect();
+  if (!a || a.rect.bottom < pane.top || a.rect.top > pane.bottom) { btn.hidden = true; return; }
+  btn.hidden = false;
+  const w = btn.offsetWidth || 110;
+  const x = Math.min(Math.max(pane.left + 8, a.rect.left + a.rect.width / 2 - w / 2), Math.max(pane.left + 8, pane.right - w - 8));
+  const above = a.rect.top - 42 > pane.top;
+  btn.style.left = `${Math.round(x)}px`;
+  btn.style.top = `${Math.round(above ? a.rect.top - 38 : a.rect.bottom + 8)}px`;
+}
+function startComment(anchor) {
+  if (!anchor || !selectedReport()) return;
+  const { rect, ...a } = anchor;
+  cmDraft = a;
+  cmReplyTo = null;
+  cmDraftText = '';
+  window.getSelection()?.removeAllRanges();
+  renderPane();
+}
+function focusThread(cid) {
+  cmActive = cid;
+  renderPane();
+  const el = document.getElementById('rp-pane');
+  el.querySelector(`.cm-thread[data-tid="${CSS.escape(cid)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+async function onCommentAction(btn) {
+  const r = selectedReport();
+  if (!r) return;
+  const act = btn.dataset.cm;
+  const tid = btn.closest('[data-tid]')?.dataset.tid;
+  const root = tid && state.reportComments.find(c => c.id === tid);
+  if (act === 'cancel') { cmDraft = null; cmReplyTo = null; cmDraftText = ''; return renderPane(); }
+  if (act === 'show-resolved') { saveAppPrefs({ cmShowResolved: btn.checked }); return renderPane(); }
+  if (act === 'goto') {
+    cmActive = tid;
+    renderPane();
+    return document.querySelector(`#rp-pane mark.cm[data-cid="${CSS.escape(tid)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  if (!root) return;
+  if (act === 'reply') { cmReplyTo = tid; cmDraft = null; cmDraftText = ''; cmActive = tid; return renderPane(); }
+  if (act === 'resolve') {
+    root.resolved = root.resolved ? '' : 'yes';
+    renderReports(); // the list's counts, and the pane
+    return saveComments(root.resolved ? 'Comment resolved' : 'Comment reopened');
+  }
+  if (act === 'delete') {
+    const n = commentsOf(r.id).filter(c => c.parent_id === tid).length;
+    if (!confirm(`Delete this comment${n ? ` and its ${count(n, 'reply', 'replies')}` : ''}?`)) return;
+    const snap = snapshotData();
+    state.reportComments = state.reportComments.filter(c => c.id !== tid && c.parent_id !== tid);
+    if (cmReplyTo === tid) cmReplyTo = null;
+    renderReports();
+    offerUndo(snap, `Deleted a comment on the report for ${fmtShort(r.period_end)}`);
+    await saveComments('Comment deleted');
+  }
+}
+function submitComment(form) {
+  const r = selectedReport();
+  const text = form.elements.text.value.trim(), by = form.elements.by.value.trim();
+  if (!r) return;
+  if (!text) return form.elements.text.focus();
+  saveAppPrefs({ commentAuthor: by });
+  const reply = form.dataset.cmForm === 'reply';
+  if (reply ? !cmReplyTo : !cmDraft) return;
+  const c = {
+    id: nextCommentId(), workspace_id: r.workspace_id, report_id: r.id, field: '', quote: '', start: '', end: '',
+    parent_id: reply ? cmReplyTo : '', at: new Date().toISOString(), by, text, resolved: '',
+  };
+  if (!reply) Object.assign(c, { field: cmDraft.field, quote: cmDraft.quote, start: String(cmDraft.start), end: String(cmDraft.end) });
+  state.reportComments.push(c);
+  cmActive = reply ? cmReplyTo : c.id;
+  cmDraft = null; cmReplyTo = null; cmDraftText = '';
+  renderReports(); // the list's counts, and the pane
+  saveComments(reply ? 'Reply added' : 'Comment added');
+}
+function wireComments() {
+  const btn = document.createElement('button');
+  btn.id = 'cm-float';
+  btn.type = 'button';
+  btn.className = 'cm-float';
+  btn.hidden = true;
+  btn.innerHTML = '<span aria-hidden="true">💬</span> Comment';
+  btn.title = 'Comment on the selected words';
+  btn.addEventListener('pointerdown', (e) => e.preventDefault()); // keeps the selection
+  btn.addEventListener('click', () => startComment(cmPending));
+  document.body.append(btn);
+  document.addEventListener('selectionchange', updateCommentFloat);
+  document.getElementById('rp-pane').addEventListener('scroll', updateCommentFloat, { passive: true });
+  window.addEventListener('resize', updateCommentFloat);
+  const pane = document.getElementById('rp-pane');
+  pane.addEventListener('input', (e) => { if (e.target.matches('.cm-form textarea')) cmDraftText = e.target.value; });
+  pane.addEventListener('keydown', (e) => {
+    const form = e.target.closest?.('.cm-form');
+    if (!form) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cmDraft = null; cmReplyTo = null; cmDraftText = ''; renderPane(); }
+    else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); submitComment(form); }
+  });
 }
 
 /* ---- report preview ---- */
@@ -4886,6 +5159,7 @@ function renderPane(focusKey) {
   const r = selectedReport();
   if (!r) {
     paneEditing = false;
+    resetCommentUi();
     el.innerHTML = `<div class="pane-empty">${state.reports.length ? 'No report selected.' : 'Reports appear here once they’re submitted.'}</div>`;
     return;
   }
@@ -4898,6 +5172,7 @@ function renderPane(focusKey) {
         <button type="button" data-step="1" title="Next report (↓)" ${i >= 0 && i < rptRows.length - 1 ? '' : 'disabled'}>↓</button>
       </span>
       <span class="pane-pos">${panePosText(r)}</span>
+      ${openThreads(r.id).length ? `<span class="pane-cm-count" title="Open comment threads on this report">💬 ${openThreads(r.id).length}</span>` : ''}
       <span class="spacer"></span>
       ${paneEditing
         ? `<button type="button" class="btn btn-sm btn-danger" data-pane="delete">Delete</button>
@@ -4934,6 +5209,12 @@ function renderPane(focusKey) {
           </aside>
         </div>
       </div>`;
+    const found = paintComments(el, r);
+    el.querySelector('.pane-main').insertAdjacentHTML('beforeend', commentsPanelHtml(r, found));
+    if (cmDraft || cmReplyTo) {
+      const t = el.querySelector('.cm-form textarea');
+      if (t && !t.matches(':focus')) { t.scrollIntoView({ block: 'nearest' }); t.focus({ preventScroll: true }); t.setSelectionRange(t.value.length, t.value.length); }
+    }
     return;
   }
 
@@ -5059,12 +5340,13 @@ async function deletePane() {
   const i = rptRows.indexOf(r);
   const next = rptRows[i + 1] || rptRows[i - 1];
   state.reports = state.reports.filter(x => x !== r);
+  const hadComments = dropComments([r.id]);
   rptSelId = next?.id ?? null;
   paneEditing = false;
   rerenderCurrentView();
   focusSelectedRow();
   offerUndo(snap, `Deleted the report${m ? ` on ${itemLabel(m)}` : ''} for ${fmtShort(r.period_end)}`);
-  await saveReports('Report deleted');
+  await Promise.all([saveReports('Report deleted'), hadComments && saveComments()]);
 }
 
 // Before the preview shows something else: keep edits that can be saved, otherwise ask.
@@ -5081,6 +5363,7 @@ function leavePaneEdit() {
 
 function selectReport(id, focus) {
   if (id !== rptSelId && !leavePaneEdit()) return;
+  if (id !== rptSelId) resetCommentUi();
   rptSelId = id;
   paneEditing = false;
   document.querySelectorAll('#reports-body tr[data-rid]').forEach(tr => {
@@ -5113,6 +5396,11 @@ const isTyping = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT
 function onPaneClick(e) {
   const step = e.target.closest('[data-step]');
   if (step) return stepReport(+step.dataset.step);
+  const cm = e.target.closest('[data-cm]');
+  if (cm) return onCommentAction(cm);
+  const mark = e.target.closest('mark.cm[data-cid]');
+  if (mark) return focusThread(mark.dataset.cid);
+  if (e.target.closest('.pane-comments')) return;
   const act = e.target.closest('[data-pane]')?.dataset.pane;
   if (act === 'edit') return editPane('exec_summary');
   if (act === 'cancel') return cancelPane();
@@ -5135,7 +5423,8 @@ function onPaneClick(e) {
 function wirePane() {
   const pane = document.getElementById('rp-pane');
   pane.addEventListener('click', onPaneClick);
-  pane.addEventListener('submit', (e) => { e.preventDefault(); savePane(); });
+  pane.addEventListener('submit', (e) => { e.preventDefault(); if (e.target.matches('.cm-form')) submitComment(e.target); else savePane(); });
+  wireComments();
   pane.addEventListener('change', (e) => {
     if (['status', 'cadence', 'period_end'].includes(e.target.name)) refreshPaneForm();
     const err = paneForm()?.querySelector('.pane-error');
@@ -5153,7 +5442,7 @@ function wirePane() {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       stepReport(e.key === 'ArrowDown' ? 1 : -1);
-    } else if (e.key === 'Enter' && !paneEditing && !e.target.closest('button, a, [data-pane]') && selectedReport()) {
+    } else if (e.key === 'Enter' && !paneEditing && !e.target.closest('button, a, [data-pane], .pane-comments') && selectedReport()) {
       e.preventDefault();
       editPane('exec_summary');
     }
@@ -6352,10 +6641,12 @@ async function deleteWorkspace() {
   state.raid = state.raid.filter(r => r.workspace_id !== p.id);
   const hadNotes = state.raidNotes.some(n => n.workspace_id === p.id);
   state.raidNotes = state.raidNotes.filter(n => n.workspace_id !== p.id);
+  const hadComments = state.reportComments.some(c => c.workspace_id === p.id);
+  state.reportComments = state.reportComments.filter(c => c.workspace_id !== p.id);
   applyWorkspaceChrome();
   rerenderCurrentView();
   offerUndo(snap, `Deleted the workspace ${p.name}${lost.length ? ` and its ${lost.join(' and ')}` : ''}`);
-  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadStreams && saveStreams(), hadRaid && saveRaid(), hadNotes && saveRaidNotes()]);
+  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadStreams && saveStreams(), hadRaid && saveRaid(), hadNotes && saveRaidNotes(), hadComments && saveComments()]);
 }
 
 function wireWorkspaces() {
