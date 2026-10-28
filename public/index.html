@@ -556,8 +556,9 @@
     <div class="toolbar">
       <div class="toolbar-group">
         <div class="mode-seg" role="radiogroup" aria-label="Show">
-          <label title="Every report in this workspace"><input type="radio" name="rp-mode" value="all" /><span>All reports</span></label>
+          <label title="Status reports on items"><input type="radio" name="rp-mode" value="all" /><span>Item reports</span></label>
           <label title="What still needs a report this period, by owner"><input type="radio" name="rp-mode" value="due" /><span>Due <b id="rp-due-count" class="seg-count"></b></span></label>
+          <label title="The weekly RAG and summary for the workspace and each stream"><input type="radio" name="rp-mode" value="weekly" /><span>Weekly updates</span></label>
         </div>
         <input id="rpf-q" type="search" class="rp-list-only" placeholder="Search report text…" aria-label="Search the reports" />
         <button id="rpf-clear" class="btn btn-ghost" hidden>Clear filters</button>
@@ -567,6 +568,7 @@
       </div>
       <div class="toolbar-actions">
         <button id="btn-new-report" class="btn btn-primary">+ New report</button>
+        <button id="btn-new-update" class="btn btn-primary" title="Record this week’s update for the workspace" hidden>+ New update</button>
         <div class="tb-menu">
           <button type="button" class="btn btn-menu" data-menu="ex-reports" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
           <div id="ex-reports" class="tb-pop tb-pop-right tb-pop-list" hidden>
@@ -587,6 +589,11 @@
       <section id="rp-pane" class="rp-pane" aria-label="Selected report"></section>
     </div>
     <div id="rp-due" class="rp-due" hidden></div>
+    <div id="rp-weekly" class="rp-due" hidden></div>
+    <div id="rp-weekly-hint" class="help help-off" hidden>
+      <p><b>Weekly updates</b> are the weekly RAG, trend and summary for the workspace as a whole and for each stream: what the Portfolio and Streams tables show. They’re listed here week by week, newest first; click one to read or edit it.</p>
+      <p><b>+ New update</b> records this week’s update for the workspace. A stream’s update is recorded from its row on <b>Streams</b>, or by clicking its last one here and changing the week.</p>
+    </div>
     <div id="rp-due-hint" class="help help-off" hidden><p><b>Due</b> lists what still needs a report this period, by owner: anything that has started or already has reports, until it reaches a done status. Each follows the cadence of its latest report (weekly if it has none); a report whose period reaches into the current one covers it. <b>Periods missed</b> counts the periods since its last report.</p></div>
     <div id="rp-hint" class="help" hidden><p>Select a report to read it in the preview; <b>↑</b> <b>↓</b> move through the list. Click into the preview to edit the report in place. Sort, filter, move and resize columns as on <span data-term="Items">Items</span>.</p>
       <p>To report on <span data-term="item">item</span>, click it on the plan and choose <b>New report</b>, or use <b>New report</b> here or on <span data-term="Items">Items</span>.</p></div>

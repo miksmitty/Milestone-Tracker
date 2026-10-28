@@ -1272,6 +1272,13 @@ body.nav-collapsed .nav-badge { display: none; }
 .due-late { color: var(--accent); font-weight: 600; }
 .due-act { text-align: right; white-space: nowrap; }
 .due-empty { padding: 28px; font-size: 13.5px; color: var(--muted); }
+.wk-table tr[data-update] { cursor: pointer; }
+.wk-table tr[data-update]:hover td { background: var(--hover); }
+.wk-table tr[data-update]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wk-week { white-space: nowrap; color: var(--muted); }
+.wk-sum { max-width: 560px; }
+.wk-sum .md { font-size: 13px; line-height: 1.45; }
+.wk-sum .md > * + * { margin-top: 4px; }
 
 /* ---------- what changed ---------- */
 .tb-select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; color: var(--text); background: var(--panel); }

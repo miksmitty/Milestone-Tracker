@@ -4750,7 +4750,7 @@ function stampCell(iso) {
 // a report, until it reaches a done status. Its cadence is that of its latest report (weekly if it
 // has none); it's covered once a report's period reaches into the current one.
 
-let rptMode = 'all'; // 'all' reports, or what's 'due'
+let rptMode = 'all'; // 'all' item reports, what's 'due', or the 'weekly' updates
 
 function reportsDue(items = state.items) {
   const today = todayISO();
@@ -4814,9 +4814,47 @@ function renderDue() {
     : `<p class="due-empty">Every ${escAttr(T.item)} that’s under way has a report for this period. Nothing is due.</p>`;
 }
 
+// The weekly updates of this workspace and its streams, week by week, newest first. Each opens
+// in the weekly update dialog, as from the Portfolio and Streams tables.
+function renderWeekly() {
+  const p = currentWorkspace();
+  const rg = ragOf(p.id);
+  const order = ['', ...streamsInOrder().filter(Boolean)];
+  const ups = state.updates.filter(u => u.workspace_id === p.id);
+  const weeks = [...new Set(ups.map(u => u.week_ending))].sort((a, b) => b.localeCompare(a));
+  const thisWeek = defaultPeriodEnd('Weekly');
+  const subjectName = (u) => (u.stream_id ? escAttr(streamName(u.stream_id) || '(Deleted stream)') : `<b>${escAttr(p.name)}</b> <span class="muted">· whole workspace</span>`);
+  document.getElementById('rp-weekly').innerHTML = ups.length ? `
+    <table class="due-table wk-table">
+      <thead><tr><th>Week ending</th><th>For</th><th>RAG</th><th>Summary</th><th>Updated by</th><th></th></tr></thead>
+      ${weeks.map(w => `
+        <tbody>
+          <tr class="due-owner"><th colspan="6">Week ending ${fmtNice(w)}${w === thisWeek ? ' <span class="muted">· this week</span>' : ''}</th></tr>
+          ${ups.filter(u => u.week_ending === w).sort((a, b) => { const i = order.indexOf(a.stream_id || ''), j = order.indexOf(b.stream_id || ''); return (i < 0) - (j < 0) || i - j; }).map(u => `
+            <tr data-update="${u.id}" tabindex="0" title="Open this update">
+              <td class="wk-week">${fmtShort(u.week_ending)}</td>
+              <td>${subjectName(u)}</td>
+              <td>${statusPill(u.status, rg.map)}</td>
+              <td class="wk-sum">${u.summary ? `<div class="md">${mdToHtml(u.summary)}</div>` : '<span class="muted">No summary</span>'}</td>
+              <td>${escAttr(u.author)}</td>
+              <td class="due-act"><button type="button" class="btn btn-sm" data-open-update="${u.id}">Open</button></td>
+            </tr>`).join('')}
+        </tbody>`).join('')}
+    </table>`
+    : `<p class="due-empty">No weekly updates yet. <b>+ New update</b> records this week’s update for ${escAttr(p.name)}; a stream’s is recorded from its row on <b>Streams</b>.</p>`;
+}
+function openUpdateById(id) {
+  const u = state.updates.find(x => x.id === id);
+  if (!u) return;
+  const p = workspaceById(u.workspace_id);
+  openUpdateDialog(u.stream_id ? streamSubject(p, u.stream_id) : programSubject(p));
+  document.getElementById('update-form').elements.week_ending.value = u.week_ending;
+  loadUpdateWeek(true);
+}
+
 function setReportsMode(mode) {
   if (mode === rptMode) return;
-  if (mode === 'due' && !leavePaneEdit()) return (document.querySelector('[name="rp-mode"][value="all"]').checked = true);
+  if (mode !== 'all' && !leavePaneEdit()) return (document.querySelector('[name="rp-mode"][value="all"]').checked = true);
   rptMode = mode;
   saveAppPrefs({ reportsMode: mode });
   renderReports();
@@ -4825,17 +4863,21 @@ function setReportsMode(mode) {
 function renderReports() {
   updateDueBadge();
   document.querySelectorAll('[name="rp-mode"]').forEach(r => { r.checked = r.value === rptMode; });
-  const due = rptMode === 'due';
+  const due = rptMode === 'due', weekly = rptMode === 'weekly', list = !due && !weekly;
   document.getElementById('rp-due').hidden = !due;
-  document.getElementById('rp-split').hidden = due;
-  for (const el of document.querySelectorAll('#view-reports .rp-list-only')) el.hidden = due; // search and preview belong to the list
-  document.getElementById('rp-hint').classList.toggle('help-off', due);
+  document.getElementById('rp-weekly').hidden = !weekly;
+  document.getElementById('rp-split').hidden = !list;
+  for (const el of document.querySelectorAll('#view-reports .rp-list-only')) el.hidden = !list; // search and preview belong to the list
+  document.getElementById('rp-hint').classList.toggle('help-off', !list);
   document.getElementById('rp-due-hint').classList.toggle('help-off', !due);
-  document.getElementById('rp-count').hidden = due;
-  document.getElementById('ex-reports').parentElement.hidden = due; // nothing to export from the Due list
-  if (due) {
+  document.getElementById('rp-weekly-hint').classList.toggle('help-off', !weekly);
+  document.getElementById('rp-count').hidden = !list;
+  document.getElementById('ex-reports').parentElement.hidden = !list; // the list is what's exported
+  document.getElementById('btn-new-report').hidden = weekly;
+  document.getElementById('btn-new-update').hidden = !weekly;
+  if (!list) {
     document.getElementById('btn-rp-orphans').hidden = true;
-    return renderDue();
+    return due ? renderDue() : renderWeekly();
   }
   updateHeadState(rptTable); // filters can be set from elsewhere, e.g. "All reports on this item"
   const qEl = document.getElementById('rpf-q');
@@ -5505,12 +5547,21 @@ function wirePane() {
   divider.addEventListener('dblclick', () => { split.style.removeProperty('--rp-list-w'); saveAppPrefs({ rptListW: null }); });
 
   rptPreview = loadAppPrefs().rptPreview ?? true;
-  rptMode = loadAppPrefs().reportsMode === 'due' ? 'due' : 'all';
+  rptMode = ['due', 'weekly'].includes(loadAppPrefs().reportsMode) ? loadAppPrefs().reportsMode : 'all';
   document.querySelectorAll('[name="rp-mode"]').forEach(r => r.addEventListener('change', () => setReportsMode(r.value)));
   document.getElementById('rp-due').addEventListener('click', (e) => {
     const b = e.target.closest('[data-due-report]');
     if (b) openReportDialog({ itemId: b.dataset.dueReport });
   });
+  document.getElementById('rp-weekly').addEventListener('click', (e) => {
+    const tr = e.target.closest('[data-update]');
+    if (tr) openUpdateById(tr.dataset.update);
+  });
+  document.getElementById('rp-weekly').addEventListener('keydown', (e) => {
+    const tr = e.target.closest('[data-update]');
+    if (tr && e.key === 'Enter') openUpdateById(tr.dataset.update);
+  });
+  document.getElementById('btn-new-update').onclick = () => openUpdateDialog(programSubject(currentWorkspace()));
   const toggle = document.getElementById('rp-preview-toggle');
   toggle.checked = rptPreview;
   toggle.addEventListener('change', () => setPreview(toggle.checked));
@@ -7085,7 +7136,7 @@ function dashWeekly(p, rg) {
   const subjects = [{ id: '', name: p.code || 'Program', sub: programSubject(p) },
     ...streamsInOrder().filter(id => id && updatesFor(p.id, id).length).map(id => ({ id, name: streamName(id), sub: streamSubject(p, id) }))];
   const ups = subjects.map(s => ({ ...s, byWeek: new Map(updatesFor(p.id, s.id).map(u => [u.week_ending, u])) }));
-  if (!ups.some(s => s.byWeek.size)) return dashCard('weekly', 'Weekly RAG', 'last 12 weeks', dashEmpty('No weekly updates yet. <b>Weekly update</b> on the Portfolio or Streams page records one.'), { span: 7 });
+  if (!ups.some(s => s.byWeek.size)) return dashCard('weekly', 'Weekly RAG', 'last 12 weeks', dashEmpty('No weekly updates yet. <b>Weekly update</b> above records this week’s; they’re listed under <b>Reports → Weekly updates</b>.'), { span: 7 });
   const body = `<div class="dv-weeks" style="--n:${weeks.length}">
     <div class="dv-weeks-row dv-weeks-head"><span></span>${weeks.map((w, i) => `<span class="dv-week${w === end ? ' now' : ''}">${i % 2 || w === end ? fmtShort(w).replace(/ .*/, '') : ''}<br><small>${w === end ? 'this wk' : i % 2 ? fmtShort(w).replace(/^\S+ /, '') : ''}</small></span>`).join('')}</div>
     ${ups.map(s => `<div class="dv-weeks-row"><span class="dv-weeks-name">${dashBtn('dv-name', { k: 'update', stream: s.id }, null, escAttr(s.name))}</span>
@@ -9160,7 +9211,7 @@ function palPages() {
   const ws = currentWorkspace();
   return [
     ['overview', 'Portfolio'], ['workspaces', 'Portfolio · cards'], ['dash', `Dashboard · ${ws.name}`], ['gantt', `Plan · ${ws.name}`],
-    ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`],
+    ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`], ['weekly', `Weekly updates · ${ws.name}`],
     ['raid', `Risks & issues · ${ws.name}`],
     ['changes', `What changed · ${ws.name}`], ['dates', `Date log · ${ws.name}`], ['streams', `Streams · ${ws.name}`],
   ].map(([view, label]) => ({ kind: 'page', view, label, hay: label.toLowerCase() }));
@@ -9238,7 +9289,7 @@ async function pickPalette(i) {
   if (!h) return;
   document.getElementById('palette').close();
   if (h.kind === 'page') {
-    if (h.view === 'due') { rptMode = 'due'; return switchView('reports'); }
+    if (h.view === 'due' || h.view === 'weekly') { rptMode = h.view; return switchView('reports'); }
     if (h.view === 'reports') rptMode = 'all';
     return switchView(h.view);
   }
