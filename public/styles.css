@@ -1103,6 +1103,14 @@ button.cm-quote:hover { background: var(--hover); }
 .ov-table .ov-ms.ms-total { background: var(--panel-2); }
 .ov-table tfoot td { font-weight: 700; background: var(--panel-2); border-top: 1px solid var(--border); border-bottom: 0; }
 .ov-act { text-align: right; white-space: nowrap; }
+/* the Update column stays in view when the table scrolls sideways */
+#overview-table .ov-act, #streams-table .ov-act,
+#overview-table thead tr:first-child th:last-child, #streams-table thead tr:first-child th:last-child,
+#overview-table tfoot td:last-child, #streams-table tfoot td:last-child {
+  position: sticky; right: 0; z-index: 1; background: var(--panel); box-shadow: inset 1px 0 0 var(--line);
+}
+#overview-table thead tr:first-child th:last-child, #streams-table thead tr:first-child th:last-child { background: var(--panel-2); }
+#overview-table tbody tr:hover .ov-act, #streams-table tbody tr:hover .ov-act { background: var(--row-hover); }
 
 .trend { display: inline-block; font-size: 20px; font-weight: 700; line-height: 1; cursor: default; }
 .trend-up { color: var(--ok); }
