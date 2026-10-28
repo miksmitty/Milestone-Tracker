@@ -547,3 +547,11 @@ id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 682,2026-10-06T13:38:55.368Z,,1,39,,Extra build work,end,,2026-06-15,,Added,New item dialog,
 683,2026-10-06T13:39:04.634Z,,1,39,,Extra build work,start,2026-06-01,,,Deleted,Undo,Undone: Added Extra build work
 684,2026-10-06T13:39:04.634Z,,1,39,,Extra build work,end,2026-06-15,,,Deleted,Undo,Undone: Added Extra build work
+685,2026-10-28T20:19:30.167Z,,1,38,,Stream test item,start,,2026-10-28,,Added,New item dialog,
+686,2026-10-28T20:19:30.167Z,,1,38,,Stream test item,end,,2026-10-28,,Added,New item dialog,
+685,2026-10-28T20:19:30.890Z,,1,38,,Stream test item,start,,2026-10-28,,Edited outside the app,milestones.csv edited directly,
+686,2026-10-28T20:19:30.890Z,,1,38,,Stream test item,end,,2026-10-28,,Edited outside the app,milestones.csv edited directly,
+687,2026-10-28T20:20:12.785Z,,1,38,,Stream test item,start,2026-10-28,,,Deleted,milestones.csv edited directly,
+688,2026-10-28T20:20:12.785Z,,1,38,,Stream test item,end,2026-10-28,,,Deleted,milestones.csv edited directly,
+687,2026-10-28T20:20:12.918Z,,1,38,,Stream test item,start,2026-10-28,,,Deleted,milestones.csv edited directly,
+688,2026-10-28T20:20:12.918Z,,1,38,,Stream test item,end,2026-10-28,,,Deleted,milestones.csv edited directly,
