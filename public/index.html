@@ -629,13 +629,17 @@
         <label class="span3">GitLab URL<input name="gitlab_url" type="url" placeholder="https://gitlab.example.com/group/project" /></label>
         <label class="span3">Use case URL<input name="use_case_url" type="url" placeholder="https://…" /></label>
       </div>
+      <div id="ed-related" class="dlg-related">
+        <span class="dlg-related-l">Related</span>
+        <button type="button" id="ed-history" class="link-btn" title="This item’s reports">Reports</button>
+        <button type="button" id="ed-dates" class="link-btn" title="Every change to this item’s dates">Date log</button>
+        <button type="button" id="ed-raid" class="link-btn" title="Risks, issues and dependencies linked to this">Risks &amp; issues</button>
+        <span class="spacer"></span>
+        <button type="button" id="ed-report" class="btn btn-sm">+ New report</button>
+      </div>
       <p id="ed-error" class="dlg-error"></p>
       <footer class="dlg-foot">
         <button type="button" id="ed-delete" class="btn btn-danger">Delete</button>
-        <button type="button" id="ed-report" class="btn">New report</button>
-        <button type="button" id="ed-history" class="btn">Reports</button>
-        <button type="button" id="ed-dates" class="btn">Date log</button>
-        <button type="button" id="ed-raid" class="btn" title="Risks, issues and dependencies linked to this">Risks &amp; issues</button>
         <span class="spacer"></span>
         <button type="button" id="ed-cancel" class="btn">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>

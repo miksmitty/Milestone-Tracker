@@ -2574,6 +2574,7 @@ function openEditDialog(m) {
   const raidN = m ? raidLinkedTo(`item:${m.id}`).filter(r => !isClosed(r)).length : 0;
   document.getElementById('ed-raid').hidden = !m;
   document.getElementById('ed-raid').textContent = `Risks & issues${raidN ? ` (${raidN})` : ''}`;
+  document.getElementById('ed-related').hidden = !m; // a new item has nothing yet
   document.getElementById('ed-error').textContent = '';
   refreshDatalists();
   renderEdDeps();
@@ -3274,8 +3275,8 @@ const byItemRef = (a, b) => { const ma = itemById(a), mb = itemById(b); return m
 // The item's ID is an internal key, so it isn't shown; Ref is how people know an item.
 const GRID_COLS = [
   { key: 'sel', label: '', w: 36, fixed: true, head: () => `<input type="checkbox" id="grid-sel-all" title="Select all shown" />` },
-  { key: 'ref', label: 'Ref', w: 80 },
-  { key: 'title', label: 'Title', w: 200 },
+  { key: 'ref', label: 'Ref', w: 96 },
+  { key: 'title', label: 'Title', w: 260 },
   { key: 'description', label: 'Description', w: 220 },
   { key: 'status', label: 'RAG', w: 125, kind: 'status' },
   { key: 'start', label: 'Start', w: 135, kind: 'date', show: fmtNice },
