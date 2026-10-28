@@ -4439,6 +4439,22 @@ function openReportDialog({ report = null, itemId = '' } = {}) {
   if (rpItemId) focusText(f.exec_summary); else f.item_id.focus();
 }
 
+// Everything that leads up to a milestone, for the report on it: the items that roll up to it and
+// the ones it depends on, followed all the way back (the chain the Gantt chart lights up when the
+// milestone is hovered). Each with its RAG, dates and owner, in date order, and how the direct
+// ones are linked. Nothing when the chain is empty.
+function rollupListHtml(m) {
+  if (!m || !state.items.includes(m)) return '';
+  const up = [...chainParts(m.id).up].map(itemById).filter(Boolean)
+    .sort((a, b) => a.end.localeCompare(b.end) || a.start.localeCompare(b.start) || cmpRef(a, b));
+  if (!up.length) return '';
+  const when = (k) => (isTask(k) ? `${fmtShort(k.start)} – ${fmtShort(k.end)}` : fmtShort(k.end));
+  const how = (k) => (k.parent === m.id ? 'rolls up to it' : m.deps.includes(k.id) ? 'it depends on this' : '');
+  return `<div class="rp-rollup"><div class="rp-rollup-head">Leads up to it <span class="rp-rollup-n">${up.length}</span></div>
+    <ul class="rp-rollup-list">${up.map(k => `<li>${statusPill(k.status)}<span class="rp-rollup-title">${k.ref ? `<b>${escAttr(k.ref)}</b> ` : ''}${escAttr(k.title)}</span>
+      <small>${escAttr(typeName(k))} · ${when(k)}${k.owner ? ` · ${escAttr(k.owner)}` : ''}</small>${how(k) ? `<em class="rp-rollup-how">${how(k)}</em>` : ''}</li>`).join('')}</ul></div>`;
+}
+
 // Defaults for a new report: carry on the item's last cadence, current status and owner.
 function newReportValues(itemId) {
   const m = itemById(itemId);
@@ -4464,7 +4480,8 @@ function refreshReportForm() {
   strip.hidden = !rpItemId;
   strip.innerHTML = m
     ? `${statusPill(m.status)}<span class="rp-item-title">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>
-       <span class="rp-item-meta">${escAttr(typeName(m))} · ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : `due ${fmtNice(m.end)}`}${m.owner ? ` · ${escAttr(m.owner)}` : ''}</span>`
+       <span class="rp-item-meta">${escAttr(typeName(m))} · ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : `due ${fmtNice(m.end)}`}${m.owner ? ` · ${escAttr(m.owner)}` : ''}</span>
+       ${rollupListHtml(m)}`
     : `<span class="rp-item-title">Deleted ${escAttr(T.item)} #${escAttr(rpItemId)}</span>`;
 
   document.getElementById('rp-range').textContent = end && parseDate(end)
@@ -4650,6 +4667,7 @@ function rerenderCurrentView() {
   updateDueBadge();
   updateRaidBadge();
   if (isShown('gantt')) renderGantt();
+  if (isShown('dash')) renderDash();
   if (isShown('reports')) renderReports();
   if (isShown('workspaces')) renderWorkspaces();
   if (isShown('overview')) renderOverview();
@@ -5199,7 +5217,7 @@ function renderPane(focusKey) {
       <div class="pane-item-title">${m ? `${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}` : `<i>Deleted ${escAttr(T.item)} #${escAttr(r.item_id)}</i>`}</div>
       ${filterValue(rptTable, 'item_id') === r.item_id || n < 2 ? ''
         : `<button type="button" class="link-btn" data-pane="item">All ${n} reports on this ${escAttr(T.item)}</button>`}
-    </div>`;
+    </div>${rollupListHtml(m)}`;
   const edited = r.updated !== r.created ? `<small>Last edited ${fmtStamp(r.updated)}</small>` : '';
 
   // The text runs down a main column; the report's details sit in a side column (above the
@@ -6199,7 +6217,7 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { overview: () => 'Program overview', streams: () => 'Stream overview', workspaces: () => 'Workspaces', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date history', raid: () => 'Risks, issues & dependencies' };
+const VIEW_TITLES = { overview: () => 'Program overview', streams: () => 'Stream overview', workspaces: () => 'Workspaces', dash: () => 'Dashboard', gantt: () => 'Gantt chart', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date history', raid: () => 'Risks, issues & dependencies' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
@@ -6880,6 +6898,401 @@ function downloadOverviewCSV(forStream) {
   a.href = URL.createObjectURL(blob);
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+
+/* ================= dashboard ================= */
+// One page that answers "how is this workspace doing?": progress against the time that's gone,
+// what's overdue and what's coming up, where the items stand by RAG and by stream, the weekly RAG
+// record, movement against the baseline, the milestones ahead month by month, the open risks and
+// the latest reports. Every number is a way in — it opens the Gantt chart, the register or the
+// reports showing just those things — and every chart has a table twin (the Table toggle), so
+// nothing depends on colour alone. The charts use the workspace's own RAG colours for RAG, and
+// one blue/red pair for early/late.
+
+const DASH_HORIZONS = [14, 30, 60, 90];
+let dashHorizon = DASH_HORIZONS.includes(+loadAppPrefs().dashHorizon) ? +loadAppPrefs().dashHorizon : 30;
+const dashTables = new Set(); // cards showing their table rather than the chart
+const DASH_BUCKET_COLORS = { closed: 'var(--closed)', green: 'var(--ok)', redAmber: 'var(--ra)', notStarted: 'var(--faint-2)' };
+
+// What a click on a number or mark does; held as JSON in data-dash-go.
+const dashGoAttr = (go) => `data-dash-go="${escAttr(JSON.stringify(go))}"`;
+// A tooltip: a heading and lines of text, held in data-tip (JSON) and shown with the Gantt tip.
+const dashTipAttr = (head, ...lines) => `data-tip="${escAttr(JSON.stringify({ h: head, l: lines.filter(Boolean) }))}"`;
+const dashBtn = (cls, go, tip, inner, extra = '') => `<button type="button" class="${cls}" ${dashGoAttr(go)} ${tip ? dashTipAttr(...tip) : ''} ${extra}>${inner}</button>`;
+const daysWord = (n) => `${n} day${n === 1 ? '' : 's'}`;
+const pct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
+
+// Progress: the share of all task-days that's complete (as a milestone's progress is counted),
+// against the share of the plan's time that's gone.
+function dashProgress(items) {
+  const tasks = items.filter(isTask);
+  const totalDays = tasks.reduce((a, t) => a + taskDays(t), 0);
+  const doneDays = tasks.filter(t => isDoneStatus(t.status)).reduce((a, t) => a + taskDays(t), 0);
+  const dates = items.flatMap(m => [m.start, m.end]).filter(Boolean).sort();
+  const first = dates[0], last = dates.at(-1), today = todayISO();
+  const span = first && last ? Math.max(1, daysBetween(first, last)) : 0;
+  const elapsed = span ? Math.max(0, Math.min(100, Math.round((daysBetween(first, today) / span) * 100))) : null;
+  return { pct: totalDays ? Math.round((doneDays / totalDays) * 100) : null, doneDays, totalDays, tasks: tasks.length, first, last, elapsed };
+}
+
+// A card: title, a note, the body and, when it has one, a table twin behind the Table toggle.
+function dashCard(key, title, sub, body, { span = 6, table = null, actions = '', cls = '' } = {}) {
+  const tbl = dashTables.has(key);
+  return `<section class="dash-card ${cls}" style="--span:${span}" id="dash-${key}">
+    <div class="dash-head"><h2>${title}</h2>${sub ? `<span class="dash-sub">${sub}</span>` : ''}
+      <span class="dash-act">${actions}${table ? `<button type="button" class="dash-tbtn${tbl ? ' on' : ''}" data-dash-table="${key}" aria-pressed="${tbl}" title="Show the numbers as a table">Table</button>` : ''}</span></div>
+    ${table ? `<div class="dash-chart" ${tbl ? 'hidden' : ''}>${body}</div><div class="dash-tbl" ${tbl ? '' : 'hidden'}>${table}</div>` : body}
+  </section>`;
+}
+const dashEmpty = (text) => `<p class="dash-empty">${text}</p>`;
+const dvTable = (head, rows) => `<table class="dv-table"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+  <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td class="${i ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+const dvLegend = (items) => `<div class="dv-legend">${items.map(([name, color, n]) =>
+  `<span><i style="background:${color}"></i>${escAttr(name)}${n != null ? ` <b>${n}</b>` : ''}</span>`).join('')}</div>`;
+
+// Stacked horizontal bars: rows of segments sized against `max` (counts), each a way in.
+function dvStacked(rows, max) {
+  return `<div class="dv-bars">${rows.map(r => `<div class="dv-row">
+      <div class="dv-label">${r.labelHtml}</div>
+      <div class="dv-bar" role="img" aria-label="${escAttr(`${r.label}: ${r.total}`)}">${r.segs.filter(s => s.n).map(s =>
+        dashBtn('dv-seg', s.go, [r.label, `${s.n} ${s.name}`, `${pct(s.n, r.total)}% of ${r.total}`], '', `style="flex-basis:${(s.n / max) * 100}%;background:${s.color}" aria-label="${escAttr(`${s.n} ${s.name}`)}"`)).join('')}</div>
+      <div class="dv-total">${r.total}</div>
+    </div>`).join('')}</div>`;
+}
+
+function renderDash() {
+  const p = currentWorkspace();
+  const items = state.items, rg = ragOf(p.id), today = todayISO();
+  const sel = document.getElementById('dash-horizon');
+  sel.innerHTML = DASH_HORIZONS.map(n => `<option value="${n}" ${n === dashHorizon ? 'selected' : ''}>Next ${n} days</option>`).join('');
+  document.getElementById('dash-asof').textContent = `${count(items.length, T.item, T.items)} · ${fmtNice(today)}`;
+  const cards = [dashGlance(p, rg), dashHero(items), dashTiles(p, items)];
+  if (items.length) {
+    cards.push(dashStand(items, rg), dashStreams(p, items, rg), dashWeekly(p, rg), dashSlip(items), dashMonths(items, rg), dashOwners(items),
+      dashComing(items), dashRisks(p));
+    if (!reportsOff()) cards.push(dashReports());
+  }
+  document.getElementById('dash-grid').innerHTML = cards.join('')
+    + (items.length ? '' : dashCard('none', 'Nothing to show yet', '', dashEmpty(`This workspace has no ${T.items} yet. Add some on the Gantt chart or in the ${T.Items} table and the dashboard fills itself in.`), { span: 12 }));
+  dashDateChanges();
+}
+
+/* ---- the cards ---- */
+
+// The workspace at a glance: its overall RAG and trend, who runs it, its dates and the latest weekly update.
+function dashGlance(p, rg) {
+  const [cur] = updatesFor(p.id);
+  const stale = isStale(cur);
+  const meta = [['Owner', p.owner], ['Lead', p.lead], ['Dates', p.start || p.end ? `${p.start ? fmtShort(p.start) : '…'} – ${p.end ? fmtNice(p.end) : '…'}` : '']]
+    .filter(([, v]) => v).map(([k, v]) => `<div><dt>${k}</dt><dd>${escAttr(v)}</dd></div>`).join('');
+  const update = cur
+    ? `<div class="dash-update${stale ? ' stale' : ''}">
+        <div class="dash-update-head">${statusPill(cur.status, rg.map)} <span>w/e ${fmtShort(cur.week_ending)}${cur.author ? ` · ${escAttr(cur.author)}` : ''}</span>
+          ${stale ? '<em class="dash-stale">No update this week</em>' : ''}</div>
+        ${cur.summary ? `<div class="md dash-md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No summary</span>'}</div>`
+    : `<div class="dash-update stale"><em class="dash-stale">No weekly update yet</em></div>`;
+  return dashCard('glance', escAttr(p.name), p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : '', `
+    <div class="dash-glance-top">${statusPill(p.status, rg.map)} ${trendBadge(p.trend)}${p.description ? `<p class="dash-desc">${escAttr(p.description)}</p>` : ''}</div>
+    ${meta ? `<dl class="dash-meta">${meta}</dl>` : ''}
+    <div class="dash-update-label">Latest weekly update</div>${update}`,
+  { span: 7, actions: dashBtn('btn btn-sm', { k: 'update' }, null, 'Update') });
+}
+
+// The one number the page leads with: how much of the work is done, against how much of the time has gone.
+function dashHero(items) {
+  const g = dashProgress(items);
+  if (g.pct == null) {
+    return dashCard('hero', 'Progress', '', dashEmpty(g.tasks ? `The ${T.tasks} have no dates yet, so there’s nothing to measure.` : `Progress is measured from ${T.tasks}; this workspace has none yet.`), { span: 5, cls: 'dash-hero' });
+  }
+  const diff = g.elapsed == null ? null : g.pct - g.elapsed;
+  const verdict = diff == null ? '' : diff >= 5 ? `<b class="ok">${diff} points ahead</b> of the time gone` : diff <= -5 ? `<b class="ra">${-diff} points behind</b> the time gone` : '<b>In step</b> with the time gone';
+  return dashCard('hero', 'Progress', `${count(g.tasks, T.task, T.tasks)}`, `
+    <div class="dash-hero-row"><span class="dash-hero-n">${g.pct}%</span><span class="dash-hero-of">of the work complete<br><small>${g.doneDays} of ${g.totalDays} ${T.task}-days</small></span></div>
+    <div class="dv-meter" role="img" aria-label="${escAttr(`${g.pct}% complete; ${g.elapsed ?? 0}% of the time has gone`)}">
+      <i class="dv-meter-fill" style="width:${g.pct}%"></i>${g.elapsed != null ? `<i class="dv-meter-mark" style="left:${g.elapsed}%" title="Today: ${g.elapsed}% of the plan’s time has gone"></i>` : ''}
+    </div>
+    <div class="dash-hero-foot">${g.elapsed != null ? `<span><b>${g.elapsed}%</b> of the time gone · ${fmtShort(g.first)} – ${fmtNice(g.last)}</span>` : ''}<span>${verdict}</span></div>`,
+  { span: 5, cls: 'dash-hero' });
+}
+
+// Headline counts, each a way in.
+function dashTiles(p, items) {
+  const open = items.filter(m => !isDoneStatus(m.status));
+  const ms = items.filter(m => !isTask(m));
+  const closed = ms.filter(m => isDoneStatus(m.status)).length;
+  const doneNames = STATUSES.filter(st => isDoneStatus(st));
+  const late = open.filter(isLate), lateStart = open.filter(isLateStart);
+  const horizon = addDays(todayISO(), dashHorizon);
+  const soon = open.filter(m => m.end >= todayISO() && m.end <= horizon);
+  const raid = raidOf().filter(r => !isClosed(r));
+  const ri = raid.filter(r => r.kind !== 'dependency'), deps = raid.filter(r => r.kind === 'dependency');
+  const high = ri.filter(r => raidRating(r).level === 'High').length;
+  const blocked = deps.filter(r => r.status === 'Blocked').length, atRisk = deps.filter(r => r.status === 'At risk').length;
+  const due = reportsOff() ? null : reportsDue().length;
+  const tile = (key, label, value, sub, go, tone = '', extra = '') => dashBtn(`dash-tile${tone ? ` tone-${tone}` : ''}`, go, null,
+    `<span class="dash-tile-l">${label}</span><span class="dash-tile-v">${value}</span>${sub ? `<span class="dash-tile-s">${sub}</span>` : ''}${extra}`, `id="dash-tile-${key}"`);
+  const tiles = [
+    tile('closed', `${T.Milestones} closed`, `${closed}<small>/${ms.length}</small>`, ms.length ? `${pct(closed, ms.length)}% of them` : `No ${T.milestones} yet`,
+      { k: 'gantt', type: 'milestone', rag: doneNames }, '', `<span class="dv-meter dv-meter-sm"><i class="dv-meter-fill" style="width:${pct(closed, ms.length)}%"></i></span>`),
+    tile('late', 'Overdue', late.length, lateStart.length ? `+ ${count(lateStart.length, 'late start', 'late starts')}` : late.length ? 'past their end date' : 'Nothing overdue',
+      { k: 'gantt', late: true }, late.length ? 'bad' : 'good'),
+    tile('soon', `Due in ${dashHorizon} days`, soon.length, soon.length ? `${count(soon.filter(m => !isTask(m)).length, T.milestone, T.milestones)}, ${count(soon.filter(isTask).length, T.task, T.tasks)}` : 'Nothing falls due', { k: 'scroll', card: 'coming' }),
+    due == null ? '' : tile('due', 'Reports due', due, due ? 'for this period' : 'All reported', { k: 'reports', mode: 'due' }, due ? 'warn' : 'good'),
+    tile('raid', 'Open risks & issues', ri.length, high ? `${count(high, 'rated High', 'rated High')}` : ri.length ? 'none rated High' : 'Register is clear', { k: 'raid' }, high ? 'bad' : ''),
+    tile('deps', 'Open dependencies', deps.length, blocked || atRisk ? [blocked && `${blocked} blocked`, atRisk && `${atRisk} at risk`].filter(Boolean).join(' · ') : deps.length ? 'none blocked' : 'None open',
+      { k: 'raid', kind: 'dependency' }, blocked ? 'bad' : atRisk ? 'warn' : ''),
+    tile('dates', 'Dates moved', '<span class="dash-tile-wait">…</span>', 'in the last 30 days', { k: 'view', view: 'dates' }),
+  ];
+  return `<div class="dash-tiles" style="--span:12">${tiles.join('')}</div>`;
+}
+
+// Where the items stand: a stacked bar per kind of item, by RAG.
+function dashStand(items, rg) {
+  const kinds = [['top', T.Tops, isTopLevel, { type: 'top' }], ['milestone', T.Milestones, (m) => m.type === 'milestone', { type: 'milestone' }], ['task', T.Tasks, isTask, { type: 'task' }]];
+  const rows = kinds.map(([key, label, test, filter]) => {
+    const list = items.filter(test);
+    return { key, label, labelHtml: dashBtn('dv-name', { k: 'gantt', ...filter }, null, escAttr(label)), total: list.length,
+      segs: rg.names.map(st => ({ name: st, n: list.filter(m => m.status === st).length, color: rg.map[st].base, go: { k: 'gantt', ...filter, rag: [st] } })) };
+  }).filter(r => r.total);
+  const max = Math.max(...rows.map(r => r.total));
+  const totals = rg.names.map(st => [st, rg.map[st].base, items.filter(m => m.status === st).length]).filter(([, , n]) => n);
+  return dashCard('stand', 'Where things stand', `by RAG`, dvStacked(rows, max) + dvLegend(totals),
+    { table: dvTable(['', ...rg.names, 'Total'], rows.map(r => [escAttr(r.label), ...r.segs.map(s => s.n), r.total])) });
+}
+
+// Each stream's items by RAG, with the stream's latest weekly RAG beside its name.
+function dashStreams(p, items, rg) {
+  const rows = streamsInOrder().map(id => {
+    const list = items.filter(m => m.stream_id === id);
+    const [cur] = id ? updatesFor(p.id, id) : [];
+    const name = id ? streamName(id) || 'Deleted stream' : '(No stream)';
+    return { key: id, label: name, total: list.length,
+      labelHtml: `${dashBtn('dv-name', { k: 'gantt', stream: id }, null, escAttr(name))}${cur ? `<span class="dv-weekly" title="Latest weekly update: ${escAttr(cur.status)}, w/e ${fmtShort(cur.week_ending)}">${statusPill(cur.status, rg.map)}</span>` : ''}`,
+      segs: rg.names.map(st => ({ name: st, n: list.filter(m => m.status === st).length, color: rg.map[st].base, go: { k: 'gantt', stream: id, rag: [st] } })) };
+  }).filter(r => r.total);
+  if (!rows.length) return dashCard('streams', 'By stream', '', dashEmpty('No streams yet.'));
+  const max = Math.max(...rows.map(r => r.total));
+  return dashCard('streams', 'By stream', `${count(rows.length, 'stream', 'streams')} · pill = latest weekly RAG`, dvStacked(rows, max),
+    { table: dvTable(['Stream', ...rg.names, 'Total'], rows.map(r => [escAttr(r.label), ...r.segs.map(s => s.n), r.total])) });
+}
+
+// The weekly RAG record: a cell per week for the program and each stream that has updates.
+function dashWeekly(p, rg) {
+  const end = defaultPeriodEnd('Weekly');
+  const weeks = Array.from({ length: 12 }, (_, i) => addDays(end, -7 * (11 - i)));
+  const subjects = [{ id: '', name: p.code || 'Program', sub: programSubject(p) },
+    ...streamsInOrder().filter(id => id && updatesFor(p.id, id).length).map(id => ({ id, name: streamName(id), sub: streamSubject(p, id) }))];
+  const ups = subjects.map(s => ({ ...s, byWeek: new Map(updatesFor(p.id, s.id).map(u => [u.week_ending, u])) }));
+  if (!ups.some(s => s.byWeek.size)) return dashCard('weekly', 'Weekly RAG', 'last 12 weeks', dashEmpty('No weekly updates yet. <b>Update</b> on the Program overview or Stream overview records one.'), { span: 7 });
+  const body = `<div class="dv-weeks" style="--n:${weeks.length}">
+    <div class="dv-weeks-row dv-weeks-head"><span></span>${weeks.map((w, i) => `<span class="dv-week${w === end ? ' now' : ''}">${i % 2 || w === end ? fmtShort(w).replace(/ .*/, '') : ''}<br><small>${w === end ? 'this wk' : i % 2 ? fmtShort(w).replace(/^\S+ /, '') : ''}</small></span>`).join('')}</div>
+    ${ups.map(s => `<div class="dv-weeks-row"><span class="dv-weeks-name">${dashBtn('dv-name', { k: 'update', stream: s.id }, null, escAttr(s.name))}</span>
+      ${weeks.map(w => { const u = s.byWeek.get(w); return u
+        ? dashBtn('dv-cell', { k: 'update', stream: s.id, week: w }, [`${s.name} · w/e ${fmtShort(w)}`, u.status, u.summary ? mdToText(u.summary).slice(0, 160) : ''], '', `style="background:${rg.map[u.status]?.base || UNKNOWN_PALETTE.base}" aria-label="${escAttr(`${s.name}, week ending ${fmtShort(w)}: ${u.status}`)}"`)
+        : `<i class="dv-cell none" title="${escAttr(`${s.name} · w/e ${fmtShort(w)} · no update`)}"></i>`; }).join('')}</div>`).join('')}
+  </div>${dvLegend(rg.names.map(st => [st, rg.map[st].base]))}`;
+  const table = dvTable(['', ...weeks.map(w => fmtShort(w))], ups.map(s => [escAttr(s.name), ...weeks.map(w => s.byWeek.get(w) ? escAttr(s.byWeek.get(w).status) : '—')]));
+  return dashCard('weekly', 'Weekly RAG', 'last 12 weeks', body, { span: 7, table });
+}
+
+// Movement against the baseline: how far each baselined item's end has moved, late to the right.
+function dashSlip(items) {
+  const rows = items.filter(m => m.baseline_end).map(m => ({ m, d: daysBetween(m.baseline_end, m.end) })).sort((a, b) => b.d - a.d || cmpRef(a.m, b.m));
+  if (!rows.length) return dashCard('slip', 'Against the baseline', '', dashEmpty(`No baseline dates yet. Set a baseline on the Gantt chart to see how far each ${T.item} has moved from it.`), { span: 5 });
+  const late = rows.filter(r => r.d > 0), early = rows.filter(r => r.d < 0);
+  const max = Math.max(1, ...rows.map(r => Math.abs(r.d)));
+  const shown = rows.filter(r => r.d).slice(0, 10);
+  const body = shown.length ? `<div class="dv-div" style="--max:${max}">${shown.map(({ m, d }) => `<div class="dv-div-row">
+      <div class="dv-label">${dashBtn('dv-name', { k: 'item', id: m.id }, null, `${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}`)}</div>
+      <div class="dv-div-track"><i class="dv-div-axis"></i>${dashBtn(`dv-div-bar ${d > 0 ? 'late' : 'early'}`, { k: 'item', id: m.id },
+        [fullLabel(m), `Baseline end ${fmtNice(m.baseline_end)}`, `Now ${fmtNice(m.end)}`, `${d > 0 ? `${daysWord(d)} later` : `${daysWord(-d)} earlier`}`], '',
+        `style="${d > 0 ? 'left:50%' : 'right:50%'};width:${(Math.abs(d) / max) * 50}%" aria-label="${escAttr(`${fullLabel(m)}: ${d > 0 ? `${daysWord(d)} later` : `${daysWord(-d)} earlier`}`)}"`)}
+        <span class="dv-div-v ${d > 0 ? 'late' : 'early'}" style="${d > 0 ? `left:calc(50% + ${(d / max) * 50}% + 6px)` : `right:calc(50% + ${(-d / max) * 50}% + 6px)`}">${d > 0 ? '+' : '−'}${Math.abs(d)}d</span>
+      </div></div>`).join('')}</div>
+    ${dvLegend([['Later than baseline', 'var(--dv-late)', late.length], ['Earlier', 'var(--dv-early)', early.length], ['On the baseline', 'var(--faint)', rows.length - late.length - early.length]])}
+    ${rows.filter(r => r.d).length > shown.length ? `<p class="dash-more">${rows.filter(r => r.d).length - shown.length} more have moved — see the table.</p>` : ''}`
+    : dashEmpty(`Every baselined ${T.item} is still on its baseline end date.`);
+  const sum = late.reduce((a, r) => a + r.d, 0);
+  return dashCard('slip', 'Against the baseline', `${late.length} of ${rows.length} later${sum ? `, ${daysWord(sum)} in all` : ''}`, body,
+    { span: 5, table: dvTable([T.Item, 'Baseline end', 'End now', 'Moved'], rows.map(({ m, d }) => [escAttr(fullLabel(m)), fmtShort(m.baseline_end), fmtShort(m.end), d ? `${d > 0 ? '+' : '−'}${Math.abs(d)}d` : '0'])) });
+}
+
+// The milestones month by month, by where they stand, around today.
+function dashMonths(items, rg) {
+  const ms = items.filter(m => !isTask(m) && m.end);
+  if (!ms.length) return dashCard('months', `${T.Milestones} by month`, '', dashEmpty(`No ${T.milestones} with dates yet.`));
+  const monthOf = (iso) => iso.slice(0, 7);
+  const months = [...new Set(ms.map(m => monthOf(m.end)))].sort();
+  const now = monthOf(todayISO());
+  // span the plan, but no more than 18 months: around today when it's longer
+  let first = months[0], last = months.at(-1);
+  const step = (ym, n) => { const [y, mo] = ym.split('-').map(Number); const d = new Date(y, mo - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  const span = (a, b) => { const [ay, am] = a.split('-').map(Number), [by, bm] = b.split('-').map(Number); return (by - ay) * 12 + (bm - am); };
+  if (span(first, last) > 17) { first = step(now, -6); last = step(now, 11); if (first < months[0]) { first = months[0]; last = step(first, 17); } if (last > months.at(-1)) { last = months.at(-1); first = step(last, -17); } }
+  const cols = [];
+  for (let ym = first; ym <= last; ym = step(ym, 1)) cols.push(ym);
+  const buckets = ['closed', 'green', 'redAmber', 'notStarted'];
+  const data = cols.map(ym => { const list = ms.filter(m => monthOf(m.end) === ym); const b = Object.fromEntries(buckets.map(k => [k, 0])); for (const m of list) b[msBucket(m.status, state.workspaceId, rg)]++; return { ym, list, b, total: list.length }; });
+  const max = Math.max(1, ...data.map(d => d.total));
+  const top = max <= 5 ? max : Math.ceil(max / 5) * 5;
+  const label = (ym) => new Date(+ym.slice(0, 4), +ym.slice(5) - 1, 1).toLocaleDateString('en-GB', { month: 'short' });
+  const outside = ms.length - data.reduce((a, d) => a + d.total, 0);
+  const body = `<div class="dv-cols">
+    <div class="dv-cols-y"><span>${top}</span><span>${top / 2 % 1 ? '' : top / 2}</span><span>0</span></div>
+    <div class="dv-cols-plot" style="--n:${cols.length}">${data.map(d => `<div class="dv-col${d.ym === now ? ' now' : ''}">
+        <div class="dv-col-stack" role="img" aria-label="${escAttr(`${label(d.ym)} ${d.ym.slice(0, 4)}: ${d.total}`)}">${buckets.filter(k => d.b[k]).map(k =>
+          dashBtn('dv-col-seg', { k: 'gantt', type: 'milestone', rag: STATUSES.filter(st => msBucket(st, state.workspaceId, rg) === k) }, [`${label(d.ym)} ${d.ym.slice(0, 4)}`, `${d.b[k]} ${MS_BUCKETS.find(([b]) => b === k)[1].toLowerCase()}`, `${d.total} in all`], '',
+            `style="height:${(d.b[k] / top) * 100}%;background:${DASH_BUCKET_COLORS[k]}"`)).join('')}</div>
+        <span class="dv-col-x">${label(d.ym)}${d.ym.endsWith('-01') || d.ym === cols[0] ? `<small>${d.ym.slice(0, 4)}</small>` : ''}</span></div>`).join('')}</div>
+  </div>${dvLegend(buckets.map(k => [MS_BUCKETS.find(([b]) => b === k)[1], DASH_BUCKET_COLORS[k], ms.filter(m => msBucket(m.status, state.workspaceId, rg) === k).length]))}
+  ${outside ? `<p class="dash-more">${outside} fall outside these months.</p>` : ''}`;
+  return dashCard('months', `${T.Milestones} by month`, `${count(ms.length, T.milestone, T.milestones)} by end date`, body,
+    { table: dvTable(['Month', ...buckets.map(k => MS_BUCKETS.find(([b]) => b === k)[1]), 'Total'], data.map(d => [`${label(d.ym)} ${d.ym.slice(0, 4)}`, ...buckets.map(k => d.b[k]), d.total])) });
+}
+
+// Who holds the open items, and how many of theirs are overdue.
+function dashOwners(items) {
+  const open = items.filter(m => !isDoneStatus(m.status));
+  if (!open.length) return dashCard('owners', 'Open items by owner', '', dashEmpty(`Everything is complete.`));
+  const by = new Map();
+  for (const m of open) { const k = m.owner || ''; if (!by.has(k)) by.set(k, { owner: k, n: 0, late: 0 }); const o = by.get(k); o.n++; if (isLate(m)) o.late++; }
+  const rows = [...by.values()].sort((a, b) => b.n - a.n || a.owner.localeCompare(b.owner)).slice(0, 10);
+  const max = Math.max(...rows.map(r => r.n));
+  const body = `<div class="dv-bars">${rows.map(r => `<div class="dv-row">
+      <div class="dv-label">${dashBtn('dv-name', { k: 'gantt', owner: r.owner }, null, r.owner ? escAttr(r.owner) : '<span class="muted">No owner</span>')}</div>
+      <div class="dv-bar">${r.n - r.late ? dashBtn('dv-seg', { k: 'gantt', owner: r.owner }, [r.owner || 'No owner', `${r.n - r.late} open and on time`, `${r.n} open in all`], '', `style="flex-basis:${((r.n - r.late) / max) * 100}%;background:var(--dv-early)" aria-label="${escAttr(`${r.n - r.late} open`)}"`) : ''}
+        ${r.late ? dashBtn('dv-seg', { k: 'gantt', owner: r.owner, late: true }, [r.owner || 'No owner', `${r.late} overdue`, `${r.n} open in all`], '', `style="flex-basis:${(r.late / max) * 100}%;background:var(--dv-late)" aria-label="${escAttr(`${r.late} overdue`)}"`) : ''}</div>
+      <div class="dv-total">${r.n}</div></div>`).join('')}</div>
+    ${dvLegend([['Open', 'var(--dv-early)', open.length - open.filter(isLate).length], ['Overdue', 'var(--dv-late)', open.filter(isLate).length]])}
+    ${by.size > rows.length ? `<p class="dash-more">${by.size - rows.length} more owners — see the table.</p>` : ''}`;
+  return dashCard('owners', `Open ${T.items} by owner`, `${count(open.length, T.item, T.items)} not complete`, body,
+    { table: dvTable(['Owner', 'Open', 'Overdue'], [...by.values()].sort((a, b) => b.n - a.n).map(r => [r.owner ? escAttr(r.owner) : '(no owner)', r.n, r.late])) });
+}
+
+// What's overdue and what falls due within the horizon, soonest first.
+function dashComing(items) {
+  const today = todayISO(), horizon = addDays(today, dashHorizon);
+  const list = items.filter(m => !isDoneStatus(m.status) && m.end && m.end <= horizon).sort((a, b) => a.end.localeCompare(b.end) || cmpRef(a, b));
+  const shown = list.slice(0, 14);
+  const when = (m) => { const d = daysBetween(today, m.end); return d < 0 ? `<em class="dv-when late">Overdue ${daysWord(-d)}</em>` : d === 0 ? '<em class="dv-when today">Due today</em>' : `<em class="dv-when">in ${daysWord(d)}</em>`; };
+  const body = shown.length ? `<ul class="dash-list">${shown.map(m => `<li>${dashBtn('dash-item', { k: 'item', id: m.id }, null,
+      `${statusPill(m.status)}<span class="dash-item-t">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>${when(m)}
+       <small>${escAttr(typeName(m))} · ${fmtShort(m.end)}${m.owner ? ` · ${escAttr(m.owner)}` : ''}${streamName(m.stream_id) ? ` · ${escAttr(streamName(m.stream_id))}` : ''}</small>`)}</li>`).join('')}</ul>
+    ${list.length > shown.length ? `<p class="dash-more">${list.length - shown.length} more within ${dashHorizon} days.</p>` : ''}`
+    : dashEmpty(`Nothing is overdue or due in the next ${dashHorizon} days.`);
+  const late = list.filter(m => m.end < today).length;
+  return dashCard('coming', 'Coming up', `${late ? `${late} overdue · ` : ''}${list.length - late} due in ${dashHorizon} days`, body, { span: 4 });
+}
+
+// The open risks, issues and dependencies that matter most: by rating, then by due date.
+function dashRisks(p) {
+  const open = raidOf().filter(r => !isClosed(r));
+  const rows = [...open].sort((a, b) => raidRating(b).score - raidRating(a).score || (!a.due) - (!b.due) || a.due.localeCompare(b.due)).slice(0, 8);
+  const body = rows.length ? `<ul class="dash-list">${rows.map(r => `<li>${dashBtn('dash-item', { k: 'raid', id: r.id }, null,
+      `<span class="dash-kind dash-kind-${r.kind}" title="${RAID_KINDS[r.kind].one}">${RAID_KINDS[r.kind].prefix}</span><span class="dash-item-t">${r.ref ? `<b>${escAttr(r.ref)}</b> ` : ''}${escAttr(r.title)}</span>${ratingPill(raidRating(r))}
+       <small>${raidStatusBadge(r)}${r.owner ? ` · ${escAttr(r.owner)}` : ''}${r.due ? ` · <span class="${raidOverdue(r) ? 'dv-late-text' : ''}">due ${fmtShort(r.due)}</span>` : ''}</small>`)}</li>`).join('')}</ul>`
+    : dashEmpty('No open risks, issues or dependencies.');
+  return dashCard('risks', 'Risks, issues & dependencies', count(open.length, 'open', 'open'), body,
+    { span: 4, actions: dashBtn('btn btn-sm', { k: 'raid' }, null, 'Register') });
+}
+
+// The reports written most recently.
+function dashReports() {
+  const rows = [...state.reports].sort((a, b) => (b.updated || b.created).localeCompare(a.updated || a.created)).slice(0, 8);
+  const body = rows.length ? `<ul class="dash-list">${rows.map(r => `<li>${dashBtn('dash-item', { k: 'report', id: r.id, item: r.item_id }, null,
+      `${statusPill(r.status)}<span class="dash-item-t">${escAttr(itemName(r.item_id))}</span>
+       <small>${r.cadence} · period ending ${fmtShort(r.period_end)}${r.author ? ` · ${escAttr(r.author)}` : ''}</small>
+       ${r.exec_summary ? `<span class="dash-item-x">${escAttr(mdToText(r.exec_summary).slice(0, 150))}</span>` : ''}`)}</li>`).join('')}</ul>`
+    : dashEmpty('No reports yet.');
+  return dashCard('reports', 'Latest reports', count(state.reports.length, 'report', 'reports'), body,
+    { span: 4, actions: dashBtn('btn btn-sm', { k: 'view', view: 'reports' }, null, 'All reports') });
+}
+
+// The Dates moved tile fills in once the date log has loaded (it's fetched, not held in memory).
+function dashDateChanges() {
+  loadDateLog().then(() => {
+    const el = document.querySelector('#dash-tile-dates .dash-tile-v');
+    if (!el || !isShown('dash')) return;
+    const since = addDays(todayISO(), -30);
+    const rows = dlRows.filter(r => r.workspace_id === state.workspaceId && r.at.slice(0, 10) >= since && ['Changed', 'Knock-on'].includes(r.action));
+    const saves = new Set(rows.map(r => `${r.at}|${r.item_id}`)), items = new Set(rows.map(r => r.item_id));
+    const knock = new Set(rows.filter(r => r.action === 'Knock-on').map(r => `${r.at}|${r.item_id}`)).size;
+    el.textContent = saves.size;
+    el.nextElementSibling.textContent = saves.size ? `${count(items.size, T.item, T.items)}${knock ? ` · ${knock} knock-on` : ''} · 30 days` : 'in the last 30 days';
+  }).catch(() => {
+    const el = document.querySelector('#dash-tile-dates .dash-tile-v');
+    if (el) el.textContent = '—';
+  });
+}
+
+/* ---- ways in, tooltips and wiring ---- */
+
+async function dashGo(go) {
+  const p = currentWorkspace();
+  switch (go.k) {
+    case 'gantt':
+      clearGanttFilters();
+      Object.assign(ganttFilter, { stream: go.stream || '', owner: go.owner || '', type: go.type || '', rag: go.rag || [], late: !!go.late });
+      return switchView('gantt');
+    case 'item': return showItemOnGantt(go.id);
+    case 'raid': {
+      raidFilter.kind = go.kind || '';
+      raidFilter.status = 'open';
+      switchView('raid');
+      const r = go.id && state.raid.find(x => x.id === go.id);
+      if (r) openRaidDialog(r);
+      return;
+    }
+    case 'reports': rptMode = go.mode || 'all'; return switchView('reports');
+    case 'report': showReportsFor(go.item); return selectReport(go.id);
+    case 'update': {
+      openUpdateDialog(go.stream ? streamSubject(p, go.stream) : programSubject(p));
+      if (go.week) { document.getElementById('update-form').elements.week_ending.value = go.week; loadUpdateWeek(true); }
+      return;
+    }
+    case 'view': return switchView(go.view);
+    case 'scroll': return document.getElementById(`dash-${go.card}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function showDashTip(el, e) {
+  let t;
+  try { t = JSON.parse(el.dataset.tip); } catch { return; }
+  const tip = document.getElementById('tip');
+  tip.replaceChildren(...[Object.assign(document.createElement('div'), { className: 'tip-head', textContent: t.h }),
+    ...t.l.map(line => Object.assign(document.createElement('div'), { className: 'tip-row', textContent: line }))]);
+  tipAvoid = [];
+  tip.classList.add('show');
+  moveTip(e);
+}
+
+function wireDash() {
+  const grid = document.getElementById('dash-grid');
+  grid.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-dash-table]');
+    if (t) {
+      const key = t.dataset.dashTable, on = !dashTables.has(key);
+      dashTables[on ? 'add' : 'delete'](key);
+      t.classList.toggle('on', on);
+      t.setAttribute('aria-pressed', on);
+      const card = t.closest('.dash-card');
+      card.querySelector('.dash-chart').hidden = on;
+      card.querySelector('.dash-tbl').hidden = !on;
+      return;
+    }
+    const go = e.target.closest('[data-dash-go]');
+    if (go) { hideTip(); dashGo(JSON.parse(go.dataset.dashGo)); }
+  });
+  grid.addEventListener('pointerover', (e) => { const el = e.target.closest('[data-tip]'); if (el) showDashTip(el, e); else hideTip(); });
+  grid.addEventListener('pointermove', (e) => { if (e.target.closest('[data-tip]')) moveTip(e); });
+  grid.addEventListener('pointerleave', hideTip);
+  grid.addEventListener('focusin', (e) => { const el = e.target.closest('[data-tip]'); if (!el) return hideTip(); const r = el.getBoundingClientRect(); showDashTip(el, { clientX: r.left + r.width / 2, clientY: r.bottom }); });
+  grid.addEventListener('focusout', hideTip);
+  document.getElementById('dash-horizon').addEventListener('change', (e) => {
+    dashHorizon = +e.target.value;
+    saveAppPrefs({ dashHorizon });
+    renderDash();
+  });
 }
 
 /* ---- weekly update dialog ---- */
@@ -7675,6 +8088,7 @@ function wireRaid() {
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   wirePgDepLists();
   wirePgStreams();
+  wireDash();
 }
 
 /* ---- import (built for SharePoint list exports) ---- */
@@ -8743,7 +9157,7 @@ let palHits = [], palSel = 0;
 function palPages() {
   const ws = currentWorkspace();
   return [
-    ['overview', 'Program overview'], ['workspaces', 'All workspaces'], ['gantt', `Gantt chart · ${ws.name}`],
+    ['overview', 'Program overview'], ['workspaces', 'All workspaces'], ['dash', `Dashboard · ${ws.name}`], ['gantt', `Gantt chart · ${ws.name}`],
     ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`],
     ['raid', `Risks, issues & dependencies · ${ws.name}`],
     ['changes', `What changed · ${ws.name}`], ['dates', `Date history · ${ws.name}`], ['streams', `Stream overview · ${ws.name}`],
@@ -8936,7 +9350,7 @@ async function copyLink() {
 // and content, drawn at 2× in the light colours, without the buttons. The page is copied with every
 // element's computed style written onto it and drawn through an SVG image onto a canvas.
 
-const PNG_TARGETS = { overview: 'overview-table', streams: 'streams-table', changes: 'ch-body' };
+const PNG_TARGETS = { overview: 'overview-table', streams: 'streams-table', changes: 'ch-body', dash: 'dash-grid' };
 
 function pngSlug(s) { return s.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase(); }
 
@@ -8950,7 +9364,7 @@ async function downloadPagePNG() {
   delete root.dataset.dark;
   let png;
   try {
-    const box = view === 'changes' ? src : src.closest('.table-wrap');
+    const box = view === 'changes' || view === 'dash' ? src : src.closest('.table-wrap');
     const width = Math.ceil(Math.max(box.scrollWidth, box.offsetWidth));
     const wrap = document.createElement('div');
     const p = currentWorkspace();
@@ -9022,7 +9436,7 @@ function svgToPNG(svg, w, h) {
 
 /* ================= wiring ================= */
 
-const VIEWS = ['overview', 'workspaces', 'gantt', 'editor', 'reports', 'raid', 'changes', 'dates', 'streams'];
+const VIEWS = ['overview', 'workspaces', 'dash', 'gantt', 'editor', 'reports', 'raid', 'changes', 'dates', 'streams'];
 const APP_VIEWS = ['overview', 'workspaces']; // views across every workspace
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 const currentView = () => VIEWS.find(isShown) || 'gantt';
@@ -9037,6 +9451,7 @@ function switchView(view) {
     document.getElementById('editor-body').innerHTML = '';
   }
   if (view === 'gantt') renderGantt();
+  else if (view === 'dash') renderDash();
   else if (view === 'editor') renderEditor();
   else if (view === 'reports') renderReports();
   else if (view === 'overview') renderOverview();

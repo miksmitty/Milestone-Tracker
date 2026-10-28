@@ -16,7 +16,7 @@ id,workspace_id,ref,title,type,description,stream_id,substream,owner,start,end,r
 15,1,4.6,Security Pen Test,task,Independent penetration test of the platform,5,Test,Mark Evans,2026-07-06,2026-07-17,Complete,16,11,,,,
 16,1,4.7,Test Exit,milestone,All system testing exit criteria met,5,Test,Mark Evans,2026-08-17,2026-08-17,Complete,,13,,,,
 17,1,5.1,User Acceptance Testing,task,Business users test end-to-end scenarios,6,UAT,Anita Gomez,2026-08-17,2026-09-02,Complete,18,16,,,,
-18,1,5.2,UAT Sign-off,milestone,User acceptance testing complete and signed off,6,UAT,Anita Gomez,2026-09-02,2026-09-02,Complete,,,,,,
+18,1,5.2,UAT Sign-off,top,User acceptance testing complete and signed off,6,UAT,Anita Gomez,2026-09-02,2026-09-02,Complete,,,,,,
 19,1,4.8,Migration Tooling,task,Build and unit test data migration scripts,5,Data,Raj Mehta,2026-06-15,2026-08-28,Complete,21,11,,,,
 20,1,4.9,Data Migration Rehearsal,task,Full dress rehearsal of production data migration,5,Data,Raj Mehta,2026-09-01,2026-10-02,Red,21,19,,,,
 21,1,4.10,Migration Ready,milestone,Migration rehearsed and signed off,5,Data,Raj Mehta,2026-10-05,2026-10-05,Red,,,,,,

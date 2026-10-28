@@ -53,6 +53,10 @@
         </div>
       </div>
 
+      <button id="nav-dash" class="nav-item" title="Dashboard">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6.5" height="8" rx="1.5"/><rect x="11.5" y="3" width="5.5" height="4.5" rx="1.5"/><rect x="11.5" y="9.5" width="5.5" height="7.5" rx="1.5"/><rect x="3" y="13" width="6.5" height="4" rx="1.5"/></svg>
+        <span class="nav-text">Dashboard</span>
+      </button>
       <button id="nav-gantt" class="nav-item" title="Gantt chart">
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3v14h14"/><rect x="5.5" y="5" width="6" height="2.6" rx="1"/><rect x="8.5" y="9" width="7" height="2.6" rx="1"/><rect x="6.5" y="13" width="4" height="2.6" rx="1"/></svg>
         <span class="nav-text">Gantt chart</span>
@@ -288,6 +292,24 @@
     <div id="workspace-cards" class="prog-grid"></div>
     <p class="hint">Each workspace has its own items and reports. Use <b>Edit</b> to rename a workspace, set its RAG, dates and people, or choose what it calls its items — for example <i>Checkpoints</i> and <i>Activities</i> instead of milestones and tasks.
       Workspaces are stored in <code>workspaces.csv</code>; items and reports carry the <code>workspace_id</code> they belong to.</p>
+  </main>
+
+  <!-- ============ DASHBOARD ============ -->
+  <main id="view-dash" class="view hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <label class="toolbar-label" for="dash-horizon">Coming up</label>
+        <select id="dash-horizon" class="tb-select" aria-label="How far ahead Coming up and Due in look"></select>
+        <span id="dash-asof" class="grid-count"></span>
+      </div>
+      <div class="toolbar-group toolbar-right">
+        <button class="btn btn-primary btn-png" data-png title="Download this page as a PNG image"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> PNG</button>
+      </div>
+    </div>
+    <div id="dash-grid" class="dash-grid"></div>
+    <p class="hint">How the workspace is doing, on one page. <b>Progress</b> is the share of all <span data-term="task">task</span>-days that are complete, set against the share of the plan’s time that has gone (the marker on the bar).
+      Every number and bar is a way in: click one to see just those <span data-term="items">items</span> on the Gantt chart, the risks in the register or the reports. <b>Table</b> on a chart shows its numbers as a table instead.
+      <b>Coming up</b> and <b>Due in</b> look as far ahead as the selector says. The weekly RAG record and the stream pills come from the weekly updates; <b>Against the baseline</b> compares each <span data-term="item">item</span>’s end date with its baseline.</p>
   </main>
 
   <!-- ============ GANTT VIEW ============ -->
