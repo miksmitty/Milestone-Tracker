@@ -6284,7 +6284,8 @@ function updatePageHead() {
   const crumb = document.getElementById('page-workspace');
   crumb.hidden = !inWorkspace;
   crumb.innerHTML = inWorkspace ? `${p.code ? `<b>${escAttr(p.code)}</b> ` : ''}${escAttr(p.name)}` : '';
-  const suffix = APP_CONFIG.title ? ` — ${APP_CONFIG.title}` : '';
+  const env = APP_CONFIG.environment.trim();
+  const suffix = `${APP_CONFIG.title ? ` — ${APP_CONFIG.title}` : ''}${env ? ` [${env}]` : ''}`;
   document.title = inWorkspace ? `${VIEW_TITLES[view]()} · ${p.name}${suffix}` : `${VIEW_TITLES[view]()}${suffix}`;
 }
 
@@ -9792,7 +9793,7 @@ function wireEvents() {
 }
 
 // config.json (via the server) sets the app's title and logo. Without it, the defaults stay.
-const APP_CONFIG = { title: 'Tracker', logo: '' };
+const APP_CONFIG = { title: 'Tracker', logo: '', environment: '', environmentColor: '', version: '' };
 async function loadConfig() {
   try {
     const res = await fetch('api/config', { cache: 'no-store' });
@@ -9802,6 +9803,19 @@ async function loadConfig() {
   name.textContent = APP_CONFIG.title;
   name.hidden = !APP_CONFIG.title;
   document.title = APP_CONFIG.title;
+  // Which instance this is: an environment name (e.g. Test) as a badge in the page header and a
+  // stripe along the top, in the browser tab too, so a test copy is never mistaken for the live one.
+  const env = APP_CONFIG.environment.trim();
+  const badge = document.getElementById('env-badge');
+  badge.textContent = env;
+  badge.hidden = !env;
+  badge.title = env ? `This is the ${env} instance${APP_CONFIG.version ? ` · version ${APP_CONFIG.version}` : ''}` : '';
+  if (env) document.body.dataset.env = env; else delete document.body.dataset.env;
+  if (/^#[0-9a-f]{3,8}$/i.test(APP_CONFIG.environmentColor)) document.documentElement.style.setProperty('--env', APP_CONFIG.environmentColor);
+  const ver = document.getElementById('app-version');
+  ver.textContent = [APP_CONFIG.version && `v${APP_CONFIG.version}`, env].filter(Boolean).join(' · ');
+  ver.hidden = !ver.textContent;
+  ver.title = 'The version of the app this instance is running';
   if (APP_CONFIG.logo) {
     const img = document.getElementById('brand-logo');
     img.alt = APP_CONFIG.title;

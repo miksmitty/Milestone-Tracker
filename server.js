@@ -18,7 +18,13 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || __dirname);
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const CONFIG_FILE = path.join(__dirname, 'config.json');
-const CONFIG_DEFAULTS = { title: 'Tracker', logo: '' };
+const CONFIG_DEFAULTS = { title: 'Tracker', logo: '', environment: '', environmentColor: '' };
+// What's running: the version from package.json unless the deployment names one (APP_VERSION, e.g.
+// a build number or commit), and the environment (APP_ENVIRONMENT, e.g. "Test") so a test instance
+// can't be mistaken for the live one. Both are shown on the page.
+let APP_VERSION = '';
+try { APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version || ''; } catch { /* no package.json: no version */ }
+APP_VERSION = process.env.APP_VERSION || APP_VERSION;
 
 // config.json sets the app's title and logo. It's read on every request, so edits show on the
 // next page load without restarting. A missing or invalid file falls back to the defaults.
@@ -27,7 +33,10 @@ function readConfig() {
   try { cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (err) {
     if (err.code !== 'ENOENT') console.error(`Couldn't read config.json: ${err.message}`);
   }
-  return { ...CONFIG_DEFAULTS, ...cfg };
+  const out = { ...CONFIG_DEFAULTS, ...cfg };
+  if (process.env.APP_ENVIRONMENT != null) out.environment = process.env.APP_ENVIRONMENT; // the instance's setting wins over the file that travels with the code
+  if (process.env.APP_ENVIRONMENT_COLOR) out.environmentColor = process.env.APP_ENVIRONMENT_COLOR;
+  return out;
 }
 // A logo is either a web address (http(s):// or data:), used as-is, or a file path relative to
 // config.json, which is served from /api/logo.
@@ -588,7 +597,7 @@ function serveConfig(req, res) {
   const cfg = readConfig();
   const logo = cfg.logo && !isLogoURL(cfg.logo) ? 'api/logo' : cfg.logo;
   res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-  res.end(JSON.stringify({ title: String(cfg.title ?? ''), logo }));
+  res.end(JSON.stringify({ title: String(cfg.title ?? ''), logo, environment: String(cfg.environment ?? ''), environmentColor: String(cfg.environmentColor ?? ''), version: APP_VERSION }));
 }
 
 function serveLogo(req, res) {
