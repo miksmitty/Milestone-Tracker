@@ -9677,6 +9677,7 @@ function setNavCollapsed(collapsed) {
   document.body.classList.toggle('nav-collapsed', collapsed);
   const btn = document.getElementById('nav-collapse');
   btn.title = collapsed ? 'Expand menu' : 'Collapse menu';
+  btn.setAttribute('aria-label', btn.title);
   btn.setAttribute('aria-expanded', !collapsed);
   saveAppPrefs({ navCollapsed: collapsed });
 }

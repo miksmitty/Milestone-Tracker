@@ -1394,8 +1394,10 @@ body.nav-collapsed .nav-badge, .nav-badge.nav-mini { position: absolute; top: 5p
 /* theme switch at the foot of the menu */
 .nav-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
 .nav-foot .nav-collapse { margin-top: 0; }
-.nav-foot .nav-arrow { width: auto; align-self: flex-end; padding: 7px; } /* just an arrow, bottom right */
-body.nav-collapsed .nav-foot .nav-arrow { align-self: stretch; width: 100%; padding: 9px 10px; }
+.nav-arrows { display: flex; justify-content: flex-end; gap: 2px; } /* collapse and hide: just arrows, bottom right */
+.nav-arrows .nav-arrow { width: auto; padding: 7px; }
+body.nav-collapsed .nav-arrows { flex-direction: column; }
+body.nav-collapsed .nav-arrows .nav-arrow { width: 100%; padding: 9px 10px; }
 
 
 /* ---------- date history ---------- */
