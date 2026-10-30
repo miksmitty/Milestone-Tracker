@@ -2623,7 +2623,7 @@ function openEditDialog(m) {
   document.getElementById('ed-dates').hidden = !m;
   const raidN = m ? raidLinkedTo(`item:${m.id}`).filter(r => !isClosed(r)).length : 0;
   document.getElementById('ed-raid').hidden = !m;
-  document.getElementById('ed-raid').textContent = `Risks & issues${raidN ? ` (${raidN})` : ''}`;
+  document.getElementById('ed-raid').textContent = `RAID${raidN ? ` (${raidN})` : ''}`;
   document.getElementById('ed-related').hidden = !m; // a new item has nothing yet
   document.getElementById('ed-error').textContent = '';
   refreshDatalists();
@@ -6326,7 +6326,7 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { overview: () => 'Portfolio', streams: () => 'Streams', workspaces: () => 'Portfolio', dash: () => 'Dashboard', gantt: () => 'Plan', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date log', raid: () => 'Risks & issues' };
+const VIEW_TITLES = { overview: () => 'Portfolio', streams: () => 'Streams', workspaces: () => 'Portfolio', dash: () => 'Dashboard', gantt: () => 'Plan', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date log', raid: () => 'RAID' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
@@ -9336,7 +9336,7 @@ function palPages() {
   return [
     ['overview', 'Portfolio'], ['workspaces', 'Portfolio · cards'], ['dash', `Dashboard · ${ws.name}`], ['gantt', `Plan · ${ws.name}`],
     ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`], ['weekly', `Weekly updates · ${ws.name}`],
-    ['raid', `Risks & issues · ${ws.name}`],
+    ['raid', `RAID · ${ws.name}`],
     ['changes', `What changed · ${ws.name}`], ['dates', `Date log · ${ws.name}`], ['streams', `Streams · ${ws.name}`],
   ].map(([view, label]) => ({ kind: 'page', view, label, hay: label.toLowerCase() }));
 }

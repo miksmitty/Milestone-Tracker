@@ -70,7 +70,7 @@ Changes show when the page is reloaded; there's no need to restart the server. I
 
 ## Workspaces
 
-Everything belongs to a **workspace**. The left-hand menu is in three groups: **Find…**; **Portfolio** (every workspace, as a table or as cards); the **Workspace** group, with a workspace switcher (and a ⚙ for **Workspace settings**) and the current workspace's **Dashboard**, **Plan** (the Gantt chart), **Items**, **Reports** (with a count of reports due), **Risks & issues** and **Streams**; and **History**, with **What changed** and **Date log**. A **?** beside each page's title opens a short note on what the page is for. Every page's toolbar follows the same pattern: what to look at on the left (a switch, search, filters, a count), what to do on the right (the page's main action, **Import…** and an **Export** menu for CSV, PNG, copying). At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, **Collapse menu** shrinks the menu to icons (the workspace's code sits under its RAG dot, and clicking it opens the menu to switch; a dot on Reports means something is due) and **Hide menu** removes it altogether (a **Menu** button at the top of the page brings it back); the app remembers the open workspace, view, theme and menu state per browser. A fresh browser opens on the Dashboard.
+Everything belongs to a **workspace**. The left-hand menu is in three groups: **Find…**; **Portfolio** (every workspace, as a table or as cards); the **Workspace** group, with a workspace switcher (and a ⚙ for **Workspace settings**) and the current workspace's **Dashboard**, **Plan** (the Gantt chart), **Items**, **Reports** (with a count of reports due), **RAID** (risks, issues and dependencies) and **Streams**; and **History**, with **What changed** and **Date log**. A **?** beside each page's title opens a short note on what the page is for. Every page's toolbar follows the same pattern: what to look at on the left (a switch, search, filters, a count), what to do on the right (the page's main action, **Import…** and an **Export** menu for CSV, PNG, copying). At the bottom, **Theme** switches between Auto (follows the system), Light and Dark, **Collapse menu** shrinks the menu to icons (the workspace's code sits under its RAG dot, and clicking it opens the menu to switch; a dot on Reports means something is due) and **Hide menu** removes it altogether (a **Menu** button at the top of the page brings it back); the app remembers the open workspace, view, theme and menu state per browser. A fresh browser opens on the Dashboard.
 
 ### Find (⌘K)
 
@@ -171,7 +171,7 @@ Deleting items (demo or test data, say) leaves them in the history on purpose: t
 
 ### Risks, issues & dependencies
 
-**Risks & issues** is the workspace's register of **risks** (what might happen), **issues** (what has happened) and **dependencies** (what the plan needs from another team, supplier or project, or what they need from it). Every entry has a ref (R1, I1, D1… numbered per type, editable), title, description, owner, status, due and raised dates, a response (a risk's *mitigation*, an issue's *resolution plan*, a dependency's *agreement / next action*) and status updates. Beyond that:
+**RAID** is the workspace's register of **risks** (what might happen), **issues** (what has happened) and **dependencies** (what the plan needs from another team, supplier or project, or what they need from it). Every entry has a ref (R1, I1, D1… numbered per type, editable), title, description, owner, status, due and raised dates, a response (a risk's *mitigation*, an issue's *resolution plan*, a dependency's *agreement / next action*) and status updates. Beyond that:
 
 - **Risks**: likelihood and impact; status *Open*, *In progress* or *Closed* by default
 - **Issues**: impact; status *Open*, *In progress* or *Closed* by default
@@ -185,7 +185,7 @@ Each entry can be **linked to any number of items and whole streams** of its wor
 
 - **Rating**: a risk's is likelihood × impact, with the top third of the scale *High* and the bottom third *Low* (with the standard three levels, 6–9 is *High*, 3–4 *Medium*, 1–2 *Low*); an issue's is its impact, a dependency's its priority. The register lists blocked and at-risk entries first and closed or complete ones last, then highest rated and soonest due. A due date in red has passed while the entry is still open
 - Filter by type, by status (*Not closed* by default) or by searching any text, including status updates and what an entry is linked to. Showing **Dependencies** alone switches to their own columns: type, stream, owner, accountable people, priority, RAG, status and the latest update, with the impact if delayed under the title. **Export → Download CSV** saves the entries shown, with all their updates
-- **Risks & issues** in an item's edit dialog opens the register showing just what's linked to that item (with the number open), and **+ Add** there links the new entry to it. An item's hover card on the plan says what's open against it
+- **RAID** in an item's edit dialog opens the register showing just what's linked to that item (with the number open), and **+ Add** there links the new entry to it. An item's hover card on the plan says what's open against it
 - The menu shows how many entries are open in the workspace, and **Find (⌘K)** searches them too
 - A link to an item or stream that's since been deleted is kept and shown struck through; a renamed stream keeps its links
 
@@ -272,7 +272,7 @@ RAG and dates change far more often than anything else, so they are the quickest
 
 A file from **Export → Download CSV** imports straight back in, matched on ref (or id, as its links are ids), so you can edit a workspace's items in a spreadsheet and bring them back.
 
-**Risks & issues → Import…** does the same for the register, and is built for a **SharePoint list exported to CSV** (or pasted cells, or the register's own Download CSV):
+**RAID → Import…** does the same for the register, and is built for a **SharePoint list exported to CSV** (or pasted cells, or the register's own Download CSV):
 
 - **Columns** are matched by heading: *Title*, *Risk owner* / *Assigned To*, *Probability* / *Likelihood*, *Impact* / *Severity*, *Mitigation*, *Target date*, *Date raised* (or SharePoint's *Created*), *Workstream*, *Dependent on*, *Related milestones*, *Comments* and so on; SharePoint's internal names (`Risk_x0020_Owner`) work too. SharePoint's own columns (*Item Type*, *Path*, *Created By*, *Modified By*…) are left out. Several columns can go into the description, the response (e.g. *Mitigation* and *Contingency*), the links or the status updates; each is kept under its heading. A dependency's *Impact if delayed*, *Mitigation* and *Accountable people* columns go to its own fields. A title row above the headings is passed over
 - **Type**: a *Type* / *RAID type* column (*Risk*, *Issue*, *Dependency*; assumptions, actions and decisions are skipped), else a ref like `R-12` or `DEP3`, else the choice in the dialog (guessed from the file name, e.g. *Issues.csv*)
