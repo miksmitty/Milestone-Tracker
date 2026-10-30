@@ -49,7 +49,7 @@
           <span id="workspace-code" class="ws-code" aria-hidden="true"></span>
           <select id="workspace-select" class="nav-text" aria-label="Current workspace" title="Switch workspace"></select>
           <button type="button" id="nav-settings" class="ws-gear" title="Workspace settings" aria-label="Workspace settings">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </button>
         </div>
         <button id="nav-dash" class="nav-item" data-view="dash" title="Dashboard: how this workspace is doing">
@@ -256,7 +256,7 @@
     </div>
     <div class="help" hidden><p><b>Risks</b> are what might happen, <b>issues</b> what has happened, <b>dependencies</b> what the plan needs from others or they need from it. Each can be linked to any number of <span data-term="items">items</span> and streams: click a link to see it on the plan, or a row to edit the entry.</p>
       <p>A risk’s rating is likelihood × impact (6 or more out of 9 is High), an issue’s its impact and a dependency’s its priority. A due date in red has passed while the entry is still open. Status updates keep their date and time and are never edited.</p>
-      <p>Set a dependency’s priorities and types in <b>Workspace settings → Dependencies</b>.</p></div>
+      <p>Set the statuses, likelihood and impact levels, priorities and dependency types the register offers in <b>Workspace settings → Register</b>.</p></div>
   </main>
 
   <!-- ============ WHAT CHANGED ============ -->
@@ -706,7 +706,7 @@
       <div class="pg-tabs" role="tablist">
         <button type="button" role="tab" data-pg-tab="details" aria-selected="true">Details</button>
         <button type="button" role="tab" data-pg-tab="rag" aria-selected="false">RAG options</button>
-        <button type="button" role="tab" data-pg-tab="deps" aria-selected="false">Dependencies</button>
+        <button type="button" role="tab" data-pg-tab="deps" aria-selected="false">Register</button>
         <button type="button" role="tab" data-pg-tab="streams" aria-selected="false">Streams</button>
       </div>
       <div id="pg-panel-details" class="form-grid" role="tabpanel">
@@ -754,11 +754,32 @@
         <div class="pg-rag-preview"><span class="pg-rag-preview-label">Key preview</span><span id="pg-rag-preview"></span></div>
       </div>
       <div id="pg-panel-deps" class="pg-deps" role="tabpanel" hidden>
-        <p class="pg-rag-intro">The choices a dependency offers, in order. Priorities run highest first; renaming one renames it on every dependency that has it.</p>
+        <p class="pg-rag-intro">The choices risks, issues and dependencies offer, in order. The last status in each list closes the entry; levels run lowest first and priorities highest first. Renaming a value renames it on every entry that has it.</p>
         <input type="hidden" name="dep_priorities" /><input type="hidden" name="dep_types" />
+        <input type="hidden" name="risk_statuses" /><input type="hidden" name="issue_statuses" /><input type="hidden" name="dep_statuses" /><input type="hidden" name="raid_levels" />
         <div class="pg-deps-lists">
           <section>
-            <h3>Priority <small>highest first</small></h3>
+            <h3>Risk status <small>last closes</small></h3>
+            <ul id="pg-risk_statuses" class="pg-dep-list"></ul>
+            <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="risk_statuses">+ Add status</button><button type="button" class="link-btn" data-dl-reset="risk_statuses">Reset</button></div>
+          </section>
+          <section>
+            <h3>Issue status <small>last closes</small></h3>
+            <ul id="pg-issue_statuses" class="pg-dep-list"></ul>
+            <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="issue_statuses">+ Add status</button><button type="button" class="link-btn" data-dl-reset="issue_statuses">Reset</button></div>
+          </section>
+          <section>
+            <h3>Dependency status <small>last closes · Blocked and At risk are counted on the dashboard</small></h3>
+            <ul id="pg-dep_statuses" class="pg-dep-list"></ul>
+            <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="dep_statuses">+ Add status</button><button type="button" class="link-btn" data-dl-reset="dep_statuses">Reset</button></div>
+          </section>
+          <section>
+            <h3>Likelihood and impact <small>lowest first · rates risks and issues</small></h3>
+            <ul id="pg-raid_levels" class="pg-dep-list"></ul>
+            <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="raid_levels">+ Add level</button><button type="button" class="link-btn" data-dl-reset="raid_levels">Reset</button></div>
+          </section>
+          <section>
+            <h3>Dependency priority <small>highest first</small></h3>
             <ul id="pg-dep_priorities" class="pg-dep-list"></ul>
             <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="dep_priorities">+ Add priority</button><button type="button" class="link-btn" data-dl-reset="dep_priorities">Reset</button></div>
           </section>

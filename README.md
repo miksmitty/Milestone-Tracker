@@ -173,15 +173,17 @@ Deleting items (demo or test data, say) leaves them in the history on purpose: t
 
 **Risks & issues** is the workspace's register of **risks** (what might happen), **issues** (what has happened) and **dependencies** (what the plan needs from another team, supplier or project, or what they need from it). Every entry has a ref (R1, I1, D1… numbered per type, editable), title, description, owner, status, due and raised dates, a response (a risk's *mitigation*, an issue's *resolution plan*, a dependency's *agreement / next action*) and status updates. Beyond that:
 
-- **Risks**: likelihood and impact; status *Open*, *In progress* or *Closed*
-- **Issues**: impact; status *Open*, *In progress* or *Closed*
-- **Dependencies**: stream, RAG (one of the workspace's RAG options), priority, dependency type, the other party, the **accountable people**, the **impact if it's delayed or blocked** and its **mitigation**; status *Not started*, *At risk*, *Blocked* or *Complete*. The **priority** and **dependency type** lists are set per workspace in **Workspace settings → Dependencies** (by default *Critical, Major, Medium, Minor* and *External, Vendor, Resource, Technology, Governance, Operational*). Priorities run highest first, which is how they sort and colour. Renaming a value there renames it on the workspace's dependencies; removing one leaves it on any dependency that has it
+- **Risks**: likelihood and impact; status *Open*, *In progress* or *Closed* by default
+- **Issues**: impact; status *Open*, *In progress* or *Closed* by default
+- **Dependencies**: stream, RAG (one of the workspace's RAG options), priority, dependency type, the other party, the **accountable people**, the **impact if it's delayed or blocked** and its **mitigation**; status *Not started*, *At risk*, *Blocked* or *Complete* by default
+
+Every list the register offers is set per workspace in **Workspace settings → Register**: each kind's **statuses** (the last in the list is the one that closes an entry; *Blocked* and *At risk* are what the dashboard counts), the **likelihood and impact levels** (lowest first; by default *Low, Medium, High*), and a dependency's **priorities** (highest first, which is how they sort and colour; by default *Critical, Major, Medium, Minor*) and **types** (by default *External, Vendor, Resource, Technology, Governance, Operational*). Renaming a value there renames it on the workspace's entries; removing one leaves it on any entry that has it. Each list has a **Reset** to the standard one
 
 **Status updates** work like a SharePoint "append changes" field: type an update and save, and it's added with the date and time, under the box, newest first. Updates are never edited or removed, only added to (deleting an entry removes its updates, and Undo brings them back). Each update is signed on the server with the login ID once the app is behind a sign-in (`changedBy()` in server.js), so a browser can't sign as someone else.
 
 Each entry can be **linked to any number of items and whole streams** of its workspace, and an item or stream can have any number of entries linked to it. Pick them from **Linked to** in the entry's dialog (streams first, then each stream's items); click a link in the register to see it on the Gantt chart.
 
-- **Rating**: a risk's is likelihood × impact (6–9 is *High*, 3–4 *Medium*, 1–2 *Low*); an issue's is its impact, a dependency's its priority. The register lists blocked and at-risk entries first and closed or complete ones last, then highest rated and soonest due. A due date in red has passed while the entry is still open
+- **Rating**: a risk's is likelihood × impact, with the top third of the scale *High* and the bottom third *Low* (with the standard three levels, 6–9 is *High*, 3–4 *Medium*, 1–2 *Low*); an issue's is its impact, a dependency's its priority. The register lists blocked and at-risk entries first and closed or complete ones last, then highest rated and soonest due. A due date in red has passed while the entry is still open
 - Filter by type, by status (*Not closed* by default) or by searching any text, including status updates and what an entry is linked to. Showing **Dependencies** alone switches to their own columns: type, stream, owner, accountable people, priority, RAG, status and the latest update, with the impact if delayed under the title. **Export → Download CSV** saves the entries shown, with all their updates
 - **Risks & issues** in an item's edit dialog opens the register showing just what's linked to that item (with the number open), and **+ Add** there links the new entry to it. An item's hover card on the plan says what's open against it
 - The menu shows how many entries are open in the workspace, and **Find (⌘K)** searches them too
@@ -199,7 +201,7 @@ id,workspace_id,kind,ref,title,description,stream_id,owner,status,rag,priority,d
 id,workspace_id,raid_id,at,by,text
 ```
 
-A workspace's own priority and dependency type lists are kept in workspaces.csv (`dep_priorities`, `dep_types`, `;`-separated; blank means the standard lists). Link fields and features a workspace doesn't use are listed in `hidden` (`gitlab_url`, `use_case_url`, `reports`, `;`-separated): a link field is hidden from Items, the edit dialog and the Gantt chart, and `reports` hides the Reports tab and every Provide report button. Nothing is deleted, so links and reports already entered come back when switched on again.
+A workspace's own register lists are kept in workspaces.csv (`risk_statuses`, `issue_statuses`, `dep_statuses`, `raid_levels`, `dep_priorities`, `dep_types`, `;`-separated; blank means the standard lists). Link fields and features a workspace doesn't use are listed in `hidden` (`gitlab_url`, `use_case_url`, `reports`, `;`-separated): a link field is hidden from Items, the edit dialog and the Gantt chart, and `reports` hides the Reports tab and every Provide report button. Nothing is deleted, so links and reports already entered come back when switched on again.
 
 ### RAG options
 

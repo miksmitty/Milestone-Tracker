@@ -707,7 +707,8 @@ const FIELD_NAMES = {
   baseline_start: 'Baseline start', baseline_end: 'Baseline end', gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
   exec_summary: 'Executive summary', next_steps: 'Next steps', get_to_green: 'Get to green plan', period_end: 'Period ending',
   week_ending: 'Week ending', lead: 'Area lead', author: 'Author', number: 'Program number', rows: 'RAG options',
-  likelihood: 'Likelihood', impact: 'Impact', priority: 'Priority', dep_type: 'Dependency type', dep_priorities: 'Dependency priorities', dep_types: 'Dependency types', text: 'Status update', due: 'Due', party: 'Other party', response: 'Response', links: 'Linked to', kind: 'Type',
+  likelihood: 'Likelihood', impact: 'Impact', priority: 'Priority', dep_type: 'Dependency type', dep_priorities: 'Dependency priorities', dep_types: 'Dependency types',
+  risk_statuses: 'Risk statuses', issue_statuses: 'Issue statuses', dep_statuses: 'Dependency statuses', raid_levels: 'Likelihood and impact levels', text: 'Status update', due: 'Due', party: 'Other party', response: 'Response', links: 'Linked to', kind: 'Type',
   impact_if: 'Impact if delayed or blocked', accountable: 'Accountable people',
   item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task', hidden: 'Hidden fields and features',
 };
@@ -6235,7 +6236,7 @@ function wireImport() {
 // with a summary of each; the one being viewed drives the Gantt chart, Items and Reports.
 
 const WORKSPACE_COLUMNS = ['id', 'number', 'name', 'code', 'description', 'owner', 'lead', 'start', 'end', 'status', 'trend',
-  'item_term', 'milestone_term', 'task_term', 'dep_priorities', 'dep_types', 'hidden', 'created', 'updated'];
+  'item_term', 'milestone_term', 'task_term', 'dep_priorities', 'dep_types', 'risk_statuses', 'issue_statuses', 'dep_statuses', 'raid_levels', 'hidden', 'created', 'updated'];
 const WORKSPACE_FIELDS = WORKSPACE_COLUMNS.slice(1, -2);
 
 function rowsToWorkspaces(rows) {
@@ -6683,7 +6684,7 @@ function applyPgStatuses(workspaceId) {
 }
 
 function newWorkspaceDefaults() {
-  return { number: '', name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', trend: '', dep_priorities: '', dep_types: '', ...DEFAULT_TERMS };
+  return { number: '', name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', trend: '', dep_priorities: '', dep_types: '', risk_statuses: '', issue_statuses: '', dep_statuses: '', raid_levels: '', ...DEFAULT_TERMS };
 }
 
 function updateTermPreview() {
@@ -6699,7 +6700,7 @@ async function submitWorkspaceDialog(e) {
   const err = document.getElementById('pg-error');
   const depErr = checkPgDepLists();
   if (depErr) { showPgTab('deps'); return (err.textContent = depErr); }
-  for (const k of DEP_LIST_KEYS) f[k].value = pgDepListValue(k);
+  for (const k of LIST_KEYS) f[k].value = pgDepListValue(k);
   f.hidden.value = [...document.querySelectorAll('[data-show-field]')].filter(b => !b.checked).map(b => b.dataset.showField).join(';');
   const v = {};
   for (const k of WORKSPACE_FIELDS) v[k] = f[k].value.trim();
@@ -7579,28 +7580,39 @@ function wireOverview() {
 
 const RAID_KINDS = {
   risk: {
-    one: 'Risk', many: 'Risks', prefix: 'R', response: 'Mitigation', statuses: ['Open', 'In progress', 'Closed'], done: 'Closed',
+    one: 'Risk', many: 'Risks', prefix: 'R', response: 'Mitigation', list: 'risk_statuses',
     placeholder: 'What’s being done to make it less likely, or to soften the blow',
   },
   issue: {
-    one: 'Issue', many: 'Issues', prefix: 'I', response: 'Resolution plan', statuses: ['Open', 'In progress', 'Closed'], done: 'Closed',
+    one: 'Issue', many: 'Issues', prefix: 'I', response: 'Resolution plan', list: 'issue_statuses',
     placeholder: 'What’s being done to resolve it, and by when',
   },
   dependency: {
-    one: 'Dependency', many: 'Dependencies', prefix: 'D', response: 'Agreement / next action', statuses: ['Not started', 'At risk', 'Blocked', 'Complete'], done: 'Complete',
+    one: 'Dependency', many: 'Dependencies', prefix: 'D', response: 'Agreement / next action', list: 'dep_statuses',
     placeholder: 'What’s been agreed with the other party, and what happens next',
   },
 };
-const RAID_LEVELS = ['Low', 'Medium', 'High'];
 const RAID_COLUMNS = ['id', 'workspace_id', 'kind', 'ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type',
   'likelihood', 'impact', 'due', 'party', 'response', 'impact_if', 'mitigation', 'accountable', 'links', 'raised', 'created', 'updated'];
 const NOTE_COLUMNS = ['id', 'workspace_id', 'raid_id', 'at', 'by', 'text'];
-// A workspace's dependency priorities (highest first) and types, until it sets its own.
-const DEFAULT_DEP_LISTS = { dep_priorities: ['Critical', 'Major', 'Medium', 'Minor'], dep_types: ['External', 'Vendor', 'Resource', 'Technology', 'Governance', 'Operational'] };
-const depList = (workspaceId, key) => {
-  const own = (workspaceById(workspaceId)?.[key] || '').split(';').map(x => x.trim()).filter(Boolean);
-  return own.length ? own : DEFAULT_DEP_LISTS[key];
+// The lists the register offers, until a workspace sets its own (Workspace settings → Register):
+// each kind's statuses (the last closes the entry), the likelihood / impact levels (lowest first),
+// and a dependency's priorities (highest first) and types.
+const DEFAULT_LISTS = {
+  risk_statuses: ['Open', 'In progress', 'Closed'], issue_statuses: ['Open', 'In progress', 'Closed'],
+  dep_statuses: ['Not started', 'At risk', 'Blocked', 'Complete'], raid_levels: ['Low', 'Medium', 'High'],
+  dep_priorities: ['Critical', 'Major', 'Medium', 'Minor'], dep_types: ['External', 'Vendor', 'Resource', 'Technology', 'Governance', 'Operational'],
 };
+const wsList = (workspaceId, key) => {
+  const own = (workspaceById(workspaceId)?.[key] || '').split(';').map(x => x.trim()).filter(Boolean);
+  return own.length ? own : DEFAULT_LISTS[key];
+};
+const raidStatuses = (kind, workspaceId = state.workspaceId) => wsList(workspaceId, RAID_KINDS[kind].list);
+const raidDone = (kind, workspaceId = state.workspaceId) => raidStatuses(kind, workspaceId).at(-1);
+const raidLevels = (workspaceId = state.workspaceId) => wsList(workspaceId, 'raid_levels');
+const midLevel = (workspaceId) => { const l = raidLevels(workspaceId); return l[Math.floor((l.length - 1) / 2)]; };
+// The status that closes any kind, in this workspace.
+const closesAny = (status, workspaceId = state.workspaceId) => Object.keys(RAID_KINDS).some(k => raidDone(k, workspaceId) === status);
 
 const raidKind = (v) => { const t = String(v ?? '').trim().toLowerCase(); return t.startsWith('r') ? 'risk' : t.startsWith('i') ? 'issue' : t.startsWith('d') ? 'dependency' : ''; };
 // A value from a fixed list, matched ignoring case; one that isn't in it is kept as it is.
@@ -7618,12 +7630,13 @@ function rowsToRaid(rows) {
     for (const k of RAID_COLUMNS) o[k] = (r[header.indexOf(k)] ?? '').trim(); // by name only: `status` and `rag` are both columns here
     const kind = raidKind(o.kind);
     const d = RAID_KINDS[kind];
-    let status = d ? fromList(o.status, d.statuses) : o.status;
-    if (kind === 'dependency') status = DEP_STATUS_WAS[status.toLowerCase()] || status;
+    const sts = d ? raidStatuses(kind, o.workspace_id) : [];
+    let status = d ? fromList(o.status, sts) : o.status;
+    if (kind === 'dependency' && !sts.includes(status)) status = DEP_STATUS_WAS[status.toLowerCase()] || status;
     return {
-      ...o, kind, status: status || d?.statuses[0], rag: o.rag && normaliseStatus(o.rag, o.workspace_id),
-      likelihood: fromList(o.likelihood, RAID_LEVELS), impact: fromList(o.impact, RAID_LEVELS),
-      priority: fromList(o.priority, depList(o.workspace_id, 'dep_priorities')), dep_type: fromList(o.dep_type, depList(o.workspace_id, 'dep_types')),
+      ...o, kind, status: status || sts[0], rag: o.rag && normaliseStatus(o.rag, o.workspace_id),
+      likelihood: fromList(o.likelihood, raidLevels(o.workspace_id)), impact: fromList(o.impact, raidLevels(o.workspace_id)),
+      priority: fromList(o.priority, wsList(o.workspace_id, 'dep_priorities')), dep_type: fromList(o.dep_type, wsList(o.workspace_id, 'dep_types')),
       links: [...new Set(o.links.split(';').map(raidLink).filter(Boolean))],
     };
   }).filter(r => ids.has(r.workspace_id) && r.kind);
@@ -7658,7 +7671,7 @@ function nextRaidRef(workspaceId, kind) {
 }
 
 const raidOf = (workspaceId = state.workspaceId) => state.raid.filter(r => r.workspace_id === workspaceId);
-const isClosed = (r) => r.status === RAID_KINDS[r.kind].done;
+const isClosed = (r) => r.status === raidDone(r.kind, r.workspace_id);
 const raidOverdue = (r) => !isClosed(r) && r.due && r.due < fmtISO(new Date());
 // Entries linked to an item (directly) or a stream.
 const raidLinkedTo = (link) => raidOf().filter(r => r.links.includes(link));
@@ -7669,17 +7682,24 @@ const notesOf = (r) => state.raidNotes.filter(n => n.raid_id === r.id).sort((a, 
 // from likelihood × impact, an issue's its impact, a dependency's its priority.
 function raidRating(r) {
   if (r.kind === 'dependency') {
-    const list = depList(r.workspace_id, 'dep_priorities'), i = list.indexOf(r.priority);
+    const list = wsList(r.workspace_id, 'dep_priorities'), i = list.indexOf(r.priority);
     if (!r.priority) return { level: '', score: 0, label: '' };
     if (i < 0) return { level: 'Medium', score: 0, label: r.priority };
     const pos = list.length < 2 ? 0 : i / (list.length - 1); // 0 = top priority
     return { level: pos < 1 / 3 ? 'High' : pos > 2 / 3 ? 'Low' : 'Medium', score: 9 * (1 - pos), label: r.priority };
   }
-  const i = RAID_LEVELS.indexOf(r.impact) + 1;
-  const l = RAID_LEVELS.indexOf(r.likelihood) + 1;
-  if (r.kind !== 'risk' || !i || !l) return { level: i ? r.impact : '', score: i * 3, label: i ? r.impact : '' };
+  // Levels are the workspace's list, lowest first: the top third of the scale is High, the
+  // bottom third Low (with the standard three, a risk's 6–9 is High and 3–4 Medium).
+  const levels = raidLevels(r.workspace_id), n = levels.length;
+  const i = levels.indexOf(r.impact) + 1;
+  const l = levels.indexOf(r.likelihood) + 1;
+  const band = (v, top) => (v * 3 >= top * 2 ? 'High' : v * 3 >= top ? 'Medium' : 'Low');
+  if (r.kind !== 'risk' || !i || !l) {
+    if (!r.impact) return { level: '', score: 0, label: '' };
+    return i ? { level: band(i - 1, Math.max(1, n - 1)), score: i * 3, label: r.impact } : { level: 'Medium', score: 0, label: r.impact };
+  }
   const score = l * i;
-  const level = score >= 6 ? 'High' : score >= 3 ? 'Medium' : 'Low';
+  const level = band(score, n * n);
   return { level, score, label: level };
 }
 const ratingPill = (rt, title = '') => (rt.label ? `<span class="lvl lvl-${rt.level.toLowerCase()}" ${title ? `title="${escAttr(title)}"` : ''}>${escAttr(rt.label)}</span>` : '<span class="muted">—</span>');
@@ -7855,19 +7875,19 @@ function openRaidDialog(r, preset = {}) {
   const linkedStream = preset.links?.find(l => l.startsWith('stream:'))?.slice(7) || '';
   const v = r || {
     kind, ref: nextRaidRef(state.workspaceId, kind), title: '', description: '', stream_id: linkedStream, owner: '', status: '', rag: ragOf(state.workspaceId).def,
-    priority: '', dep_type: '', likelihood: 'Medium', impact: 'Medium', due: '', raised: fmtISO(new Date()), party: '', response: '', impact_if: '', mitigation: '', accountable: '',
+    priority: '', dep_type: '', likelihood: midLevel(), impact: midLevel(), due: '', raised: fmtISO(new Date()), party: '', response: '', impact_if: '', mitigation: '', accountable: '',
     links: preset.links || [],
   };
   document.getElementById('rd-kind').innerHTML = Object.entries(RAID_KINDS).map(([k, d]) =>
     `<label><input type="radio" name="kind" value="${k}" ${k === v.kind ? 'checked' : ''} /><span>${d.one}</span></label>`).join('');
-  f.likelihood.innerHTML = keepOptions(RAID_LEVELS, v.likelihood);
-  f.impact.innerHTML = keepOptions(RAID_LEVELS, v.impact);
+  f.likelihood.innerHTML = keepOptions(raidLevels(), v.likelihood);
+  f.impact.innerHTML = keepOptions(raidLevels(), v.impact);
   const streams = streamsInOrder().filter(Boolean);
   f.stream_id.innerHTML = `<option value="">—</option>` + [...streams, ...(v.stream_id && !streams.includes(v.stream_id) ? [v.stream_id] : [])]
     .map(id => `<option value="${escAttr(id)}" ${id === v.stream_id ? 'selected' : ''}>${escAttr(streamName(id) || '(deleted stream)')}</option>`).join('');
   f.rag.innerHTML = keepOptions(ragOf(state.workspaceId).names, v.rag);
-  f.priority.innerHTML = keepOptions(depList(state.workspaceId, 'dep_priorities'), v.priority);
-  f.dep_type.innerHTML = keepOptions(depList(state.workspaceId, 'dep_types'), v.dep_type);
+  f.priority.innerHTML = keepOptions(wsList(state.workspaceId, 'dep_priorities'), v.priority);
+  f.dep_type.innerHTML = keepOptions(wsList(state.workspaceId, 'dep_types'), v.dep_type);
   for (const k of RD_FIELDS) if (k !== 'status') f[k].value = v[k] ?? '';
   f.note.value = '';
   rdLinks = [...v.links];
@@ -7889,10 +7909,10 @@ function updateRdKind(status) {
   for (const [k, kinds] of Object.entries(RD_ONLY)) f[k].closest('label').hidden = !kinds.includes(kind);
   // Changing the kind carries the status across: closed stays closed, anything else starts again.
   const was = status ?? f.status.value;
-  const kinds = Object.values(RAID_KINDS);
-  const keep = d.statuses.includes(was) ? was : kinds.some(x => x.done === was) ? d.done
-    : kinds.some(x => x.statuses.includes(was)) || !was ? d.statuses[0] : was;
-  f.status.innerHTML = optionList(d.statuses.includes(keep) ? d.statuses : [...d.statuses, keep], keep);
+  const sts = raidStatuses(kind);
+  const keep = sts.includes(was) ? was : closesAny(was) ? raidDone(kind)
+    : Object.keys(RAID_KINDS).some(k => raidStatuses(k).includes(was)) || !was ? sts[0] : was;
+  f.status.innerHTML = optionList(sts.includes(keep) ? sts : [...sts, keep], keep);
   document.getElementById('rd-badge').textContent = d.one;
   document.getElementById('rd-badge').className = `type-badge raid raid-kind-${kind}`;
   document.getElementById('rd-heading').textContent = rdEditing ? `Edit ${rdEditing.ref || d.one.toLowerCase()}` : `New ${d.one.toLowerCase()}`;
@@ -7976,64 +7996,81 @@ function raidTipLine(m) {
   return `<div class="tip-row ${flag ? 'tip-late' : 'tip-muted'}">Open: ${n.join(', ')}${flag}</div>`;
 }
 
-/* ---- settings: dependency priorities and types ---- */
-// Workspace settings → Dependencies edits the two lists (kept in workspaces.csv, ;-separated;
-// blank means the standard lists). Renaming a value renames it on the workspace's dependencies;
-// removing one leaves it on any dependency that has it, where it still shows.
-const DEP_LIST_KEYS = ['dep_priorities', 'dep_types'];
+/* ---- settings: the register’s lists ---- */
+// Workspace settings → Register edits the lists the register offers (kept in workspaces.csv,
+// ;-separated; blank means the standard list): the statuses of each kind (the last one closes the
+// entry), the likelihood / impact levels (lowest first), and a dependency's priorities (highest
+// first) and types. Renaming a value renames it on the workspace's entries that have it.
+const PG_LISTS = {
+  risk_statuses: { fields: ['status'], kinds: ['risk'], word: 'risk status', words: 'risk statuses', min: 2 },
+  issue_statuses: { fields: ['status'], kinds: ['issue'], word: 'issue status', words: 'issue statuses', min: 2 },
+  dep_statuses: { fields: ['status'], kinds: ['dependency'], word: 'dependency status', words: 'dependency statuses', min: 2 },
+  raid_levels: { fields: ['likelihood', 'impact'], kinds: ['risk', 'issue'], word: 'level', words: 'levels', min: 2 },
+  dep_priorities: { fields: ['priority'], kinds: ['dependency'], word: 'priority', words: 'priorities', min: 1 },
+  dep_types: { fields: ['dep_type'], kinds: ['dependency'], word: 'dependency type', words: 'dependency types', min: 1 },
+};
+const LIST_KEYS = Object.keys(PG_LISTS);
 let pgDepLists = {}; // key → [{ orig (name when the dialog opened, null if new), name }]
 
 function loadPgDepLists(p) {
-  for (const key of DEP_LIST_KEYS) pgDepLists[key] = depList(p?.id, key).map(name => ({ orig: p ? name : null, name }));
+  for (const key of LIST_KEYS) pgDepLists[key] = wsList(p?.id, key).map(name => ({ orig: p ? name : null, name }));
   renderPgDepLists();
 }
-const depUsage = (workspaceId, field, name) => state.raid.filter(r => r.workspace_id === workspaceId && r[field] === name).length;
+// How many of the workspace's entries carry a value from one of its lists.
+const listUsage = (workspaceId, key, name) => {
+  const { fields, kinds } = PG_LISTS[key];
+  return state.raid.filter(r => r.workspace_id === workspaceId && kinds.includes(r.kind) && fields.some(k => r[k] === name)).length;
+};
 function renderPgDepLists() {
-  const field = { dep_priorities: 'priority', dep_types: 'dep_type' };
-  for (const key of DEP_LIST_KEYS) {
+  for (const key of LIST_KEYS) {
     const list = pgDepLists[key];
+    const closes = key.endsWith('_statuses');
     document.getElementById(`pg-${key}`).innerHTML = list.map((x, i) => {
-      const used = pgEditing && x.orig ? depUsage(pgEditing.id, field[key], x.orig) : 0;
+      const used = pgEditing && x.orig ? listUsage(pgEditing.id, key, x.orig) : 0;
       return `<li data-i="${i}">
         <input value="${escAttr(x.name)}" data-dl-name aria-label="Name" />
         <button type="button" class="btn btn-sm btn-ghost" data-dl-move="-1" ${i ? '' : 'disabled'} title="Move up">↑</button>
         <button type="button" class="btn btn-sm btn-ghost" data-dl-move="1" ${i < list.length - 1 ? '' : 'disabled'} title="Move down">↓</button>
-        <button type="button" class="btn btn-sm btn-ghost" data-dl-remove title="${used ? `Remove — ${count(used, 'dependency keeps', 'dependencies keep')} it` : 'Remove'}">✕</button>
-        ${used ? `<small class="muted">${used} in use</small>` : ''}
+        <button type="button" class="btn btn-sm btn-ghost" data-dl-remove title="${used ? `Remove — ${count(used, 'entry keeps', 'entries keep')} it` : 'Remove'}">✕</button>
+        ${closes && i === list.length - 1 ? '<small class="muted" title="An entry with this status is closed">closes</small>' : used ? `<small class="muted">${used} in use</small>` : ''}
       </li>`;
     }).join('');
   }
 }
 // Check the lists; an error message or null. Then the lists as stored ('' for the standard ones).
 function checkPgDepLists() {
-  const words = { dep_priorities: 'priority', dep_types: 'dependency type' };
-  for (const key of DEP_LIST_KEYS) {
+  for (const key of LIST_KEYS) {
+    const { word, words, min } = PG_LISTS[key];
     const list = pgDepLists[key];
     for (const x of list) x.name = x.name.trim().replace(/;/g, ',');
-    if (list.some(x => !x.name)) return `Every ${words[key]} needs a name.`;
+    if (list.some(x => !x.name)) return `Every ${word} needs a name.`;
+    if (list.length < min) return key.endsWith('_statuses') ? `Keep at least two ${words}: one open and one that closes the entry.` : `Keep at least ${count(min, word, words)}.`;
     const seen = new Set();
     for (const x of list) {
-      if (seen.has(x.name.toLowerCase())) return `There are two of “${x.name}” in the ${words[key]} list.`;
+      if (seen.has(x.name.toLowerCase())) return `There are two of “${x.name}” in the ${word} list.`;
       seen.add(x.name.toLowerCase());
     }
   }
   return null;
 }
-const pgDepListValue = (key) => { const names = pgDepLists[key].map(x => x.name); return !names.length || names.join(';') === DEFAULT_DEP_LISTS[key].join(';') ? '' : names.join(';'); };
-// Rename values on the workspace's dependencies to match; true if any changed.
+const pgDepListValue = (key) => { const names = pgDepLists[key].map(x => x.name); return !names.length || names.join(';') === DEFAULT_LISTS[key].join(';') ? '' : names.join(';'); };
+// Rename values on the workspace's entries to match; true if any changed.
 function applyPgDepRenames(workspaceId) {
-  const field = { dep_priorities: 'priority', dep_types: 'dep_type' };
   let changed = false;
-  for (const key of DEP_LIST_KEYS) {
+  for (const key of LIST_KEYS) {
+    const { fields, kinds } = PG_LISTS[key];
     for (const x of pgDepLists[key]) {
       if (x.orig == null || x.orig === x.name) continue;
-      for (const r of state.raid) if (r.workspace_id === workspaceId && r[field[key]] === x.orig) { r[field[key]] = x.name; changed = true; }
+      for (const r of state.raid) {
+        if (r.workspace_id !== workspaceId || !kinds.includes(r.kind)) continue;
+        for (const k of fields) if (r[k] === x.orig) { r[k] = x.name; changed = true; }
+      }
     }
   }
   return changed;
 }
 function wirePgDepLists() {
-  for (const key of DEP_LIST_KEYS) {
+  for (const key of LIST_KEYS) {
     const ul = document.getElementById(`pg-${key}`);
     ul.addEventListener('input', (e) => { if (e.target.matches('[data-dl-name]')) pgDepLists[key][+e.target.closest('li').dataset.i].name = e.target.value; });
     ul.addEventListener('click', (e) => {
@@ -8056,7 +8093,7 @@ function wirePgDepLists() {
   document.querySelectorAll('[data-dl-reset]').forEach(b => {
     b.onclick = () => {
       const key = b.dataset.dlReset;
-      pgDepLists[key] = DEFAULT_DEP_LISTS[key].map(name => ({ orig: pgDepLists[key].some(x => x.orig === name) ? name : null, name }));
+      pgDepLists[key] = DEFAULT_LISTS[key].map(name => ({ orig: pgDepLists[key].some(x => x.orig === name) ? name : null, name }));
       renderPgDepLists();
     };
   });
@@ -8364,20 +8401,21 @@ const RI_STATUS_WORDS = {
 };
 function readRaidStatus(v, kind) {
   const raw = String(v ?? '').trim();
-  const d = RAID_KINDS[kind];
-  const exact = d.statuses.find(x => x.toLowerCase() === raw.toLowerCase());
+  const sts = raidStatuses(kind);
+  const exact = sts.find(x => x.toLowerCase() === raw.toLowerCase());
   if (exact) return [exact, true];
   const s = raw.toLowerCase().replace(/^\(?\d+\)?\s*[-.:)]?\s*/, '').replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
   const W = RI_STATUS_WORDS;
+  // The usual words, as the workspace's list has them: a status it doesn't have is kept as written.
+  const pick = (name) => (sts.includes(name) ? [name, true] : [raw, false]);
+  if (W.closed.test(s)) return [sts.at(-1), true];
   if (kind === 'dependency') {
-    if (W.closed.test(s)) return ['Complete', true];
-    if (W.blocked.test(s)) return ['Blocked', true];
-    if (W.atRisk.test(s)) return ['At risk', true];
-    if (W.open.test(s) || W.progress.test(s) || s === 'green') return ['Not started', true];
+    if (W.blocked.test(s)) return pick('Blocked');
+    if (W.atRisk.test(s)) return pick('At risk');
+    if (W.open.test(s) || W.progress.test(s) || s === 'green') return [sts[0], true];
   } else {
-    if (W.closed.test(s)) return ['Closed', true];
-    if (W.progress.test(s) || W.blocked.test(s) || W.atRisk.test(s)) return ['In progress', true];
-    if (W.open.test(s)) return ['Open', true];
+    if (W.progress.test(s) || W.blocked.test(s) || W.atRisk.test(s)) return pick('In progress');
+    if (W.open.test(s)) return [sts[0], true];
   }
   return [raw, false];
 }
@@ -8651,11 +8689,11 @@ function planRaidImport() {
     if (st) {
       const [s, ok] = readRaidStatus(st, kind);
       f.status = s;
-      if (!ok) row.warn.push(`Status “${st}” isn't one of ${d.statuses.join(', ')}, so it's kept as it is`);
-    } else if (!t) f.status = d.statuses[0];
+      if (!ok) row.warn.push(`Status “${st}” isn't one of ${raidStatuses(kind).join(', ')}, so it's kept as it is`);
+    } else if (!t) f.status = raidStatuses(kind)[0];
     else if (t.kind !== kind) {
-      const kinds = Object.values(RAID_KINDS);
-      f.status = d.statuses.includes(t.status) ? t.status : kinds.some(x => x.done === t.status) ? d.done : d.statuses[0];
+      const sts = raidStatuses(kind);
+      f.status = sts.includes(t.status) ? t.status : closesAny(t.status) ? raidDone(kind) : sts[0];
     }
 
     if (kind === 'dependency') {
@@ -8669,16 +8707,20 @@ function planRaidImport() {
       for (const [k, key, word] of [['priority', 'dep_priorities', 'priority'], ['dep_type', 'dep_types', 'dependency type']]) {
         const v = cell(k);
         if (!v) continue;
-        const x = readFromDepList(v, depList(ws, key), k === 'priority');
+        const x = readFromDepList(v, wsList(ws, key), k === 'priority');
         f[k] = x || v;
         if (!x) row.warn.push(`“${v}” isn't one of this workspace's ${word === 'priority' ? 'priorities' : 'dependency types'}, so it's kept as it is`);
       }
     }
     const levels = kind === 'risk' ? ['likelihood', 'impact'] : kind === 'issue' ? ['impact'] : [];
+    // Low / medium / high as read become the workspace's own levels (its bottom, middle and top).
+    const lv = raidLevels(ws);
+    const asLevel = { Low: lv[0], Medium: midLevel(ws), High: lv.at(-1) };
     for (const k of levels) {
       const v = cell(k);
-      const x = readLevel(v, scale);
-      if (x) f[k] = x;
+      const exact = lv.find(x => x.toLowerCase() === riClean(v).toLowerCase());
+      const x = exact || readLevel(v, scale);
+      if (x) f[k] = asLevel[x] || x;
       else if (x === null) row.warn.push(`Couldn't read ${k} “${v}” as low, medium or high`);
     }
 

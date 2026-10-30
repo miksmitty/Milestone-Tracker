@@ -106,7 +106,7 @@ body {
   flex: none; display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 7px;
   background: transparent; color: #a8a69c; cursor: pointer;
 }
-.ws-gear svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.ws-gear svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .ws-gear:hover { background: #3a3a38; color: #fff; }
 .ws-gear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 body.nav-collapsed .workspace-pick { flex-direction: column; gap: 8px; }
