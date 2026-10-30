@@ -494,6 +494,35 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .grid-count { font-size: 12.5px; color: var(--muted); }
 
 /* ---------- items: row selection + bulk actions ---------- */
+/* a box with a list of suggestions shows a ▾ that opens the whole list (see wireListPickers) */
+input[list] {
+  padding-right: 24px !important;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23908e88' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 8 4 4 4-4'/></svg>") !important;
+  background-repeat: no-repeat !important; background-position: right 6px center !important; background-size: 13px !important;
+}
+input[list]::-webkit-calendar-picker-indicator, input[list]::-webkit-list-button { display: none !important; opacity: 0; }
+.list-pop {
+  position: fixed; z-index: 400; max-height: 280px; overflow: auto; display: flex; flex-direction: column; gap: 1px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 30px rgba(28,28,28,.22);
+}
+.list-pop button {
+  text-align: left; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px;
+  padding: 6px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+.list-pop button:hover { background: var(--panel-2); }
+.list-pop button[aria-selected="true"] { background: var(--tint); color: var(--accent); font-weight: 600; }
+
+/* fill handle: drag a cell's value over the rows below or above (see wireFill) */
+.fill-handle { position: fixed; z-index: 206; width: 9px; height: 9px; box-sizing: border-box; background: var(--accent); border: 1px solid var(--panel); border-radius: 2px; cursor: crosshair; }
+.fill-handle::after { content: ""; position: absolute; inset: -6px; } /* a bigger target than the square itself */
+.fill-handle[hidden] { display: none; }
+.fill-mark { position: fixed; z-index: 205; box-sizing: border-box; border: 2px solid var(--accent); background: rgba(230,0,0,.06); border-radius: 4px; pointer-events: none; }
+.fill-mark[data-count]:not([data-count=""])::after {
+  content: attr(data-count); position: absolute; right: 0; bottom: -22px; white-space: nowrap;
+  background: var(--text); color: var(--panel); font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 5px;
+}
+body.fill-dragging, body.fill-dragging #editor-table :is(input, select, button) { cursor: crosshair; }
+body.fill-dragging { user-select: none; }
 #editor-table .col-sel { text-align: center; padding-left: 4px; padding-right: 4px; }
 #editor-table .col-sel input { width: 15px; height: 15px; padding: 0; accent-color: var(--accent); cursor: pointer; }
 #editor-table tr.selected td { background: var(--tint-2); }

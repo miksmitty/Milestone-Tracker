@@ -3515,6 +3515,7 @@ function renderEditor(highlight = [], keepOrder = false) {
   const shown = new Set(rows.map(r => r.m.id));
   for (const id of gridSel) if (!shown.has(id)) gridSel.delete(id);
   renderBulkBar();
+  placeFillHandle();
 }
 
 function escAttr(s) {
@@ -3783,6 +3784,212 @@ function wireBulk() {
   document.getElementById('bulk-apply').onclick = applyBulk;
   document.getElementById('bulk-delete').onclick = bulkDelete;
   document.getElementById('bulk-clear').onclick = () => selectAllShown(false);
+}
+
+/* ---- pick lists ---- */
+// A box with a list of suggestions (owner, stream, sub-stream, people) shows a ▾ at its right.
+// Typing works as before, with the browser's own suggestions as you type; clicking the ▾ opens the
+// whole list to pick from, so the box works as the dropdown it looks like. One list is open at a
+// time; it sits in the open dialog if there is one (so it shows above it), Esc or a click elsewhere
+// closes it, and picking a value fires the box's input and change events as typing would.
+
+const LIST_ARROW_W = 26; // the part of the box, at its right, that is the ▾
+let listPopFor = null;   // the box whose list is open
+
+function openListPop(input) {
+  closeListPop();
+  const seen = new Set();
+  const opts = [...(input.list?.options || [])].map(o => o.value).filter(v => v && !seen.has(v) && seen.add(v));
+  if (!opts.length) return;
+  const pop = document.createElement('div');
+  pop.id = 'list-pop';
+  pop.className = 'list-pop';
+  pop.setAttribute('role', 'listbox');
+  const cur = input.value.trim().toLowerCase();
+  pop.innerHTML = opts.map(v => `<button type="button" role="option" aria-selected="${v.toLowerCase() === cur}">${escAttr(v)}</button>`).join('');
+  (document.querySelector('dialog[open]') || document.body).append(pop);
+  const r = input.getBoundingClientRect();
+  pop.style.minWidth = `${Math.max(160, r.width)}px`;
+  pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
+  pop.style.top = r.bottom + 4 + pop.offsetHeight <= innerHeight - 8 ? `${r.bottom + 4}px` : `${Math.max(8, r.top - 4 - pop.offsetHeight)}px`;
+  pop.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  input.setAttribute('aria-expanded', 'true');
+  listPopFor = input;
+}
+
+function closeListPop() {
+  document.getElementById('list-pop')?.remove();
+  listPopFor?.removeAttribute('aria-expanded');
+  listPopFor = null;
+}
+
+function pickFromListPop(v) {
+  const input = listPopFor;
+  closeListPop();
+  if (!input) return;
+  input.focus();
+  if (input.value === v) return;
+  input.value = v;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+const onListArrow = (el, e) => el.matches?.('input[list]') && !el.disabled && !el.readOnly && e.clientX >= el.getBoundingClientRect().right - LIST_ARROW_W;
+
+function wireListPickers() {
+  document.addEventListener('mousedown', (e) => {
+    if (e.target.closest?.('#list-pop')) return e.preventDefault(); // the focus stays in the box
+    const open = listPopFor;
+    closeListPop();
+    if (e.button !== 0 || e.target === open || !onListArrow(e.target, e)) return; // a second click on the ▾ just closes
+    e.preventDefault(); // no caret move: the ▾ is a button
+    e.target.focus();
+    openListPop(e.target);
+  });
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('#list-pop [role="option"]');
+    if (b) pickFromListPop(b.textContent);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!listPopFor) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeListPop(); } // the dialog stays open
+    else if (e.key === 'Tab') closeListPop();
+  }, true);
+  document.addEventListener('focusout', (e) => { if (e.target === listPopFor) closeListPop(); });
+  addEventListener('scroll', closeListPop, true); // the box has moved: the list would be adrift
+  addEventListener('resize', closeListPop);
+}
+
+/* ---- fill handle: drag to copy ---- */
+// As in a spreadsheet, a small square sits at the corner of the cell being edited. Drag it over
+// the rows below (or above) and, on letting go, those rows take the cell's value: one change,
+// with Undo. Refs are never copied (they're unique), and the selection column and the row
+// buttons have nothing to copy. The handle is drawn outside the table so a redraw never
+// disturbs the control that has the focus.
+
+const FILL_SKIP = new Set(['sel', 'id', 'ref', 'actions']);
+let fillSrc = null; // { td, tr, key, m }: the cell the handle belongs to
+
+function fillSource(el) {
+  const td = el?.closest?.('#editor-body td'), tr = td?.closest('tr[data-id]');
+  if (!tr) return null;
+  const key = el.dataset.k || (el.closest('.rag-pick') ? 'status' : el.closest('.deps') ? 'deps' : null);
+  const m = key && !FILL_SKIP.has(key) && itemById(tr.dataset.id);
+  return m ? { td, tr, key, m } : null;
+}
+
+// Put the handle on the cell's bottom right corner, or hide it when there's no cell or it's scrolled out of view.
+function placeFillHandle() {
+  const h = document.getElementById('fill-handle');
+  if (!h) return;
+  const src = fillSrc && document.contains(fillSrc.td) && fillSrc.td.getClientRects().length ? fillSrc : null;
+  if (!src) return void (h.hidden = true);
+  // Beside what's in the cell: the chosen RAG pill in a wide RAG cell, otherwise the cell's corner.
+  const r = (src.td.querySelector('.rag-pick [aria-pressed="true"]') || src.td).getBoundingClientRect();
+  const w = src.td.closest('.table-wrap').getBoundingClientRect();
+  const top = tableEl(grid).querySelector('thead').getBoundingClientRect().bottom; // the heading stays put while rows scroll under it
+  h.hidden = r.bottom > w.bottom || r.bottom < top || r.right > w.right || r.right < w.left;
+  h.style.left = `${r.right - 6}px`;
+  h.style.top = `${r.bottom - 6}px`;
+}
+
+function wireFill() {
+  const body = document.getElementById('editor-body');
+  const h = document.createElement('div');
+  h.id = 'fill-handle';
+  h.className = 'fill-handle';
+  h.title = 'Drag over the rows below or above to copy this value to them';
+  h.hidden = true;
+  document.body.append(h);
+  // The handle follows the cell that's clicked or focused (not every browser focuses a button on a click),
+  // and goes when the focus or a click lands somewhere else.
+  const pick = (el) => { const src = fillSource(el); if (src) { fillSrc = src; placeFillHandle(); } };
+  body.addEventListener('pointerdown', (e) => pick(e.target));
+  body.addEventListener('focusin', (e) => pick(e.target));
+  body.addEventListener('focusout', (e) => { if (e.relatedTarget && !fillSource(e.relatedTarget)) { fillSrc = null; placeFillHandle(); } });
+  document.addEventListener('pointerdown', (e) => { if (fillSrc && e.target !== h && !fillSource(e.target)) { fillSrc = null; placeFillHandle(); } });
+  body.closest('.table-wrap').addEventListener('scroll', placeFillHandle, { passive: true });
+  addEventListener('resize', placeFillHandle);
+  h.addEventListener('pointerdown', startFill);
+}
+
+function startFill(e) {
+  if (e.button !== 0 || !fillSrc) return;
+  e.preventDefault(); // the focus (and so the handle) stays on the cell
+  // A focused <select> swallows the pointer moves in Chrome, so the drag would never grow: let it go first.
+  if (document.activeElement?.tagName === 'SELECT') document.activeElement.blur();
+  syncEditorToState();
+  const src = fillSrc, wrap = src.td.closest('.table-wrap');
+  const col = [...src.tr.children].indexOf(src.td);
+  const mark = document.createElement('div');
+  mark.className = 'fill-mark';
+  document.body.append(mark);
+  document.body.classList.add('fill-dragging');
+  let rows = [src.tr];
+  const move = (ev) => {
+    const wr = wrap.getBoundingClientRect(), top = tableEl(grid).querySelector('thead').getBoundingClientRect().bottom;
+    if (ev.clientY > wr.bottom - 24) wrap.scrollTop += 14;
+    else if (ev.clientY < top + 24) wrap.scrollTop -= 14;
+    const trs = [...document.querySelectorAll('#editor-body tr[data-id]')];
+    const y = Math.max(top, Math.min(ev.clientY, wr.bottom - 1));
+    const under = trs.find(tr => { const r = tr.getBoundingClientRect(); return y >= r.top && y < r.bottom; })
+      || (y < trs[0].getBoundingClientRect().top ? trs[0] : trs.at(-1));
+    const a = trs.indexOf(src.tr), b = trs.indexOf(under);
+    rows = trs.slice(Math.min(a, b), Math.max(a, b) + 1);
+    const first = rows[0].children[col].getBoundingClientRect(), last = rows.at(-1).children[col].getBoundingClientRect();
+    const y0 = Math.max(first.top, top), y1 = Math.min(last.bottom, wr.bottom);
+    Object.assign(mark.style, { left: `${first.left}px`, top: `${y0}px`, width: `${first.width}px`, height: `${Math.max(0, y1 - y0)}px` });
+    const n = rows.length - 1;
+    mark.dataset.count = n ? `${colLabel(tableCol(grid, src.key))} → ${count(n, 'row', 'rows')}` : '';
+  };
+  const up = (ev) => {
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    removeEventListener('pointercancel', up);
+    if (ev.type === 'pointerup') move(ev); // where it was let go counts, even if the moves were swallowed by a closing dropdown
+    mark.remove();
+    document.body.classList.remove('fill-dragging');
+    if (ev.type !== 'pointerup') return;
+    const targets = rows.filter(tr => tr !== src.tr).map(tr => itemById(tr.dataset.id)).filter(Boolean);
+    if (targets.length) fillCopy(src, targets);
+  };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+  addEventListener('pointercancel', up);
+}
+
+// Give the cell's value to each target, as one change: roll-up clashes and change control are
+// asked about as for any edit, and anything that can't take it (rolling up to itself, a
+// circular dependency) is skipped.
+async function fillCopy(src, targets) {
+  const m0 = src.m, key = src.key;
+  const change = (m) => {
+    switch (key) {
+      case 'stream': return { stream_id: m0.stream_id };
+      case 'deps': return { deps: m0.deps.filter(d => d !== m.id) };
+      case 'parent': return m0.parent === m.id ? null : { parent: m0.parent };
+      default: return { [key]: m0[key] ?? '' };
+    }
+  };
+  const label = colLabel(tableCol(grid, key));
+  const snap = snapshotData();
+  const before = new Map(state.items.map(x => [x.id, x.start + x.end]));
+  const ids = new Set(targets.map(m => m.id));
+  let done = 0, skipped = 0;
+  const ok = await guardChange(() => {
+    done = skipped = 0;
+    for (const m of targets) {
+      const c = change(m);
+      if (!c || updateItem(m, c).error) skipped++; else done++;
+    }
+    return true;
+  });
+  if (!ok) return refreshEditor();
+  const moved = state.items.filter(x => !ids.has(x.id) && before.get(x.id) !== x.start + x.end).map(x => x.id);
+  refreshEditor([...ids, ...moved]);
+  const what = `${label} copied to ${count(done, T.item, T.items)}`;
+  if (done) offerUndo(snap, what);
+  scheduleSave(what + (skipped ? ` · ${skipped} skipped` : '') + (moved.length ? ` · ${moved.length} downstream ${moved.length > 1 ? T.items : T.item} rescheduled` : ''));
 }
 
 /* ================= reports ================= */
@@ -10010,6 +10217,8 @@ function wireEvents() {
   document.getElementById('editor-body').addEventListener('focusout', (e) => { if (pendingDates.has(e.target)) applyDateEdit(e.target); });
   document.getElementById('editor-body').addEventListener('keydown', (e) => { if (e.key === 'Enter' && pendingDates.has(e.target)) applyDateEdit(e.target); });
   wireBulk();
+  wireFill();
+  wireListPickers();
 
   wireReports();
   wireConflicts();
