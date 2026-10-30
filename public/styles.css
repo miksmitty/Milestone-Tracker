@@ -360,7 +360,7 @@ tr.shifted td { animation: shifted 2.5s ease-out; }
   border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 60px rgba(28,28,28,.25);
 }
 .edit-dialog::backdrop { background: rgba(28,28,28,.35); }
-#edit-form { padding: 18px 20px; }
+.edit-dialog > form { padding: 18px 20px; } /* every dialog form, whatever it holds */
 .dlg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .dlg-head h2 { font-size: 16px; font-weight: 700; }
 .dlg-close { margin-left: auto; border: 0; background: transparent; font-size: 16px; color: var(--muted); cursor: pointer; padding: 4px 8px; border-radius: 6px; }
@@ -398,7 +398,6 @@ tr.shifted td { animation: shifted 2.5s ease-out; }
 .spacer { flex: 1; }
 
 /* someone else changed the same things */
-#conflict-form { padding: 18px 20px; }
 .cf-intro { font-size: 13px; color: var(--text-2); margin-bottom: 12px; }
 .cf-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
 .cf-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
@@ -574,7 +573,6 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 /* ---------- report dialog ---------- */
 .type-badge.rpt { background: var(--ok-bg); color: var(--ok); }
 .report-dialog { width: min(720px, calc(100vw - 32px)); }
-#report-form { padding: 18px 20px; }
 /* header, item strip and footer stay put; the body scrolls so Submit is always on screen */
 .report-dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); overflow: hidden; }
 #report-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
@@ -863,7 +861,6 @@ button.cm-quote:hover { background: var(--hover); }
 
 .type-badge.prog { background: #1c1c1c; color: #fff; }
 .workspace-dialog { width: min(680px, calc(100vw - 32px)); }
-#workspace-form { padding: 18px 20px; }
 .pg-date-note { align-self: end; padding-bottom: 9px; font-size: 12px; color: var(--muted); }
 .pg-terms {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; border: 1px solid var(--border);
@@ -1102,7 +1099,7 @@ button.cm-quote:hover { background: var(--hover); }
 .type-badge.imp { background: var(--chip); color: var(--text); }
 .import-dialog { width: min(1100px, calc(100vw - 32px)); }
 .import-dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); overflow: hidden; }
-#import-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; padding: 18px 20px; }
+#import-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 #import-form > .dlg-head, #import-form > .dlg-error, #import-form > .dlg-foot { flex: none; }
 .im-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .im-drop {
@@ -1433,7 +1430,6 @@ body.nav-collapsed .nav-badge, .nav-badge.nav-mini { position: absolute; top: 5p
 .clash-flag::after { content: ''; position: absolute; left: 4px; top: 2.5px; width: 5px; height: 7px; background: #fff; clip-path: polygon(0 0, 100% 0, 75% 30%, 100% 60%, 22% 60%, 22% 100%, 0 100%); }
 
 /* ---------- risks, issues and dependencies ---------- */
-#raid-form { padding: 18px 20px; }
 .raid-dialog { width: min(720px, calc(100vw - 32px)); }
 .nav-badge-quiet { background: var(--chip); color: var(--text-2); }
 .raid-seg-count { background: var(--faint); color: var(--text); }
