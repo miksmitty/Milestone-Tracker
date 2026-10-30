@@ -3558,7 +3558,7 @@ function onEditorChange(e) {
     syncEditorToState();
     const m = state.items[+t.dataset.adddep];
     if (!t.value) return;
-    return applyTableChange(m, { deps: [...m.deps, t.value] });
+    return applyTableChange(m, { deps: [...m.deps, t.value] }).then(() => refocusGrid(`[data-adddep="${t.dataset.adddep}"]`));
   }
 
   const k = t.dataset.k;
@@ -3592,6 +3592,12 @@ function onEditorChange(e) {
   scheduleSave();
 }
 
+// A rebuilt cell takes the focused control with it; put the focus on the row's matching control if it went nowhere.
+function refocusGrid(sel) {
+  if (document.activeElement && document.activeElement !== document.body) return;
+  document.querySelector(`#editor-body ${sel}`)?.focus();
+}
+
 function applyDateEdit(t) {
   pendingDates.delete(t);
   if (t.value && (+t.value.slice(0, 4) < 1900 || !parseDate(t.value))) return; // half-typed, e.g. year 0002
@@ -3606,7 +3612,7 @@ function onEditorClick(e) {
   if (rag) {
     syncEditorToState();
     if (setRag(state.items[+rag.dataset.i], rag.dataset.rag)) {
-      rag.parentElement.querySelectorAll('[data-rag]').forEach(b => b.setAttribute('aria-pressed', b === rag));
+      rag.parentElement.querySelectorAll('[data-rag]').forEach(b => { b.setAttribute('aria-pressed', b === rag); b.tabIndex = b === rag ? 0 : -1; });
     }
     return;
   }
@@ -3621,6 +3627,7 @@ function onEditorClick(e) {
     const m = state.items[+rm.dataset.rmdep];
     m.deps = m.deps.filter(d => d !== rm.dataset.dep);
     refreshEditor();
+    refocusGrid(`[data-adddep="${rm.dataset.rmdep}"]`);
     return scheduleSave();
   }
   const del = e.target.closest('[data-del]');
@@ -3936,8 +3943,10 @@ function dependentCount(id) {
   return seen.size - 1;
 }
 
-const ragButtons = (current, attrs = '') => STATUSES.map(st => `
-  <button type="button" data-rag="${escAttr(st)}" ${attrs} aria-pressed="${st === current}" title="${escAttr(st)}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
+// One tab stop for the group: only the chosen button is in the tab order (the first when nothing is
+// chosen) and the arrow keys move the choice, as in a radio group.
+const ragButtons = (current, attrs = '') => STATUSES.map((st, i) => `
+  <button type="button" data-rag="${escAttr(st)}" ${attrs} aria-pressed="${st === current}" tabindex="${st === current || (i === 0 && !STATUSES.includes(current)) ? 0 : -1}" title="${escAttr(st)}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
 
 function renderQuick() {
   const m = itemById(quickId), d = quickDraft;
@@ -3959,7 +3968,7 @@ function renderQuick() {
       <div>
         <div class="q-label">Type</div>
         <div class="q-type" role="group" aria-label="Type">${TYPES.map(t => `
-          <button type="button" data-type="${t}" aria-pressed="${t === d.type}" title="${t === 'task' ? 'A date range, drawn as a bar' : t === 'top' ? 'A single date under change control, drawn as a ringed diamond' : 'A single date, drawn as a diamond'}">${escAttr(typeLabel(t))}</button>`).join('')}</div>
+          <button type="button" data-type="${t}" aria-pressed="${t === d.type}" tabindex="${t === d.type ? 0 : -1}" title="${t === 'task' ? 'A date range, drawn as a bar' : t === 'top' ? 'A single date under change control, drawn as a ringed diamond' : 'A single date, drawn as a diamond'}">${escAttr(typeLabel(t))}</button>`).join('')}</div>
       </div>
       <div class="q-dates">
         ${task
@@ -5520,6 +5529,9 @@ function focusSelectedRow() {
   tr.scrollIntoView({ block: 'nearest' });
 }
 
+// The controls Tab would visit inside root, in order.
+const tabbables = (root) => [...root.querySelectorAll('a[href], button, input, select, textarea, [contenteditable="true"], [tabindex]')]
+  .filter(el => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden]'));
 const isTyping = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 function onPaneClick(e) {
@@ -5563,6 +5575,10 @@ function wirePane() {
     if (!paneEditing) return;
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelPane(); }
     else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); savePane(); }
+    else if (e.key === 'Tab' && !e.shiftKey && !e.defaultPrevented) { // Save sits above the fields: Tab from the last one goes to it
+      const form = paneForm(), doc = form?.querySelector('.pane-doc');
+      if (doc && e.target === tabbables(doc).at(-1)) { e.preventDefault(); form.querySelector('.pane-bar [type="submit"]').focus(); }
+    }
   });
   // ↑ / ↓ move through the list wherever focus is, except while typing.
   document.addEventListener('keydown', (e) => {
@@ -5626,6 +5642,26 @@ function wireReports() {
   quick.addEventListener('click', onQuickClick);
   quick.addEventListener('input', onQuickDateInput);
   quick.addEventListener('submit', onQuickDateSubmit);
+  // Tab stays in the panel, going round from its last control to its first (Esc closes it).
+  quick.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const f = tabbables(quick);
+    if (!f.length || e.target !== (e.shiftKey ? f[0] : f.at(-1))) return;
+    e.preventDefault();
+    (e.shiftKey ? f.at(-1) : f[0]).focus();
+  });
+  // RAG and type buttons work as a radio group: the arrow keys move the choice.
+  document.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) || e.metaKey || e.ctrlKey || e.altKey) return;
+    const group = e.target.closest('.rag-pick, .q-type');
+    if (!group || !e.target.matches('button')) return;
+    const items = [...group.querySelectorAll('button:not([disabled])')], i = items.indexOf(e.target);
+    if (i < 0) return;
+    e.preventDefault();
+    const next = items[(i + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length];
+    next.focus();
+    next.click();
+  });
   // Clicking away closes the panel unless it has unsaved changes; then it asks for Save or Cancel.
   document.addEventListener('mousedown', (e) => {
     if (quick.hidden || quick.contains(e.target) || e.target.closest('.gantt-item')) return;
@@ -6082,6 +6118,7 @@ function openImportDialog() {
   document.getElementById('im-file').value = '';
   showImportStep('source');
   document.getElementById('import-dialog').showModal();
+  document.getElementById('im-file').focus();
 }
 
 function showImportStep(step) {
@@ -6089,6 +6126,8 @@ function showImportStep(step) {
   document.getElementById('im-step-map').hidden = step !== 'map';
   document.getElementById('im-error').textContent = '';
   document.getElementById('im-submit').disabled = step !== 'map';
+  // The step that was showing (and the focus with it) has gone: start the new one at its first choice.
+  if (document.getElementById('import-dialog').open) (step === 'map' ? document.querySelector('#im-mode input:checked') : document.getElementById('im-file'))?.focus();
 }
 
 function loadImportText(text, name) {
@@ -6538,8 +6577,8 @@ function renderPgStatuses() {
     </tr>` : `
     <tr data-idx="${i}">
       <td class="pg-move">
-        <button type="button" data-move="-1" title="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
-        <button type="button" data-move="1" title="Move down" ${i === pgStatuses.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" data-move="-1" title="Move up (Alt+↑ in the row)" tabindex="-1" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" data-move="1" title="Move down (Alt+↓ in the row)" tabindex="-1" ${i === pgStatuses.length - 1 ? 'disabled' : ''}>↓</button>
       </td>
       <td><input type="color" data-f="color" value="${r.color}" title="Colour" /></td>
       <td><input data-f="name" value="${escAttr(r.name)}" placeholder="e.g. Green" />${usedText(r.used)}</td>
@@ -6583,28 +6622,42 @@ function onPgStatusesInput(e) {
 function onPgStatusesClick(e) {
   const move = e.target.closest('[data-move]');
   if (move) {
-    const i = +move.closest('[data-idx]').dataset.idx, j = i + +move.dataset.move;
-    [pgStatuses[i], pgStatuses[j]] = [pgStatuses[j], pgStatuses[i]];
-    return renderPgStatuses();
+    const i = +move.closest('[data-idx]').dataset.idx;
+    return movePgStatus(i, i + +move.dataset.move, `[data-move="${move.dataset.move}"]`);
   }
   const rm = e.target.closest('[data-remove]');
   if (rm) {
-    const r = pgStatuses[+rm.dataset.remove];
+    const i = +rm.dataset.remove;
+    const r = pgStatuses[i];
     if (r.used) {
       r.deleted = true;
       r.replace = activePgStatuses()[0];
     } else pgStatuses = pgStatuses.filter(x => x !== r);
     if (r.is_default && activePgStatuses().length) activePgStatuses().at(-1).is_default = true;
     r.is_default = false;
-    return renderPgStatuses();
+    renderPgStatuses();
+    // on to where its things go, else the next row's remove button, else Add
+    return (document.querySelector(`#pg-statuses [data-idx="${i}"] [data-replace]`)
+      || document.querySelector(`#pg-statuses [data-idx="${Math.min(i, pgStatuses.length - 1)}"] [data-remove]:not([disabled])`)
+      || document.getElementById('pg-add-status')).focus();
   }
   const undo = e.target.closest('[data-undo]');
   if (undo) {
     const r = pgStatuses[+undo.dataset.undo];
     r.deleted = false;
     for (const x of pgStatuses) if (x.replace === r && x.deleted) x.replace = activePgStatuses().find(a => a !== x) || r;
-    return renderPgStatuses();
+    renderPgStatuses();
+    return document.querySelector(`#pg-statuses [data-idx="${undo.dataset.undo}"] [data-f="name"]`)?.focus();
   }
+}
+
+// Swap two rows of the list and keep the focus on the moved row (its matching control, else its name).
+function movePgStatus(i, j, focusSel) {
+  if (j < 0 || j >= pgStatuses.length) return;
+  [pgStatuses[i], pgStatuses[j]] = [pgStatuses[j], pgStatuses[i]];
+  renderPgStatuses();
+  const row = document.querySelector(`#pg-statuses [data-idx="${j}"]`), el = row?.querySelector(focusSel);
+  (el && !el.disabled ? el : row?.querySelector('[data-f="name"]'))?.focus();
 }
 
 function addPgStatus() {
@@ -6630,7 +6683,7 @@ function resetPgStatuses() {
 }
 
 function showPgTab(tab) {
-  document.querySelectorAll('[data-pg-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.pgTab === tab));
+  document.querySelectorAll('[data-pg-tab]').forEach(b => { const on = b.dataset.pgTab === tab; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1; });
   document.getElementById('pg-panel-details').hidden = tab !== 'details';
   document.getElementById('pg-panel-rag').hidden = tab !== 'rag';
   document.getElementById('pg-panel-deps').hidden = tab !== 'deps';
@@ -6820,10 +6873,26 @@ function wireWorkspaces() {
   form.addEventListener('input', (e) => { if (/_term$/.test(e.target.name)) updateTermPreview(); });
   form.elements.status.addEventListener('change', (e) => { pgStatusesSelected = e.target.value === 'stray' ? null : pgStatuses[+e.target.value]; });
   document.querySelector('.pg-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-pg-tab]'); if (b) showPgTab(b.dataset.pgTab); });
+  // The tab strip is one tab stop: ← → (Home, End) move between the tabs, Tab goes on into the panel.
+  document.querySelector('.pg-tabs').addEventListener('keydown', (e) => {
+    const tabs = [...document.querySelectorAll('[data-pg-tab]')], i = tabs.indexOf(e.target);
+    if (i < 0) return;
+    const j = e.key === 'ArrowRight' ? (i + 1) % tabs.length : e.key === 'ArrowLeft' ? (i + tabs.length - 1) % tabs.length : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
+    if (j < 0) return;
+    e.preventDefault();
+    showPgTab(tabs[j].dataset.pgTab);
+    tabs[j].focus();
+  });
   const rag = document.getElementById('pg-statuses');
   rag.addEventListener('input', onPgStatusesInput);
   rag.addEventListener('change', onPgStatusesInput);
   rag.addEventListener('click', onPgStatusesClick);
+  rag.addEventListener('keydown', (e) => { // Alt+↑/↓ in a row moves it
+    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || !e.target.dataset.f) return;
+    e.preventDefault();
+    const i = +e.target.closest('[data-idx]').dataset.idx;
+    movePgStatus(i, i + (e.key === 'ArrowUp' ? -1 : 1), `[data-f="${e.target.dataset.f}"]`);
+  });
   document.getElementById('pg-add-status').onclick = addPgStatus;
   document.getElementById('pg-reset-statuses').onclick = resetPgStatuses;
   document.getElementById('pg-cancel').onclick = () => dlg.close();
@@ -7438,6 +7507,7 @@ function openUpdateDialog(sub) {
   document.getElementById('up-error').textContent = '';
   refreshDatalists();
   document.getElementById('update-dialog').showModal();
+  focusText(f.summary);
 }
 
 const subjectUpdates = () => updatesFor(upSubject.p.id, upSubject.stream);
@@ -8069,8 +8139,8 @@ function renderPgDepLists() {
       const used = pgEditing && x.orig ? listUsage(pgEditing.id, key, x.orig) : 0;
       return `<li data-i="${i}">
         <input value="${escAttr(x.name)}" data-dl-name aria-label="Name" />
-        <button type="button" class="btn btn-sm btn-ghost" data-dl-move="-1" ${i ? '' : 'disabled'} title="Move up">↑</button>
-        <button type="button" class="btn btn-sm btn-ghost" data-dl-move="1" ${i < list.length - 1 ? '' : 'disabled'} title="Move down">↓</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-dl-move="-1" tabindex="-1" ${i ? '' : 'disabled'} title="Move up (Alt+↑ in the name)">↑</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-dl-move="1" tabindex="-1" ${i < list.length - 1 ? '' : 'disabled'} title="Move down (Alt+↓ in the name)">↓</button>
         <button type="button" class="btn btn-sm btn-ghost" data-dl-remove title="${used ? `Remove — ${count(used, 'entry keeps', 'entries keep')} it` : 'Remove'}">✕</button>
         ${closes && i === list.length - 1 ? '<small class="muted" title="An entry with this status is closed">closes</small>' : used ? `<small class="muted">${used} in use</small>` : ''}
       </li>`;
@@ -8109,6 +8179,15 @@ function applyPgDepRenames(workspaceId) {
   }
   return changed;
 }
+// Swap two entries of a list and keep the focus on the moved one (its matching control, else its name).
+function movePgDepItem(key, i, j, focusSel) {
+  const list = pgDepLists[key];
+  if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  renderPgDepLists();
+  const li = document.querySelector(`#pg-${key} li[data-i="${j}"]`), el = li?.querySelector(focusSel);
+  (el && !el.disabled ? el : li?.querySelector('[data-dl-name]'))?.focus();
+}
 function wirePgDepLists() {
   for (const key of LIST_KEYS) {
     const ul = document.getElementById(`pg-${key}`);
@@ -8118,8 +8197,18 @@ function wirePgDepLists() {
       if (!li) return;
       const i = +li.dataset.i, list = pgDepLists[key];
       const mv = e.target.closest('[data-dl-move]');
-      if (mv) { const j = i + +mv.dataset.dlMove; [list[i], list[j]] = [list[j], list[i]]; renderPgDepLists(); }
-      else if (e.target.closest('[data-dl-remove]')) { list.splice(i, 1); renderPgDepLists(); }
+      if (mv) movePgDepItem(key, i, i + +mv.dataset.dlMove, `[data-dl-move="${mv.dataset.dlMove}"]`);
+      else if (e.target.closest('[data-dl-remove]')) {
+        list.splice(i, 1);
+        renderPgDepLists();
+        (ul.querySelector(`li[data-i="${Math.min(i, list.length - 1)}"] [data-dl-remove]`) || document.querySelector(`[data-dl-add="${key}"]`)).focus();
+      }
+    });
+    ul.addEventListener('keydown', (e) => { // Alt+↑/↓ in a name moves it
+      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || !e.target.matches('[data-dl-name]')) return;
+      e.preventDefault();
+      const i = +e.target.closest('li').dataset.i;
+      movePgDepItem(key, i, i + (e.key === 'ArrowUp' ? -1 : 1), '[data-dl-name]');
     });
   }
   document.querySelectorAll('[data-dl-add]').forEach(b => {
@@ -8235,10 +8324,19 @@ function wirePgStreams() {
     const rm = e.target.closest('[data-sremove]'), un = e.target.closest('[data-sundo]');
     if (rm) {
       const x = pgStreams[+rm.dataset.sremove];
+      const i = +rm.dataset.sremove;
       if (!x.id) pgStreams.splice(pgStreams.indexOf(x), 1); // never saved: just drop it
       else { x.deleted = true; x.replace = null; }
       renderPgStreams();
-    } else if (un) { pgStreams[+un.dataset.sundo].deleted = false; renderPgStreams(); }
+      // on to where its things go, else the next row's remove button, else Add
+      (body.querySelector(`[data-idx="${i}"] [data-sreplace]`)
+        || body.querySelector(`[data-idx="${Math.min(i, pgStreams.length - 1)}"] [data-sremove]:not([disabled])`)
+        || document.getElementById('pg-add-stream')).focus();
+    } else if (un) {
+      pgStreams[+un.dataset.sundo].deleted = false;
+      renderPgStreams();
+      body.querySelector(`[data-idx="${un.dataset.sundo}"] [data-sf="name"]`)?.focus();
+    }
   });
   document.getElementById('pg-add-stream').onclick = () => {
     pgStreams.push({ id: null, orig: null, name: '', lead: '', used: { items: 0, updates: 0, raid: 0, total: 0 }, deleted: false, replace: null });
@@ -8275,6 +8373,7 @@ function wireRaid() {
     if (!b) return;
     rdLinks = rdLinks.filter(l => l !== b.dataset.rdrm);
     renderRdLinks();
+    document.getElementById('rd-addlink').focus();
   });
   document.getElementById('rd-cancel').onclick = () => dlg.close();
   document.getElementById('rd-close').onclick = () => dlg.close();
@@ -8884,6 +8983,7 @@ function openRaidImport() {
   document.getElementById('ri-file').value = '';
   showRaidImportStep('source');
   document.getElementById('raid-import-dialog').showModal();
+  document.getElementById('ri-file').focus();
 }
 
 function showRaidImportStep(step) {
@@ -8891,6 +8991,7 @@ function showRaidImportStep(step) {
   document.getElementById('ri-step-map').hidden = step !== 'map';
   document.getElementById('ri-error').textContent = '';
   document.getElementById('ri-submit').disabled = step !== 'map';
+  if (document.getElementById('raid-import-dialog').open) (step === 'map' ? document.querySelector('#ri-mode input:checked') : document.getElementById('ri-file'))?.focus();
 }
 
 function loadRaidImportText(text, name) {
@@ -9875,12 +9976,13 @@ function wireEvents() {
   document.getElementById('ed-dates').onclick = () => showDatesFor(editing.id);
   document.getElementById('ed-raid').onclick = () => showRaidFor(`item:${editing.id}`);
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
+  // The list is rebuilt after a change, so the focus goes back to the add box, ready for the next one.
   document.getElementById('ed-deps').addEventListener('click', (e) => {
     const rm = e.target.closest('[data-edrm]');
-    if (rm) { edDeps = edDeps.filter(d => d !== rm.dataset.edrm); renderEdDeps(); }
+    if (rm) { edDeps = edDeps.filter(d => d !== rm.dataset.edrm); renderEdDeps(); document.getElementById('ed-adddep').focus(); }
   });
   document.getElementById('ed-deps').addEventListener('change', (e) => {
-    if (e.target.id === 'ed-adddep' && e.target.value) { edDeps.push(e.target.value); renderEdDeps(); }
+    if (e.target.id === 'ed-adddep' && e.target.value) { edDeps.push(e.target.value); renderEdDeps(); document.getElementById('ed-adddep').focus(); }
   });
 
   // editor table

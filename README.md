@@ -213,7 +213,7 @@ A workspace's own register lists are kept in workspaces.csv (`risk_statuses`, `i
 - **Get to green plan**: reports at this status must include one
 - **Default**: the status new items start at
 
-Reorder statuses with ↑ ↓ (the order is used in the key, the RAG buttons and when sorting by RAG), **+ Add status**, remove one with ✕, or **Reset to the standard RAG**. Renaming a status renames it on every item and report in the workspace. Removing a status that's in use asks which status to move those items and reports to. A key preview shows the result before you save, and the workspace's own RAG is chosen from the same list.
+Reorder statuses with ↑ ↓, or Alt+↑ / Alt+↓ while typing in a row (the order is used in the key, the RAG buttons and when sorting by RAG), **+ Add status**, remove one with ✕, or **Reset to the standard RAG**. Renaming a status renames it on every item and report in the workspace. Removing a status that's in use asks which status to move those items and reports to. A key preview shows the result before you save, and the workspace's own RAG is chosen from the same list.
 
 RAG options are stored in [statuses.csv](statuses.csv), created the first time a workspace changes them. Workspaces without rows there use the standard five:
 
@@ -342,7 +342,7 @@ id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved
 - **Overdue** items (past their end date and not at a done status) get a red **!**, and tasks that should have started but are still at the default status an amber one; the hover card says by how much. **Filter → Only overdue or late starting** shows just those
 - **Baseline**: **View → Baseline → Set from current dates** records every item's dates as the plan. Where an item has moved since, a grey bar under a task (or a dashed outline of a milestone) shows where it was planned, and the hover card says *slipped 12 days* or *3 days early*. **View → Baseline** hides them; **Clear** removes the baseline
 - **Fold a stream** by clicking its name: its items share one summary row, small and unlabelled (the hover card still works). **View → Streams → Fold all / Unfold all**. Folding is remembered per workspace, per browser
-- **Keyboard**: Tab into the chart, then ← → move along a stream, ↑ ↓ to the row above or below, Enter opens the quick update panel and Esc lets go. Enter on a stream's name folds it
+- **Keyboard**: Tab into the chart, then ← → move along a stream, ↑ ↓ to the row above or below, Enter opens the quick update panel and Esc lets go. Enter on a stream's name folds it. In the panel (and the Items grid's quick update mode) the RAG and type buttons are one tab stop each: ← → move the choice, and Tab goes round the panel
 - **View → Row height** — below 40px the dates/owner line under each item is hidden for a compact view
 - Hover an item for a summary card (including its last report); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)
 - The chart fills the window below its toolbar and scrolls inside its own panel
