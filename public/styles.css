@@ -1435,6 +1435,16 @@ body.nav-collapsed .nav-arrows .nav-arrow { width: 100%; padding: 9px 10px; }
 
 /* ---------- risks, issues and dependencies ---------- */
 .raid-dialog { width: min(720px, calc(100vw - 32px)); }
+/* header and footer stay put; the sectioned body scrolls so Save is always on screen */
+.raid-dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 32px); overflow: hidden; }
+#raid-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+#raid-form > .dlg-head, #raid-form > .dlg-error, #raid-form > .dlg-foot { flex: none; }
+#raid-form > .rd-grid { min-height: 0; overflow-y: auto; margin: -4px -6px; padding: 4px 6px; align-content: start; }
+.rd-sec {
+  grid-column: 1 / -1; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line);
+  font-size: 13px; font-weight: 700; color: var(--text);
+}
+.rd-sec small { font-size: 12px; font-weight: 400; color: var(--muted); }
 .nav-badge-quiet { background: var(--chip); color: var(--text-2); }
 .raid-seg-count { background: var(--faint); color: var(--text); }
 .mode-seg input:checked + span .raid-seg-count { background: var(--accent); color: #fff; }

@@ -7907,6 +7907,9 @@ function updateRdKind(status) {
   const kind = rdKindNow(), d = RAID_KINDS[kind];
   const f = document.getElementById('raid-form').elements;
   for (const [k, kinds] of Object.entries(RD_ONLY)) f[k].closest('label').hidden = !kinds.includes(kind);
+  document.querySelectorAll('#raid-form .rd-sec[data-kinds]').forEach(h => { h.hidden = !h.dataset.kinds.split(' ').includes(kind); });
+  document.getElementById('rd-sec-rating').textContent = kind === 'dependency' ? 'Priority and type' : 'Rating';
+  document.getElementById('rd-sec-response').textContent = kind === 'dependency' ? 'Impact and response' : 'Response';
   // Changing the kind carries the status across: closed stays closed, anything else starts again.
   const was = status ?? f.status.value;
   const sts = raidStatuses(kind);

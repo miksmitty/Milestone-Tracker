@@ -845,29 +845,40 @@
         <h2 id="rd-heading">New risk</h2>
         <button type="button" id="rd-close" class="dlg-close" title="Close">✕</button>
       </header>
-      <div class="form-grid">
+      <div class="form-grid rd-grid">
         <div class="span2 field"><span class="field-label">Type</span><div id="rd-kind" class="seg"></div></div>
         <label>Ref<input name="ref" placeholder="e.g. R4" /></label>
         <label class="span3">Title<input name="title" placeholder="A short name for it" /></label>
         <label class="span3">Description<textarea name="description" rows="3" placeholder="What it is, and what it would mean for the plan"></textarea></label>
+
+        <h3 class="rd-sec">Where it stands</h3>
         <label>Owner<input name="owner" list="people-list" /></label>
         <label>Status<select name="status"></select></label>
-        <label>Stream<select name="stream_id"></select></label>
         <label>RAG<select name="rag"></select></label>
-        <label>Priority<select name="priority"></select></label>
-        <label>Dependency type<select name="dep_type"></select></label>
-        <label>Likelihood<select name="likelihood"></select></label>
-        <label>Impact<select name="impact"></select></label>
         <label>Due<input name="due" type="date" /></label>
         <label>Raised<input name="raised" type="date" /></label>
+
+        <h3 class="rd-sec" id="rd-sec-rating">Rating</h3>
+        <label>Likelihood<select name="likelihood"></select></label>
+        <label>Impact<select name="impact"></select></label>
+        <label>Priority<select name="priority"></select></label>
+        <label>Dependency type<select name="dep_type"></select></label>
+        <label>Stream<select name="stream_id"></select></label>
+
+        <h3 class="rd-sec" data-kinds="dependency">The other party</h3>
         <label class="span3">Other party<input name="party" placeholder="The team, supplier or project it depends on (or that depends on us)" /></label>
         <label class="span3">Accountable people<input name="accountable" placeholder="Who answers for it, on both sides — separate names with commas" /></label>
+
+        <h3 class="rd-sec" id="rd-sec-response">Response</h3>
         <label class="span3">Impact if delayed or blocked<textarea name="impact_if" rows="2" placeholder="What slips, stops or costs more if it isn’t delivered on time"></textarea></label>
         <label class="span3">Mitigation<textarea name="mitigation" rows="2" placeholder="What’s being done to make a delay less likely, or to soften its effect"></textarea></label>
         <label class="span3"><span id="rd-response-label">Mitigation</span><textarea name="response" rows="3"></textarea></label>
-        <div class="span3 field"><span class="field-label">Linked to <small class="muted">— <span data-term="items">items</span> or whole streams, as many as it affects</small></span><div id="rd-links" class="deps"></div></div>
+
+        <h3 class="rd-sec">Linked to <small>— <span data-term="items">items</span> or whole streams, as many as it affects</small></h3>
+        <div class="span3 field"><div id="rd-links" class="deps"></div></div>
+
+        <h3 class="rd-sec">Status updates</h3>
         <div class="span3 field rd-notes-field">
-          <span class="field-label">Status updates</span>
           <textarea name="note" rows="2" placeholder="Add an update — it’s kept with today’s date and time, and earlier updates stay as they are"></textarea>
           <ul id="rd-notes" class="rd-notes"></ul>
         </div>
