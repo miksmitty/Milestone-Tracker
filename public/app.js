@@ -707,7 +707,8 @@ const FIELD_NAMES = {
   baseline_start: 'Baseline start', baseline_end: 'Baseline end', gitlab_url: 'GitLab URL', use_case_url: 'Use case URL',
   exec_summary: 'Executive summary', next_steps: 'Next steps', get_to_green: 'Get to green plan', period_end: 'Period ending',
   week_ending: 'Week ending', lead: 'Area lead', author: 'Author', number: 'Program number', rows: 'RAG options',
-  likelihood: 'Likelihood', impact: 'Impact', priority: 'Priority', dep_type: 'Dependency type', dep_priorities: 'Dependency priorities', dep_types: 'Dependency types', text: 'Note', due: 'Due', party: 'Other party', response: 'Response', links: 'Linked to', kind: 'Type',
+  likelihood: 'Likelihood', impact: 'Impact', priority: 'Priority', dep_type: 'Dependency type', dep_priorities: 'Dependency priorities', dep_types: 'Dependency types', text: 'Status update', due: 'Due', party: 'Other party', response: 'Response', links: 'Linked to', kind: 'Type',
+  impact_if: 'Impact if delayed or blocked', accountable: 'Accountable people',
   item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task', hidden: 'Hidden fields and features',
 };
 const fieldName = (k) => FIELD_NAMES[k] || k[0].toUpperCase() + k.slice(1).replace(/_/g, ' ');
@@ -7569,10 +7570,12 @@ function wireOverview() {
 // an issue by its impact. A dependency has its own statuses, a stream, a RAG (one of the
 // workspace's RAG options), and a priority and type from lists set in Workspace settings.
 //
-// Any entry can have summary notes (raid-notes.csv). Like a SharePoint "append changes" field,
-// a note is added with the time, and then kept: notes are never edited, only added to. They're
-// a file of their own so two people adding notes at once never clash; the server signs each new
-// note with the login ID (changedBy in server.js).
+// Any entry can have status updates (raid-notes.csv). Like a SharePoint "append changes" field,
+// an update is added with the time, and then kept: updates are never edited, only added to.
+// They're a file of their own so two people adding updates at once never clash; the server signs
+// each new one with the login ID (changedBy in server.js).
+// A dependency also records the impact if it's delayed or blocked, its mitigation and the people
+// accountable for it (impact_if, mitigation, accountable).
 
 const RAID_KINDS = {
   risk: {
@@ -7590,10 +7593,10 @@ const RAID_KINDS = {
 };
 const RAID_LEVELS = ['Low', 'Medium', 'High'];
 const RAID_COLUMNS = ['id', 'workspace_id', 'kind', 'ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type',
-  'likelihood', 'impact', 'due', 'party', 'response', 'links', 'raised', 'created', 'updated'];
+  'likelihood', 'impact', 'due', 'party', 'response', 'impact_if', 'mitigation', 'accountable', 'links', 'raised', 'created', 'updated'];
 const NOTE_COLUMNS = ['id', 'workspace_id', 'raid_id', 'at', 'by', 'text'];
 // A workspace's dependency priorities (highest first) and types, until it sets its own.
-const DEFAULT_DEP_LISTS = { dep_priorities: ['Critical', 'High', 'Medium', 'Low'], dep_types: ['Internal', 'External', 'Supplier', 'Technical'] };
+const DEFAULT_DEP_LISTS = { dep_priorities: ['Critical', 'Major', 'Medium', 'Minor'], dep_types: ['External', 'Vendor', 'Resource', 'Technology', 'Governance', 'Operational'] };
 const depList = (workspaceId, key) => {
   const own = (workspaceById(workspaceId)?.[key] || '').split(';').map(x => x.trim()).filter(Boolean);
   return own.length ? own : DEFAULT_DEP_LISTS[key];
@@ -7712,7 +7715,7 @@ function raidMatches(r, ignoreKind) {
   if (f.link && !r.links.includes(f.link) && !(r.stream_id && f.link === `stream:${r.stream_id}`)) return false;
   const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
-  const hay = [r.ref, r.title, r.description, r.owner, r.party, r.response, streamName(r.stream_id), r.rag, r.priority, r.dep_type, RAID_KINDS[r.kind].one, r.status,
+  const hay = [r.ref, r.title, r.description, r.owner, r.party, r.response, r.impact_if, r.mitigation, r.accountable, streamName(r.stream_id), r.rag, r.priority, r.dep_type, RAID_KINDS[r.kind].one, r.status,
     ...notesOf(r).map(n => n.text), ...r.links.map(l => { const x = linkInfo(l); return `${x.label} ${x.title}`; })].join(' ').toLowerCase();
   return words.every(w => hay.includes(w));
 }
@@ -7743,16 +7746,18 @@ const RAID_TABLES = {
     ['Stream', '', (r) => streamGo(r.stream_id)],
     ['Linked to', '', (r) => r.links.map(l => linkChip(l)).join('') || dash, 'raid-links'],
     ['Owner', '', (r) => cellOr(r.owner)],
+    ['Accountable', '', (r) => cellOr(r.accountable)],
     ['Priority', '', (r) => ratingPill(raidRating(r))],
     ['RAG', '', (r) => (r.rag ? statusPill(r.rag, ragOf(r.workspace_id).map) : dash)],
     ['Status', '', raidStatusBadge],
     ['Due', '', (r) => dueCell(r), 'raid-due'],
-    ['Latest note', 'raid-resp', (r) => { const n = notesOf(r)[0]; return n ? `${noteLine(n)}${notesOf(r).length > 1 ? `<small class="muted"> · ${notesOf(r).length - 1} earlier</small>` : ''}` : dash; }, 'raid-resp raid-note'],
+    ['Latest update', 'raid-resp', (r) => { const n = notesOf(r)[0]; return n ? `${noteLine(n)}${notesOf(r).length > 1 ? `<small class="muted"> · ${notesOf(r).length - 1} earlier</small>` : ''}` : dash; }, 'raid-resp raid-note'],
   ],
 };
 function raidTitleCell(r) {
   return `<b>${escAttr(r.title) || '<span class="muted">(untitled)</span>'}</b>${r.description ? `<div class="raid-desc">${escAttr(r.description)}</div>` : ''}`
-    + `${r.kind === 'dependency' && r.party ? `<div class="raid-desc">With: ${escAttr(r.party)}</div>` : ''}`;
+    + `${r.kind === 'dependency' && r.party ? `<div class="raid-desc">With: ${escAttr(r.party)}</div>` : ''}`
+    + `${r.kind === 'dependency' && r.impact_if ? `<div class="raid-desc">If delayed: ${escAttr(r.impact_if)}</div>` : ''}`;
 }
 const ratingTitle = (r) => (r.kind === 'risk' ? `Likelihood ${r.likelihood || '?'} × impact ${r.impact || '?'}` : r.kind === 'issue' ? `Impact ${r.impact || '?'}` : `Priority ${r.priority || '?'}`);
 const dueCell = (r) => (r.due ? `<span class="${raidOverdue(r) ? 'late' : ''}" ${raidOverdue(r) ? 'title="Overdue"' : ''}>${fmtShort(r.due)}</span>` : dash);
@@ -7812,9 +7817,9 @@ function goToLink(link) {
 function downloadRaidCSV() {
   renderRaid();
   const head = ['Ref', 'Type', 'Title', 'Description', 'Stream', 'Linked to', 'Owner', 'Status', 'RAG', 'Priority', 'Dependency type', 'Likelihood', 'Impact', 'Rating',
-    'Due', 'Raised', 'Other party', 'Response', 'Summary notes'];
+    'Due', 'Raised', 'Other party', 'Response', 'Impact if delayed', 'Mitigation', 'Accountable people', 'Status updates'];
   const lines = raidRows.map(r => [r.ref, RAID_KINDS[r.kind].one, r.title, r.description, streamName(r.stream_id), r.links.map(l => linkInfo(l).title).join('; '), r.owner,
-    r.status, r.rag, r.priority, r.dep_type, r.likelihood, r.impact, raidRating(r).label, r.due, r.raised, r.party, r.response,
+    r.status, r.rag, r.priority, r.dep_type, r.likelihood, r.impact, raidRating(r).label, r.due, r.raised, r.party, r.response, r.impact_if, r.mitigation, r.accountable,
     notesOf(r).map(n => `${fmtStamp(n.at)}${n.by ? ` (${n.by})` : ''}: ${n.text}`).join('\n')].map(csvEscape).join(','));
   const blob = new Blob(['﻿' + [head.map(csvEscape).join(','), ...lines].join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
   const p = currentWorkspace();
@@ -7830,9 +7835,10 @@ function downloadRaidCSV() {
 let rdEditing = null; // entry being edited; null for a new one
 let rdOpened = null;  // it as the dialog showed it, so only what's changed here is saved
 let rdLinks = [];
-const RD_FIELDS = ['ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact', 'due', 'raised', 'party', 'response'];
+const RD_FIELDS = ['ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact', 'due', 'raised', 'party', 'response', 'impact_if', 'mitigation', 'accountable'];
 // Fields only some kinds have: cleared on saving any other kind.
-const RD_ONLY = { likelihood: ['risk'], impact: ['risk', 'issue'], stream_id: ['dependency'], rag: ['dependency'], priority: ['dependency'], dep_type: ['dependency'], party: ['dependency'] };
+const RD_ONLY = { likelihood: ['risk'], impact: ['risk', 'issue'], stream_id: ['dependency'], rag: ['dependency'], priority: ['dependency'], dep_type: ['dependency'], party: ['dependency'],
+  impact_if: ['dependency'], mitigation: ['dependency'], accountable: ['dependency'] };
 
 // Options for a select, keeping a value that isn't in the list so it can't be lost.
 const keepOptions = (list, selected, blank = '—') => `<option value="">${blank}</option>`
@@ -7849,7 +7855,8 @@ function openRaidDialog(r, preset = {}) {
   const linkedStream = preset.links?.find(l => l.startsWith('stream:'))?.slice(7) || '';
   const v = r || {
     kind, ref: nextRaidRef(state.workspaceId, kind), title: '', description: '', stream_id: linkedStream, owner: '', status: '', rag: ragOf(state.workspaceId).def,
-    priority: '', dep_type: '', likelihood: 'Medium', impact: 'Medium', due: '', raised: fmtISO(new Date()), party: '', response: '', links: preset.links || [],
+    priority: '', dep_type: '', likelihood: 'Medium', impact: 'Medium', due: '', raised: fmtISO(new Date()), party: '', response: '', impact_if: '', mitigation: '', accountable: '',
+    links: preset.links || [],
   };
   document.getElementById('rd-kind').innerHTML = Object.entries(RAID_KINDS).map(([k, d]) =>
     `<label><input type="radio" name="kind" value="${k}" ${k === v.kind ? 'checked' : ''} /><span>${d.one}</span></label>`).join('');
@@ -7918,7 +7925,7 @@ function renderRdNotes() {
   const notes = rdEditing ? notesOf(rdEditing) : [];
   document.getElementById('rd-notes').innerHTML = notes.length
     ? notes.map(n => `<li><div class="note-when">${fmtStamp(n.at)}${n.by ? ` · ${escAttr(n.by)}` : ''}</div><div class="note-text">${escAttr(n.text)}</div></li>`).join('')
-    : '<li class="muted">No notes yet.</li>';
+    : '<li class="muted">No updates yet.</li>';
 }
 
 async function submitRaid(e) {
@@ -7942,7 +7949,7 @@ async function submitRaid(e) {
   document.getElementById('raid-dialog').close();
   rerenderCurrentView();
   const changed = !rdEditing || !same(r, rdOpened);
-  await Promise.all([changed && saveRaid(`${what} ${rdEditing ? 'saved' : 'added'}`), note && saveRaidNotes('Note added')]);
+  await Promise.all([changed && saveRaid(`${what} ${rdEditing ? 'saved' : 'added'}`), note && saveRaidNotes('Status update added')]);
 }
 
 async function deleteRaid() {
@@ -8219,21 +8226,22 @@ function wireRaid() {
 // impact from Low/Medium/High, 1–3, 1–5 or 1–10 scores, words like Rare…Almost certain or Minor…
 // Severe, or percentages; statuses from the usual SharePoint words (Active, Mitigating, Resolved,
 // Delivered…), and a value that can't be placed is kept as it is, with a note. A comments column
-// becomes summary notes: a cell can hold several, each starting with a date (and who wrote it,
-// as Download CSV writes them), and a note that's already on the entry isn't added again. Links
+// becomes status updates: a cell can hold several, each starting with a date (and who wrote it,
+// as Download CSV writes them), and an update that's already on the entry isn't added again. Links
 // name items by ref or title, or a stream by name; a risk or issue's stream becomes a link.
 
 const RI_FIELDS = ['kind', 'ref', 'spid', 'title', 'description', 'stream', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact',
-  'due', 'raised', 'party', 'response', 'links', 'notes', 'modified'];
+  'due', 'raised', 'party', 'response', 'impact_if', 'mitigation', 'accountable', 'links', 'notes', 'modified'];
 // Several columns can go into these: their text is put together, each under its heading.
-const RI_MULTI = ['description', 'response', 'links', 'notes'];
+const RI_MULTI = ['description', 'response', 'impact_if', 'mitigation', 'links', 'notes'];
 const RI_DATES = ['due', 'raised', 'modified'];
 const riFieldLabel = (k) => ({
   kind: 'Type (risk, issue or dependency)', ref: 'Ref', spid: 'SharePoint ID (makes the ref if there’s no ref column)', title: 'Title',
   description: 'Description', stream: 'Stream', owner: 'Owner', status: 'Status', rag: 'RAG (dependencies)', priority: 'Priority (dependencies)',
   dep_type: 'Dependency type', likelihood: 'Likelihood (risks)', impact: 'Impact (risks and issues)', due: 'Due date', raised: 'Date raised',
-  party: 'Other party (dependencies)', response: 'Mitigation / resolution / next action', links: `Linked ${T.items} or streams`,
-  notes: 'Summary notes', modified: 'Last modified (dates notes that have no date)',
+  party: 'Other party (dependencies)', response: 'Mitigation / resolution / next action', impact_if: 'Impact if delayed or blocked (dependencies)',
+  mitigation: 'Mitigation (dependencies)', accountable: 'Accountable people (dependencies)', links: `Linked ${T.items} or streams`,
+  notes: 'Status updates', modified: 'Last modified (dates updates that have no date)',
 }[k]);
 // Headings are compared with everything but letters and digits removed; earlier names win.
 const RI_ALIASES = {
@@ -8263,6 +8271,11 @@ const RI_ALIASES = {
   response: ['response', 'mitigation', 'mitigations', 'mitigationplan', 'mitigatingactions', 'mitigationactions', 'mitigationstrategy',
     'responseplan', 'responsestrategy', 'resolution', 'resolutionplan', 'actionplan', 'actions', 'action', 'nextsteps', 'nextaction',
     'nextactions', 'agreement', 'agreementnextaction', 'treatment', 'contingency', 'contingencyplan'],
+  impact_if: ['impactifdelayed', 'impactifblocked', 'impactifdelayedblocked', 'impactifdelayedorblocked', 'impactiflate', 'impactofdelay',
+    'impactifmissed', 'impactifnotdelivered', 'consequenceofdelay', 'ifdelayed', 'ifblocked', 'delayimpact'],
+  mitigation: ['dependencymitigation', 'mitigationifdelayed', 'mitigationifblocked', 'fallback', 'fallbackplan', 'workaround'],
+  accountable: ['accountablepeople', 'accountableperson', 'accountablepersons', 'accountableparty', 'accountableparties', 'accountablestakeholders',
+    'accountability', 'accountableexec', 'accountableexecutive', 'escalationcontact', 'escalateto'],
   links: ['links', 'linkedto', 'linkeditems', 'linkedmilestones', 'relatedmilestones', 'relatedmilestone', 'affectedmilestones',
     'impactedmilestones', 'relateditems', 'relatedto', 'milestones', 'milestone', 'deliverables', 'deliverable', 'relatedtasks', 'tasks', 'items'],
   notes: ['summarynotes', 'notes', 'comments', 'comment', 'updates', 'update', 'latestupdate', 'statusupdate', 'progressupdate', 'commentary',
@@ -8523,8 +8536,10 @@ function guessRaidMap(header, data) {
     if (!free(i)) return;
     if (!map.includes('kind') && looksLikeKinds(i)) map[i] = 'kind';
     else if (/likel|probab/.test(h)) take(i, 'likelihood');
+    else if (/impact.*(delay|block|late|miss)|(delay|block).*impact/.test(h)) take(i, 'impact_if');
     else if (/impact|severit|consequen/.test(h)) take(i, 'impact');
     else if (/mitigat|resolution|response|action|nextstep|contingen/.test(h)) take(i, 'response');
+    else if (/accountab/.test(h)) take(i, 'accountable');
     else if (/owner|assign/.test(h)) take(i, 'owner');
     else if (/status/.test(h)) take(i, 'status');
     else if (/due|target|needby|neededby|requiredby|deadline/.test(h)) take(i, 'due');
@@ -8616,8 +8631,13 @@ function planRaidImport() {
 
     if (title) f.title = title;
     if (!t && !title) { row.action = 'skip'; row.warn.push('No title'); return; }
-    for (const k of ['owner', 'party']) if (cell(k)) f[k] = cell(k);
-    for (const k of ['description', 'response']) if (joined(k)) f[k] = joined(k);
+    for (const k of ['owner', 'party', 'accountable']) if (cell(k)) f[k] = cell(k);
+    for (const k of ['description', 'response', 'impact_if', 'mitigation']) if (joined(k)) f[k] = joined(k);
+    // A dependency's Mitigation column is its own field, not its agreement / next action.
+    if (kind === 'dependency' && f.response && !has('mitigation') && cols('response').every(c => /mitigat/.test(riNorm(header[c])))) {
+      f.mitigation = f.response;
+      delete f.response;
+    }
 
     // Stream: a dependency's own field; for a risk or issue, a link to the stream.
     // A stream the workspace doesn't have yet is created when the import is applied (see applyRaidImport).
@@ -8732,7 +8752,8 @@ async function applyRaidImport() {
     if (!r) {
       r = {
         id: nextRaidId(), workspace_id: state.workspaceId, kind: row.kind, ref: '', title: '', description: '', stream_id: '', owner: '', status: '',
-        rag: '', priority: '', dep_type: '', likelihood: '', impact: '', due: '', raised: '', party: '', response: '', links: [], created: now, updated: now,
+        rag: '', priority: '', dep_type: '', likelihood: '', impact: '', due: '', raised: '', party: '', response: '', impact_if: '', mitigation: '', accountable: '',
+        links: [], created: now, updated: now,
       };
       state.raid.push(r);
       added++;

@@ -1,7 +1,7 @@
 // Tracker — zero-dependency Node server.
 // Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv,
 // updates.csv, streams.csv, raid.csv (risks, issues and dependencies), raid-notes.csv (their
-// notes) and report-comments.csv (comments on passages of a report, with replies), and appends
+// status updates) and report-comments.csv (comments on passages of a report, with replies), and appends
 // every change to an item's dates to date-changes.csv.
 // Several people can use it at once: each file has a version, a save based on an older version is
 // turned back with the current file for the browser to merge, and every save is pushed to the
@@ -72,7 +72,7 @@ const DATASETS = {
   },
   '/api/raid': {
     file: path.join(DATA_DIR, 'raid.csv'),
-    header: 'id,workspace_id,kind,ref,title,description,stream_id,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,links,raised,created,updated\n',
+    header: 'id,workspace_id,kind,ref,title,description,stream_id,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,impact_if,mitigation,accountable,links,raised,created,updated\n',
   },
   '/api/raid-notes': {
     file: path.join(DATA_DIR, 'raid-notes.csv'),
