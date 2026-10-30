@@ -946,6 +946,24 @@
     </form>
   </dialog>
 
+  <dialog id="del-dialog" class="edit-dialog conflict-dialog tl-dialog del-dialog">
+    <form method="dialog">
+      <header class="dlg-head">
+        <span class="type-badge prog">Workspace</span>
+        <h2 id="del-heading">Delete this workspace?</h2>
+        <button value="cancel" class="dlg-close" title="Cancel">✕</button>
+      </header>
+      <p class="cf-intro tl-warn">⚠ Everything in it is deleted with it:</p>
+      <ul id="del-list" class="cf-list"></ul>
+      <p class="cf-intro del-note">The message afterwards offers <b>Undo</b>, which puts it all back.</p>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button value="cancel" class="btn">Cancel</button>
+        <button value="ok" class="btn btn-danger">Delete workspace</button>
+      </footer>
+    </form>
+  </dialog>
+
   <!-- ============ FIND (⌘K) ============ -->
   <dialog id="palette" class="palette" aria-label="Find">
     <div class="pal-search">

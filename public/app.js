@@ -1468,11 +1468,59 @@ function rowMetrics() {
 }
 
 // Label columns grow to fit the longest stream and sub-stream names up to a cap; longer names wrap.
+// Dragging a column's edge sets its width instead (a per-browser, per-workspace preference, up to
+// MAX_DRAG_COL_W); double-clicking the edge goes back to fitting the names.
+const MAX_DRAG_COL_W = 480;
 const hasSubStreams = () => state.items.some(m => m.substream);
 const widest = (names, size, weight) => Math.max(0, ...[...new Set(names)].filter(Boolean).map(n => textW(n, size, weight)));
-const streamColWidth = () => Math.ceil(Math.min(MAX_STREAM_COL_W, Math.max(hasSubStreams() ? MIN_STREAM_COL_W : 170, widest(state.items.map(m => streamName(m.stream_id)), 14, 700) + 40)));
-const subColWidth = () => Math.ceil(Math.min(MAX_SUB_COL_W, Math.max(MIN_SUB_COL_W, widest(state.items.map(m => m.substream), 12, 600) + 24)));
+const ganttColPrefs = () => loadAppPrefs().ganttCols?.[state.workspaceId] || {};
+const streamColWidth = () => (ganttColPrefs().stream ? Math.max(MIN_STREAM_COL_W, Math.min(MAX_DRAG_COL_W, ganttColPrefs().stream))
+  : Math.ceil(Math.min(MAX_STREAM_COL_W, Math.max(hasSubStreams() ? MIN_STREAM_COL_W : 170, widest(state.items.map(m => streamName(m.stream_id)), 14, 700) + 40))));
+const subColWidth = () => (ganttColPrefs().sub ? Math.max(MIN_SUB_COL_W, Math.min(MAX_DRAG_COL_W, ganttColPrefs().sub))
+  : Math.ceil(Math.min(MAX_SUB_COL_W, Math.max(MIN_SUB_COL_W, widest(state.items.map(m => m.substream), 12, 600) + 24))));
 const labelWidth = () => streamColWidth() + (hasSubStreams() ? subColWidth() : 0);
+
+function setGanttColWidth(key, w) { // key 'stream' | 'sub'; null goes back to fitting the names
+  const all = loadAppPrefs().ganttCols || {};
+  const mine = { ...(all[state.workspaceId] || {}) };
+  if (w == null) delete mine[key]; else mine[key] = Math.round(w);
+  saveAppPrefs({ ganttCols: { ...all, [state.workspaceId]: mine } });
+  if (state.userZoomed) renderGantt(); else fitZoom(); // the chart takes the space left to it
+}
+
+// Drag a label column's edge: a guide line follows the pointer, and the width is set on letting go.
+function startGanttColResize(key, e) {
+  const wrap = document.getElementById('gantt-scroll');
+  const startX = e.clientX, startW = key === 'sub' ? subColWidth() : streamColWidth();
+  const min = key === 'sub' ? MIN_SUB_COL_W : MIN_STREAM_COL_W;
+  const wr = wrap.getBoundingClientRect();
+  const baseX = document.getElementById('gantt-container').getBoundingClientRect().left + wrap.scrollLeft + (key === 'sub' ? streamColWidth() : 0); // the pinned column's left edge on screen
+  const guide = document.createElement('div');
+  guide.className = 'col-drop-mark';
+  document.body.append(guide);
+  document.body.classList.add('col-resizing');
+  let w = startW;
+  const move = (ev) => {
+    w = Math.max(min, Math.min(MAX_DRAG_COL_W, Math.round(startW + ev.clientX - startX)));
+    guide.style.left = `${baseX + w - 1}px`;
+    guide.style.top = `${wr.top}px`;
+    guide.style.height = `${wr.height}px`;
+    showWidthTip(ev, w);
+  };
+  const up = (ev) => {
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    removeEventListener('pointercancel', up);
+    guide.remove();
+    hideWidthTip();
+    document.body.classList.remove('col-resizing');
+    if (ev.type === 'pointerup' && w !== startW) setGanttColWidth(key, w);
+  };
+  move(e);
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+  addEventListener('pointercancel', up);
+}
 
 function svgEl(tag, attrs, text) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -1821,6 +1869,13 @@ function renderGantt() {
 
   // vertical separator between labels and chart
   col.appendChild(svgEl('line', { x1: LABEL_W, y1: 0, x2: LABEL_W, y2: height, stroke: G.strong, 'stroke-width': 1 }));
+  // the columns' edges can be dragged to resize them (double-click an edge to fit the names again)
+  const grip = (x, key, h) => svgEl('rect', { class: 'gantt-col-grip', 'data-grip': key, x: x - 4, y: 0, width: 8, height: h, fill: 'transparent' });
+  for (const g of [col, corner]) {
+    const h = g === col ? height : headerH;
+    if (subCol) g.appendChild(grip(STREAM_COL_W, 'stream', h));
+    g.appendChild(grip(LABEL_W, subCol ? 'sub' : 'stream', h));
+  }
 
   // ---- timescale: two tiers of headers + grid, like MS Project ----
   const gridBottom = headerH + bodyH;
@@ -7029,9 +7084,43 @@ async function clearWorkspaceHistory() {
   showToast(`History cleared for ${p.name}: ${count(out.removed, 'date log row', 'date log rows')} removed, ${count(out.copies, 'daily copy', 'daily copies')} reset`);
 }
 
+// Deleting a workspace takes everything in it: say what that is and ask first. Resolves true to go ahead.
+function confirmDeleteWorkspace(p) {
+  const dlg = document.getElementById('del-dialog');
+  const st = workspaceStats(p), t = makeTerms(p);
+  const n = (k) => state[k].filter(x => x.workspace_id === p.id).length;
+  const rows = [
+    [st.items.length, t.item, t.items], [st.reports.length, 'report', 'reports'], [n('updates'), 'weekly update', 'weekly updates'],
+    [n('raid'), 'risk, issue or dependency', 'risks, issues and dependencies'], [n('streams'), 'stream', 'streams'], [n('reportComments'), 'report comment', 'report comments'],
+  ].filter(([c]) => c);
+  document.getElementById('del-heading').textContent = `Delete the workspace ${p.name}?`;
+  document.getElementById('del-list').innerHTML = rows.length
+    ? rows.map(([c, one, many]) => `<li><div class="cf-what">${escAttr(count(c, one, many))}</div></li>`).join('')
+    : '<li><div class="cf-what">It holds nothing yet.</div></li>';
+  dlg.returnValue = '';
+  dlg.showModal();
+  dlg.querySelector('[value="cancel"].btn').focus(); // Enter or Esc keeps the workspace; Delete has to be chosen
+  return new Promise(resolve => {
+    const form = dlg.querySelector('form');
+    const done = (ok) => {
+      form.removeEventListener('submit', onSubmit);
+      dlg.removeEventListener('cancel', onCancel);
+      dlg.removeEventListener('close', onClose);
+      resolve(ok);
+    };
+    const onSubmit = (e) => done(e.submitter?.value === 'ok');
+    const onCancel = () => done(false);
+    const onClose = () => done(dlg.returnValue === 'ok');
+    form.addEventListener('submit', onSubmit);
+    dlg.addEventListener('cancel', onCancel);
+    dlg.addEventListener('close', onClose);
+  });
+}
+
 async function deleteWorkspace() {
   const p = pgEditing;
   if (!p || state.workspaces.length < 2) return;
+  if (!await confirmDeleteWorkspace(p)) return;
   const st = workspaceStats(p);
   const t = makeTerms(p);
   const lost = [st.items.length && count(st.items.length, t.item, t.items), st.reports.length && count(st.reports.length, 'report', 'reports')].filter(Boolean);
@@ -10131,6 +10220,17 @@ function wireEvents() {
   });
   gc.addEventListener('mousemove', (e) => { if (document.getElementById('tip').classList.contains('show')) moveTip(e); });
   gc.addEventListener('mouseleave', () => { hideTip(); focusLinks(null); });
+  gc.addEventListener('pointerdown', (e) => { // a column edge: resize, not an item drag
+    const grip = e.button === 0 && e.target.closest?.('.gantt-col-grip');
+    if (!grip) return;
+    e.preventDefault();
+    e.stopPropagation();
+    startGanttColResize(grip.dataset.grip, e);
+  }, true);
+  gc.addEventListener('dblclick', (e) => {
+    const grip = e.target.closest?.('.gantt-col-grip');
+    if (grip) setGanttColWidth(grip.dataset.grip, null);
+  });
   gc.addEventListener('pointerdown', (e) => {
     const g = e.button === 0 && !e.ctrlKey && e.target.closest('.gantt-item');
     const m = g && itemById(g.dataset.id);

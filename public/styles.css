@@ -1295,6 +1295,8 @@ button.cm-quote:hover { background: var(--hover); }
 
 /* gantt: dependency lines only for the item in focus; folding streams; baseline and overdue */
 #gantt-container svg.links-hover .gantt-link:not(.hl) { opacity: 0; }
+#gantt-container .gantt-col-grip { cursor: col-resize; fill: transparent; }
+#gantt-container .gantt-col-grip:hover, body.col-resizing #gantt-container .gantt-col-grip { fill: var(--accent); fill-opacity: .3; }
 #gantt-container .stream-toggle { cursor: pointer; }
 #gantt-container .stream-toggle:hover text:first-of-type { text-decoration: underline; }
 #gantt-container .stream-toggle:focus { outline: none; }
@@ -1451,6 +1453,7 @@ body.nav-collapsed .nav-arrows .nav-arrow { width: 100%; padding: 9px 10px; }
 .tl-warn { padding: 9px 12px; border: 1px solid var(--tint-border); background: var(--tint); border-radius: 8px; color: var(--text); font-weight: 600; }
 .tl-dialog { width: min(520px, calc(100vw - 32px)); }
 .tl-dialog .cf-list li { grid-template-columns: 1fr; }
+.del-dialog .del-note { margin: 12px 0 0; }
 .form-grid .check-row { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text); }
 .form-grid .check-row input { width: auto; margin: 0; }
 

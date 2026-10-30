@@ -221,7 +221,7 @@ RAG options are stored in [statuses.csv](statuses.csv), created the first time a
 workspace_id,position,name,color,description,get_to_green,is_default
 ```
 
-Deleting a workspace also deletes its items, reports and weekly updates; the message afterwards says how many, with **Undo**. There must always be at least one workspace.
+Deleting a workspace also deletes its items, reports, weekly updates, register entries, streams and comments: **Delete workspace** first asks, listing what goes with it, and the message afterwards offers **Undo**. There must always be at least one workspace.
 
 Workspaces live in [workspaces.csv](workspaces.csv):
 
@@ -348,7 +348,7 @@ id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved
 - The chart fills the window below its toolbar and scrolls inside its own panel
 - One toolbar: **Search**, **Filter**, **Sort** and **View** menus on the left; the date range, zoom and actions on the right
 - Timescale, as in MS Project: **Quarters** (quarters over months, fitted to the window), **Months** (months over weeks) or **Weeks** (weeks over days, with day names). Months and Weeks open scrolled to today, weekends are shaded once days are wide enough, and the choice is remembered per browser
-- The stream column and the timescale header stay pinned while the chart scrolls
+- The stream column and the timescale header stay pinned while the chart scrolls. The stream and sub-stream columns fit their names; drag a column's edge to set its width (double-click the edge to fit the names again), remembered per workspace in this browser
 - Zoom: − **Fit** + (auto-fits until you zoom manually), with a finer slider under **View**; header labels shorten to fit as you zoom
 - The date range button shows the months in view; open it to pick dates, or **Fit to items** to fit the range to everything shown
 - Items dated outside the range are named under the toolbar, with a link to fit the range to everything; adding or moving an item beyond the range widens it so the item stays on the chart
