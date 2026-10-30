@@ -41,7 +41,7 @@ The app runs on Azure App Service as it is: plain Node 18+, nothing to install.
 2. Under **Configuration → Application settings**, set `DATA_DIR` to `/home/data`. `/home` is kept across restarts and redeployments; the app's own folder is replaced on each deploy (and is read-only when run from a package).
 3. Keep the instance count at **1** (scale up, not out). Turn on **Always On** so the server isn't stopped when it's idle.
 4. Deploy the repository (zip deploy, GitHub Actions or local Git). To start with existing data, copy the CSVs (and `date-changes.csv`) into `/home/data` once, e.g. through the Kudu console or the SSH session, then restart.
-5. `config.json` and the logo are read from the app's own folder, so they travel with the code. On a test instance, add the application setting `APP_ENVIRONMENT` = `Test` so its pages carry a Test badge (see **Title, logo and environment**); `APP_VERSION` can carry the build number.
+5. `config.json` and the logo are read from the app's own folder, so they travel with the code. On a test instance, add the application setting `APP_ENVIRONMENT` = `Test` so its pages carry a Test band across the top (see **Title, logo and environment**); `APP_VERSION` can carry the build number.
 
 To put it behind a corporate sign-in, turn on App Service **Authentication**. The signed-in user's login ID then arrives on every request (the `X-MS-CLIENT-PRINCIPAL-NAME` header), and `changedBy()` in server.js can return it for the date log.
 
@@ -62,9 +62,9 @@ On a Windows App Service, IIS holds back the event stream, so pages fall back to
 - **title**: the app's name (default *Tracker*). Leave it empty (`""`) to show only the logo.
 - **logo**: an image file (PNG, JPG, SVG, GIF or WebP), as a path relative to `config.json`, or a web address (`https://…`). It replaces the red diamond at the top of the menu, 28px tall and as wide as its shape needs. Leave it empty for the default mark.
 
-- **environment**: a name for this copy of the app, e.g. *Test* or *UAT*. It shows as a badge at the top right of every page, as a stripe along the top, and in the browser tab (`Dashboard · PLT — Tracker [Test]`), so a test instance is never mistaken for the live one. Leave it empty on the live instance. **environmentColor** (`#rrggbb`) changes the badge's colour from the default amber.
+- **environment**: a name for this copy of the app, e.g. *Test* or *UAT*. It shows as a coloured band across the top of every page (with the version), beside the app's name in the menu, and in the browser tab (`Dashboard · PLT — Tracker [Test]`), so a test instance is never mistaken for the live one. Leave it empty on the live instance. **environmentColor** (`#rrggbb`) changes the badge's colour from the default amber.
 
-Since `config.json` travels with the code, an instance can set these itself instead: the `APP_ENVIRONMENT` environment variable overrides `environment` (and `APP_ENVIRONMENT_COLOR` the colour). The app's **version** (from `package.json`, or `APP_VERSION` if the deployment sets one, e.g. a build number or commit) is shown at the foot of the menu with the environment, and in the badge's tooltip.
+Since `config.json` travels with the code, an instance can set these itself instead: the `APP_ENVIRONMENT` environment variable overrides `environment` (and `APP_ENVIRONMENT_COLOR` the colour). The app's **version** (from `package.json`, or `APP_VERSION` if the deployment sets one, e.g. a build number or commit) is shown in the band and at the foot of the menu.
 
 Changes show when the page is reloaded; there's no need to restart the server. If the file is missing, the defaults are used.
 

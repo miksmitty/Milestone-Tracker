@@ -150,14 +150,21 @@ body.nav-hidden .sidebar { display: none; }
 .save-status { margin-left: auto; font-size: 12.5px; color: var(--muted); text-align: right; }
 .save-status.ok { color: #16a34a; }
 .save-status.err { color: var(--accent); }
-/* which instance this is (config.json "environment" or APP_ENVIRONMENT): a badge and a stripe */
+/* which instance this is (config.json "environment" or APP_ENVIRONMENT): a band across the top of
+   every page, and the name beside the app's own */
 :root { --env: #b45309; }
-.env-badge {
-  flex: none; padding: 3px 10px; border-radius: 999px; background: var(--env); color: #fff;
-  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+.env-band {
+  flex: none; padding: 6px 20px; background: var(--env); color: #fff; text-align: center;
+  font-size: 13px; letter-spacing: .02em; line-height: 1.3;
 }
-.env-badge[hidden] { display: none; }
-body[data-env] .app-main { border-top: 3px solid var(--env); }
+.env-band b { font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
+.env-band-v { opacity: .85; }
+.env-band[hidden] { display: none; }
+.brand-env {
+  flex: none; padding: 2px 7px; border-radius: 6px; background: var(--env); color: #fff;
+  font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+}
+.brand-env[hidden] { display: none; }
 .app-version { display: block; padding: 4px 10px 6px; font-size: 11px; color: #8e8d83; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .app-version[hidden] { display: none; }
 

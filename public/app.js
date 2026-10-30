@@ -9803,13 +9803,15 @@ async function loadConfig() {
   name.textContent = APP_CONFIG.title;
   name.hidden = !APP_CONFIG.title;
   document.title = APP_CONFIG.title;
-  // Which instance this is: an environment name (e.g. Test) as a badge in the page header and a
-  // stripe along the top, in the browser tab too, so a test copy is never mistaken for the live one.
+  // Which instance this is: an environment name (e.g. Test) as a band across the top of every page
+  // and beside the app's name, in the browser tab too, so a test copy is never mistaken for the live one.
   const env = APP_CONFIG.environment.trim();
-  const badge = document.getElementById('env-badge');
-  badge.textContent = env;
-  badge.hidden = !env;
-  badge.title = env ? `This is the ${env} instance${APP_CONFIG.version ? ` · version ${APP_CONFIG.version}` : ''}` : '';
+  const band = document.getElementById('env-band');
+  band.innerHTML = env ? `<b>${escAttr(env)}</b> instance${APP_CONFIG.version ? ` <span class="env-band-v">· version ${escAttr(APP_CONFIG.version)}</span>` : ''}` : '';
+  band.hidden = !env;
+  const brandEnv = document.getElementById('brand-env');
+  brandEnv.textContent = env;
+  brandEnv.hidden = !env;
   if (env) document.body.dataset.env = env; else delete document.body.dataset.env;
   if (/^#[0-9a-f]{3,8}$/i.test(APP_CONFIG.environmentColor)) document.documentElement.style.setProperty('--env', APP_CONFIG.environmentColor);
   const ver = document.getElementById('app-version');
