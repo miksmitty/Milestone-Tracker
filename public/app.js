@@ -2449,6 +2449,7 @@ function renderGanttFilters() {
   const badge = document.getElementById('gf-badge');
   badge.hidden = !chips.length;
   badge.textContent = chips.length;
+  document.getElementById('gf-clear').hidden = !ganttFiltered();
   const row = document.getElementById('gf-chips');
   row.hidden = !ganttFiltered();
   if (!row.hidden) {
@@ -2527,6 +2528,7 @@ function wireGanttFilters() {
     renderGantt();
   });
   document.getElementById('gf-late').addEventListener('click', () => { ganttFilter.late = !ganttFilter.late; renderGantt(); });
+  document.getElementById('gf-clear').addEventListener('click', () => { clearGanttFilters(); renderGantt(); });
   document.getElementById('gf-chips').addEventListener('click', (e) => {
     const k = e.target.closest('[data-unfilter]')?.dataset.unfilter;
     if (!k) return;
