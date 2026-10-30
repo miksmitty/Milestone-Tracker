@@ -348,6 +348,7 @@ id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved
 - The stream column and the timescale header stay pinned while the chart scrolls
 - Zoom: − **Fit** + (auto-fits until you zoom manually), with a finer slider under **View**; header labels shorten to fit as you zoom
 - The date range button shows the months in view; open it to pick dates, or **Fit to items** to fit the range to everything shown
+- Items dated outside the range are named under the toolbar, with a link to fit the range to everything; adding or moving an item beyond the range widens it so the item stays on the chart
 - **Search** by ref, title, description, owner or stream, and **Filter** by stream, owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
 - **Sort** streams A–Z (the default), as listed, by earliest start, by latest end, or most at risk first (most items at an off-track RAG). Items are packed several to a row by date, or choose one per row sorted by start, end, ref, title, RAG or owner, ascending or descending. A dot on **Sort** shows it's changed from the default, and the sort is remembered per browser
 - **View** toggles the **top** and **bottom timescale**, **today line** (labelled in the timescale header, so it never covers an item) and **baseline**, and sets the dependency lines, folding and baseline

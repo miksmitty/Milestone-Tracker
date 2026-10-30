@@ -1004,6 +1004,49 @@ function autoRange() {
   document.getElementById('range-end').value = fmtISO(state.rangeEnd);
 }
 
+// Widen the range (never narrow it) so these items are on the chart: an item added or moved
+// beyond the range would otherwise just vanish from it. The chart refits unless the user has
+// set a zoom, and scrolls the first item into view.
+function growRangeTo(ids) {
+  if (!state.rangeStart) return false;
+  let grown = false;
+  for (const id of ids) {
+    const m = itemById(id);
+    const s = m && parseDate(m.start), e = m && parseDate(m.end);
+    if (!s || !e) continue;
+    if (s < state.rangeStart) { state.rangeStart = new Date(s.getFullYear(), s.getMonth(), 1 - 14); grown = true; }
+    if (e > state.rangeEnd) { state.rangeEnd = new Date(e.getFullYear(), e.getMonth() + 1, 14); grown = true; }
+  }
+  if (!grown) return false;
+  document.getElementById('range-start').value = fmtISO(state.rangeStart);
+  document.getElementById('range-end').value = fmtISO(state.rangeEnd);
+  if (isShown('gantt')) {
+    if (!state.userZoomed) fitZoom();
+    requestAnimationFrame(() => document.querySelector(`#gantt-container .gantt-item[data-id="${ids[0]}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+  }
+  return true;
+}
+
+// Fit the range to the items shown, and the zoom to the window unless the user has set one.
+function fitRange() {
+  autoRange();
+  if (state.userZoomed) renderGantt(); else fitZoom();
+}
+
+// Items the filters would show but the date range hides, named under the toolbar with a
+// one-click fit, so an item dated beyond the range is never silently missing.
+function renderOutsideNote(outside) {
+  const note = document.getElementById('g-outside');
+  note.hidden = !outside.length;
+  if (note.hidden) return;
+  const sorted = [...outside].sort((a, b) => a._s - b._s);
+  const when = (m) => m._task ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end);
+  const names = sorted.slice(0, 3).map(m => `<b>${escAttr(fullLabel(m))}</b> (${when(m)})`).join(', ');
+  const more = sorted.length > 3 ? ` and ${sorted.length - 3} more` : '';
+  note.innerHTML = `<span>${count(sorted.length, T.item, T.items)} outside this date range: ${names}${more}.</span>
+    <button type="button" class="link-btn" data-act="fit">Fit the range to everything</button>`;
+}
+
 /* ---- baseline ---- */
 // A snapshot of the planned dates (View → Set baseline), kept in baseline_start / baseline_end.
 // The chart shows where an item was planned when it has moved, and the hover card how far.
@@ -1652,7 +1695,7 @@ function renderGantt() {
   const subCol = hasSubStreams();
   const rm = rowMetrics();
 
-  const items = state.items
+  const dated = state.items
     // a task's end date is inclusive, so its bar runs to the end of that day
     .map(m => ({ ...m, _s: parseDate(m.start), _e: parseDate(isTask(m) && m.end ? addDays(m.end, 1) : m.end), _task: isTask(m) }))
     .map(m => {
@@ -1660,8 +1703,11 @@ function renderGantt() {
       const prog = !m._task && milestoneProgress(m);
       return { ...m, _tag: prog ? `${prog.pct}%` : '' };
     })
-    .filter(m => m._s && m._e && m._e >= state.rangeStart && m._s <= state.rangeEnd && ganttMatches(m));
+    .filter(m => m._s && m._e && ganttMatches(m));
+  const inRange = (m) => m._e >= state.rangeStart && m._s <= state.rangeEnd;
+  const items = dated.filter(inRange);
   renderGanttFilters();
+  renderOutsideNote(dated.filter(m => !inRange(m)));
 
   const totalDays = Math.max(1, (state.rangeEnd - state.rangeStart) / MS_DAY);
   const chartW = totalDays * state.pxPerDay;
@@ -2115,7 +2161,7 @@ async function onDragEnd() {
   const snap = snapshotData();
   const res = await guardChange(() => updateItem(m, dragChanges(m, mode, days)));
   if (!res) return renderGantt();
-  if (!res.error) flashMoved([m.id, ...res.moved]);
+  if (!res.error) { flashMoved([m.id, ...res.moved]); growRangeTo([m.id, ...res.moved]); }
   renderGantt();
   if (res.error) return showToast(res.error);
   const msg = [`${itemLabel(m)}: ${isTask(m) ? `${fmtShort(m.start)} – ${fmtNice(m.end)}` : fmtNice(m.end)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
@@ -2666,6 +2712,7 @@ async function submitEditDialog(e) {
   if (res.error) { dropped(); return (err.textContent = res.error); }
   document.getElementById('edit-dialog').close();
   if (res.moved.length) flashMoved([m.id, ...res.moved]);
+  growRangeTo([m.id, ...res.moved]);
   rerenderCurrentView();
   if (isShown('editor')) { // redraw the Items grid so saving can't copy its old values back; a new item goes at the bottom
     refreshEditor(editing ? [] : [m.id]);
@@ -3497,6 +3544,7 @@ async function applyTableChange(m, changes, msg) {
     flashStatus(res.error, false);
     return refreshEditor();
   }
+  growRangeTo([m.id, ...res.moved]);
   refreshEditor(res.moved);
   scheduleSave([msg, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
 }
@@ -4031,6 +4079,7 @@ async function onQuickDateSubmit(e) {
   if (d.status !== m.status) { m.status = d.status; msgs.unshift(`RAG ${d.status}`); }
   hideQuick();
   if (res.moved.length) flashMoved([m.id, ...res.moved]);
+  growRangeTo([m.id, ...res.moved]);
   renderGantt();
   const msg = [`${itemLabel(m)}: ${msgs.join(', ')}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
   offerUndo(snap, msg);
@@ -9638,7 +9687,8 @@ function wireEvents() {
     if (d) { state.rangeEnd = d; renderGantt(); }
   };
   wireGanttFilters();
-  document.getElementById('range-auto').onclick = () => { autoRange(); renderGantt(); };
+  document.getElementById('range-auto').onclick = fitRange;
+  document.getElementById('g-outside').onclick = (e) => { if (e.target.closest('[data-act="fit"]')) fitRange(); };
 
   document.getElementById('toggle-months').onchange = (e) => { state.showMonths = e.target.checked; renderGantt(); };
   document.getElementById('toggle-quarters').onchange = (e) => { state.showQuarters = e.target.checked; renderGantt(); };
