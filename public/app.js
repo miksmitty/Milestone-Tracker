@@ -7910,6 +7910,7 @@ function updateRdKind(status) {
   document.querySelectorAll('#raid-form .rd-sec[data-kinds]').forEach(h => { h.hidden = !h.dataset.kinds.split(' ').includes(kind); });
   document.getElementById('rd-sec-rating').textContent = kind === 'dependency' ? 'Priority and type' : 'Rating';
   document.getElementById('rd-sec-response').textContent = kind === 'dependency' ? 'Impact and response' : 'Response';
+  document.getElementById('rd-issue').hidden = !(rdEditing && kind === 'risk');
   // Changing the kind carries the status across: closed stays closed, anything else starts again.
   const was = status ?? f.status.value;
   const sts = raidStatuses(kind);
@@ -7973,6 +7974,42 @@ async function submitRaid(e) {
   rerenderCurrentView();
   const changed = !rdEditing || !same(r, rdOpened);
   await Promise.all([changed && saveRaid(`${what} ${rdEditing ? 'saved' : 'added'}`), note && saveRaidNotes('Status update added')]);
+}
+
+// A risk that has happened becomes an issue. The risk is kept and closed, with a status update
+// naming the issue it became; a new issue is raised with the risk's title, description, owner,
+// impact, due date and links, and its first status update says which risk it came from, how that
+// was rated and what the mitigation was. Edits made in the dialog are kept on the risk first, and
+// the new issue opens so its resolution plan can be written.
+async function riskToIssue() {
+  const r = rdEditing;
+  if (!r || rdKindNow() !== 'risk') return;
+  const f = document.getElementById('raid-form').elements;
+  const err = document.getElementById('rd-error');
+  const v = Object.fromEntries(RD_FIELDS.map(k => [k, f[k].value.trim()]));
+  if (!v.title) return (err.textContent = 'Give it a title.');
+  if (!state.raid.includes(r)) return (err.textContent = 'Someone else has just deleted this.');
+  const snap = snapshotData();
+  const now = new Date().toISOString();
+  const was = r.ref || 'a risk';
+  const ref = nextRaidRef(r.workspace_id, 'issue');
+  const level = raidRating({ ...r, ...v, kind: 'risk' }).level;
+  Object.assign(r, changedFrom({ ...v, kind: 'risk', links: [...rdLinks] }, rdOpened), { status: raidDone('risk', r.workspace_id), updated: now });
+  const issue = {
+    id: nextRaidId(), workspace_id: r.workspace_id, kind: 'issue', ref, title: v.title, description: v.description, stream_id: '', owner: v.owner,
+    status: raidStatuses('issue', r.workspace_id)[0], rag: '', priority: '', dep_type: '', likelihood: '', impact: v.impact, due: v.due, raised: fmtISO(new Date()),
+    party: '', response: '', impact_if: '', mitigation: '', accountable: '', links: [...rdLinks], created: now, updated: now,
+  };
+  state.raid.push(issue);
+  const note = (raidId, text) => state.raidNotes.push({ id: nextNoteId(), workspace_id: r.workspace_id, raid_id: raidId, at: now, by: '', text });
+  if (f.note.value.trim()) note(r.id, f.note.value.trim());
+  note(r.id, `Happened — became issue ${ref}.`);
+  note(issue.id, `Raised from risk ${was}${level ? `, rated ${level} (likelihood ${v.likelihood || '—'}, impact ${v.impact || '—'})` : ''}.${v.response ? `\nMitigation was: ${v.response}` : ''}`);
+  document.getElementById('raid-dialog').close();
+  rerenderCurrentView();
+  offerUndo(snap, `${was} became issue ${ref}`);
+  openRaidDialog(issue);
+  await Promise.all([saveRaid(`Risk ${was} became issue ${ref}`), saveRaidNotes()]);
 }
 
 async function deleteRaid() {
@@ -8242,6 +8279,7 @@ function wireRaid() {
   document.getElementById('rd-cancel').onclick = () => dlg.close();
   document.getElementById('rd-close').onclick = () => dlg.close();
   document.getElementById('rd-delete').onclick = deleteRaid;
+  document.getElementById('rd-issue').onclick = riskToIssue;
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   wirePgDepLists();
   wirePgStreams();
