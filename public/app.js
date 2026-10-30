@@ -1678,7 +1678,7 @@ function renderGantt() {
   const svg = svgEl('svg', {
     width, height, viewBox: `0 0 ${width} ${height}`, class: state.linkMode === 'hover' ? 'links-hover' : '',
     xmlns: 'http://www.w3.org/2000/svg',
-    style: 'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;',
+    style: `font-family:${getComputedStyle(document.body).fontFamily};`, // the page's typeface, so the chart matches it
   });
 
   // defs: status gradients, drop shadow, arrowheads
