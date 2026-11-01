@@ -6809,7 +6809,7 @@ function updatePageHead() {
   document.getElementById('page-title').textContent = VIEW_TITLES[view]();
   const crumb = document.getElementById('page-workspace');
   crumb.hidden = !inWorkspace;
-  crumb.innerHTML = inWorkspace ? `${p.code ? `<b>${escAttr(p.code)}</b> ` : ''}${escAttr(p.name)}` : '';
+  crumb.innerHTML = inWorkspace ? `${p.code ? `<b>${escAttr(p.code)}</b>` : ''}<span>${escAttr(p.name)}</span>` : '';
   const env = APP_CONFIG.environment.trim();
   const suffix = `${APP_CONFIG.title ? ` — ${APP_CONFIG.title}` : ''}${env ? ` [${env}]` : ''}`;
   document.title = inWorkspace ? `${VIEW_TITLES[view]()} · ${p.name}${suffix}` : `${VIEW_TITLES[view]()}${suffix}`;
@@ -7682,11 +7682,11 @@ function dashSummary(p, items, rg) {
         <div class="dash-update-head">${statusPill(cur.status, rg.map)} <span>w/e ${fmtShort(cur.week_ending)}${cur.author ? ` · ${escAttr(cur.author)}` : ''}</span></div>
         ${cur.summary ? `<div class="md dash-md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No summary</span>'}</div>`
     : `<p class="dash-empty">No weekly update yet.</p>`;
-  const latest = `<div class="dash-sum-col"><div class="dash-sum-label">Latest weekly update${stale && cur ? ' <em class="dash-stale">not this week’s</em>' : ''}</div>${update}</div>`;
+  const latest = `<div class="dash-sum-col"><div class="dash-sum-label">Latest weekly update${stale && cur ? ' <em class="dash-stale">not this week’s</em>' : ''}${dashBtn('btn btn-sm', { k: 'update' }, null, 'Weekly update')}</div>${update}</div>`;
 
-  return dashCard('summary', escAttr(p.name), p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : '',
+  return dashCard('summary', '', '', // the workspace's name is the page's title
     `<div class="dash-sum">${who}${progress}${latest}</div>`,
-    { span: 12, cls: 'dash-summary', actions: dashBtn('btn btn-sm', { k: 'update' }, null, 'Weekly update') });
+    { span: 12, cls: 'dash-summary' });
 }
 
 // What needs someone's attention, worst first: one row per kind of trouble, with the first few

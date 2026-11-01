@@ -148,10 +148,23 @@ body.nav-hidden .sidebar { display: none; }
 .page-head {
   display: flex; align-items: center; gap: 16px; padding: 14px 20px 0; flex: none;
 }
-.page-titles { display: flex; flex-direction: column; min-width: 0; }
-.page-workspace { font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.page-workspace b { color: var(--accent); }
+/* "PLT Platform Replacement / Dashboard": the workspace and the page, one line, at title size */
+.page-titles { display: flex; align-items: center; min-width: 0; }
+.page-workspace { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.015em; color: var(--text); white-space: nowrap; }
+.page-workspace[hidden] { display: none; }
+.page-workspace span { overflow: hidden; text-overflow: ellipsis; }
+.page-workspace b { flex: none; font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--accent); background: var(--tint); padding: 2px 7px; border-radius: 5px; }
+.page-workspace:not([hidden])::after { content: "/"; flex: none; margin: 0 10px 0 2px; font-weight: 400; color: var(--faint-2); }
+.page-title-row { flex: none; }
 .page-head h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.015em; }
+.page-workspace:not([hidden]) + .page-title-row h1 { font-weight: 500; color: var(--text-2); }
+@media (max-width: 700px) {
+  .page-titles { flex-direction: column; align-items: flex-start; gap: 1px; }
+  .page-workspace { max-width: 100%; font-size: 18px; }
+  .page-workspace:not([hidden])::after { content: none; }
+  .page-workspace:not([hidden]) + .page-title-row h1 { font-size: 16px; }
+}
+.dash-sum-label .btn { white-space: nowrap; }
 .save-status { margin-left: auto; font-size: 12.5px; color: var(--muted); text-align: right; }
 .save-status.ok { color: #16a34a; }
 .save-status.err { color: var(--accent); }
@@ -1634,9 +1647,9 @@ button.raid-link:hover:not(:disabled) { border-color: var(--accent); color: var(
 .dash-verdict b.ok { color: var(--ok); }
 .dash-verdict b.ra { color: var(--ra); }
 .dash-summary .dash-hero .dv-meter { margin: 2px 0 12px; }
-.dash-summary .dash-head { align-items: center; margin-bottom: 2px; }
-.dash-summary .dash-head h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.2; }
-.dash-summary .dash-head .prog-code { font-size: 12px; }
+.dash-summary .dash-head { display: none; }
+.dash-sum-label .btn { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.dash-sum-label .dash-stale + .btn { margin-left: 0; }
 
 /* needs attention */
 .dash-att { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
