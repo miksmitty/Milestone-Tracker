@@ -1,8 +1,9 @@
 // Tracker — zero-dependency Node server.
 // Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv,
 // updates.csv, streams.csv, raid.csv (risks, issues and dependencies), raid-notes.csv (their
-// status updates) and report-comments.csv (comments on passages of a report, with replies), and appends
-// every change to an item's dates to date-changes.csv.
+// status updates), meeting-series.csv (a workspace's regular meetings), meetings.csv (their minutes),
+// meeting-actions.csv (the actions taken from them) and report-comments.csv (comments on passages of a report, with replies), and
+// appends every change to an item's dates to date-changes.csv.
 // Several people can use it at once: each file has a version, a save based on an older version is
 // turned back with the current file for the browser to merge, and every save is pushed to the
 // other browsers straight away (see "Working together" below).
@@ -78,6 +79,26 @@ const DATASETS = {
     file: path.join(DATA_DIR, 'raid-notes.csv'),
     header: 'id,workspace_id,raid_id,at,by,text\n',
     stampBy: true, // new notes are signed with the login ID (see changedBy)
+  },
+  '/api/meeting-series': {
+    file: path.join(DATA_DIR, 'meeting-series.csv'),
+    // A regular meeting: `cadence` Weekly, Fortnightly or Monthly (blank: no fixed cadence), `start`
+    // the date of its first meeting, from which the others are counted; `attendees` the usual ones.
+    header: 'id,workspace_id,name,cadence,start,attendees,notes,created,updated\n',
+  },
+  '/api/meetings': {
+    file: path.join(DATA_DIR, 'meetings.csv'),
+    // A meeting's minutes: `minutes` is Markdown (as an LLM or a person wrote them), `series_id`
+    // the regular meeting it is one of (blank for a one-off), `attendees` free text, `link` where
+    // the recording or original notes live.
+    header: 'id,workspace_id,title,date,series_id,attendees,link,minutes,created,updated\n',
+  },
+  '/api/meeting-actions': {
+    file: path.join(DATA_DIR, 'meeting-actions.csv'),
+    // An action taken from a meeting's minutes (or added by hand): `meeting_id` where it came
+    // from (blank for one added without a meeting), `status` Open or Done, `links` the items or
+    // streams it concerns (item:<id>;stream:<id>, as in raid.csv).
+    header: 'id,workspace_id,meeting_id,ref,text,owner,due,status,links,done_at,created,updated\n',
   },
   '/api/report-comments': {
     file: path.join(DATA_DIR, 'report-comments.csv'),
@@ -409,7 +430,7 @@ setInterval(checkFiles, 2000).unref();
 // next number. A browser reserves a few at a time (POST /api/ids?file=milestones&n=20). The last
 // id given out per file is kept in ids.json; the next is always above every id in the file too.
 const IDS_FILE = path.join(DATA_DIR, 'ids.json');
-const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'streams', 'raid', 'raid-notes', 'report-comments'];
+const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'streams', 'raid', 'raid-notes', 'meeting-series', 'meetings', 'meeting-actions', 'report-comments'];
 function reserveIds(file, n) {
   let issued = {};
   try { issued = JSON.parse(fs.readFileSync(IDS_FILE, 'utf8')); } catch { /* none issued yet */ }

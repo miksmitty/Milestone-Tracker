@@ -1,0 +1,4 @@
+id,workspace_id,name,cadence,start,attendees,notes,created,updated
+1,1,Weekly stand-up,Weekly,2026-10-20,"Sarah Patel, Helen Carter, Tom Reed, Priya Shah",,2026-11-01T07:18:57.590Z,2026-11-01T07:19:26.644Z
+2,1,Steering group,Monthly,2026-10-31,"Daniel Wright, Sarah Patel",,2026-11-01T07:19:53.006Z,2026-11-01T07:19:53.006Z
+3,1,Weekly Working Group,Weekly,2026-11-01,,,2026-11-01T07:56:05.797Z,2026-11-01T07:56:05.797Z

@@ -555,3 +555,15 @@ id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 688,2026-10-28T20:20:12.785Z,,1,38,,Stream test item,end,2026-10-28,,,Deleted,milestones.csv edited directly,
 687,2026-10-28T20:20:12.918Z,,1,38,,Stream test item,start,2026-10-28,,,Deleted,milestones.csv edited directly,
 688,2026-10-28T20:20:12.918Z,,1,38,,Stream test item,end,2026-10-28,,,Deleted,milestones.csv edited directly,
+689,2026-10-30T19:05:37.312Z,,3,39,,Decom,start,,2027-12-31,,Added,New item dialog,
+690,2026-10-30T19:05:37.312Z,,3,39,,Decom,end,,2027-12-31,,Added,New item dialog,
+689,2026-10-30T19:05:37.407Z,,3,39,,Decom,start,,2027-12-31,,Edited outside the app,milestones.csv edited directly,
+690,2026-10-30T19:05:37.407Z,,3,39,,Decom,end,,2027-12-31,,Edited outside the app,milestones.csv edited directly,
+691,2026-10-30T20:07:22.186Z,,1,2,1.2,Requirements Gathering,start,2026-01-13,2026-02-05,23,Changed,Items table,Type copied to 2 items
+692,2026-10-30T20:07:22.239Z,,1,2,1.2,Requirements Gathering,start,2026-02-05,2026-01-13,-23,Changed,Undo,Undone: Type copied to 2 items
+693,2026-10-30T20:33:47.473Z,,1,40,,dfsfdsfs,start,,2028-04-23,,Added,New item dialog,
+694,2026-10-30T20:33:47.473Z,,1,40,,dfsfdsfs,end,,2028-04-23,,Added,New item dialog,
+691,2026-10-30T20:33:49.195Z,,1,40,,dfsfdsfs,start,,2028-04-23,,Edited outside the app,milestones.csv edited directly,
+692,2026-10-30T20:33:49.195Z,,1,40,,dfsfdsfs,end,,2028-04-23,,Edited outside the app,milestones.csv edited directly,
+695,2026-10-31T10:02:40.596Z,,1,40,,dfsfdsfs,start,2028-04-23,,,Deleted,Edit dialog,Deleted dfsfdsfs
+696,2026-10-31T10:02:40.596Z,,1,40,,dfsfdsfs,end,2028-04-23,,,Deleted,Edit dialog,Deleted dfsfdsfs

@@ -1,0 +1,101 @@
+id,workspace_id,title,date,series_id,attendees,link,minutes,created,updated
+1,1,Weekly stand-up,2026-11-03,1,"Sarah Patel, Helen Carter, Tom Reed, Priya Shah",,"# Platform Replacement — Weekly stand-up
+**Date:** 3 November 2026
+
+## Summary
+The data extract from the legacy platform is still delayed. The team agreed to escalate.
+
+## Discussion
+- Tom reported that the supplier has missed the extract deadline again.
+- Helen to raise this at the programme board next week (noted, not an action).
+
+## Decisions
+- Proceed with the fallback extract script.
+
+## Action items
+- **Tom Reed**: Chase the supplier for a revised extract date — due Friday
+- Helen Carter to prepare the escalation paper for the programme board by 10 Nov
+- [ ] Update the RAID log with the new issue (Priya)
+- [x] Circulate the fallback script to the team — Sarah Patel
+- Book a room for the design review (owner: Priya Shah, due 2026-11-20)
+- Agree the test data approach
+  - Owner: Tom
+  - Due: end of month
+- Sarah
+  - Confirm the budget position with finance by 14/11
+  - Send the updated plan to the steering group
+
+## Next steps
+| Action | Owner | Due |
+|---|---|---|
+| Review the migration runbook | Helen Carter | 18 Nov |
+| Draft the comms for the pilot users | Priya | next Wednesday |
+
+## Other
+Action: Everyone to read the architecture paper before Thursday.
+Nothing else was raised.",2026-11-01T07:06:38.883Z,2026-11-01T07:06:38.883Z
+2,1,Weekly Working Group,2026-10-14,3,,,"# Green Spaces Working Group — Meeting Minutes
+
+**Date:** 28 October 2026  
+**Time:** 10:00–10:45  
+**Location:** Community Centre, Room 2  
+**Chair:** Alex Morgan  
+**Minute taker:** Priya Shah  
+
+*Fictional example — all names, organisations and details are invented.*
+
+**Present:** Alex Morgan, Priya Shah, Jamie Ellis, Taylor Reed, Sam Patel  
+**Apologies:** Casey Brooks
+
+## 1. Previous minutes
+
+The minutes of 14 October were approved. The action to identify potential planting locations was completed.
+
+## 2. Community garden proposal
+
+Jamie presented three possible locations. Members agreed that the unused area beside the community centre offered the best access and visibility.
+
+**Decision:** Proceed with this location, subject to permission from the centre manager.
+
+**Action:** Jamie to request written permission by **4 November**.
+
+## 3. Budget and equipment
+
+The group reviewed an indicative budget of £750 for tools, soil and plants. Members agreed to obtain two supplier quotes before committing funds.
+
+**Action:** Sam to obtain two itemised quotes by **6 November**.
+
+**Action:** Priya to check whether a community grant could cover the proposed purchases and report back by **9 November**.
+
+## 4. Volunteer planting day
+
+The group provisionally selected 21 November for the planting day. Taylor suggested a morning session with refreshments and a short safety briefing.
+
+**Decision:** Confirm the event once permission and funding are secured.
+
+**Action:** Taylor to prepare a draft volunteer invitation by **10 November**, holding distribution until the event is confirmed.
+
+**Action:** Alex to prepare a safety checklist and wet-weather plan by **13 November**.
+
+## 5. Public feedback
+
+Members agreed to ask local residents which plants they would prefer, using a short online survey and paper copies at reception.
+
+**Action:** Priya to draft a five-question survey and circulate it to the group for review by **5 November**.
+
+## Action log
+
+| Ref. | Action | Owner | Due date | Status |
+|---|---|---|---|---|
+| A01 | Obtain written permission for the garden location | Jamie Ellis | 4 Nov 2026 | Open |
+| A02 | Obtain two itemised supplier quotes | Sam Patel | 6 Nov 2026 | Open |
+| A03 | Check community grant eligibility | Priya Shah | 9 Nov 2026 | Open |
+| A04 | Prepare draft volunteer invitation | Taylor Reed | 10 Nov 2026 | Open |
+| A05 | Prepare safety checklist and wet-weather plan | Alex Morgan | 13 Nov 2026 | Open |
+| A06 | Circulate draft resident survey for review | Priya Shah | 5 Nov 2026 | Open |
+
+## Next meeting
+
+**11 November 2026, 10:00–10:45**, Community Centre, Room 2.
+
+**Meeting closed:** 10:45.",2026-11-01T07:56:23.332Z,2026-11-01T07:57:39.752Z

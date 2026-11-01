@@ -72,6 +72,10 @@
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 17.6 16H2.4z"/><path d="M10 7.8v3.8"/><circle cx="10" cy="13.7" r=".6"/></svg>
           <span class="nav-text">RAID</span><span id="nav-raid-count" class="nav-badge nav-badge-quiet" hidden></span>
         </button>
+        <button id="nav-meetings" class="nav-item" data-view="meetings" title="Meetings: minutes, and the actions taken from them">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="7" r="2.3"/><circle cx="13.5" cy="7.5" r="1.9"/><path d="M2.8 15.5c.4-2.8 2-4.2 4.2-4.2s3.8 1.4 4.2 4.2M11.6 11.5c.6-.2 1.2-.3 1.9-.3 2 0 3.4 1.2 3.7 3.6"/></svg>
+          <span class="nav-text">Meetings</span><span id="nav-meetings-count" class="nav-badge nav-badge-quiet" hidden></span>
+        </button>
         <button id="nav-streams" class="nav-item" data-view="streams" title="Streams: weekly RAG and summary per stream">
           <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/><path d="M3 7.5h14M3 12h14M7 3.5v13"/><path d="M10 9.75h4.5M10 14.25h3"/></svg>
           <span class="nav-text">Streams</span>
@@ -235,6 +239,7 @@
           <option value="done">Closed / complete</option>
         </select>
         <span id="raid-link" class="dl-item" hidden></span>
+        <button type="button" id="raid-clear" class="btn btn-ghost" hidden>Clear filters</button>
         <span id="raid-count" class="grid-count"></span>
       </div>
       <div class="toolbar-actions">
@@ -249,14 +254,63 @@
       </div>
     </div>
     <div class="table-wrap">
-      <table class="ov-table raid-table">
-        <thead id="raid-head"></thead>
+      <table id="raid-table" class="ov-table raid-table">
+        <colgroup></colgroup>
+        <thead></thead>
         <tbody id="raid-body"></tbody>
       </table>
     </div>
     <div class="help" hidden><p><b>Risks</b> are what might happen, <b>issues</b> what has happened, <b>dependencies</b> what the plan needs from others or they need from it. Each can be linked to any number of <span data-term="items">items</span> and streams: click a link to see it on the plan, or a row to edit the entry. When a risk happens, <b>Became an issue</b> in its dialog closes it and raises an issue in its place.</p>
-      <p>A risk’s rating is likelihood × impact (6 or more out of 9 is High), an issue’s its impact and a dependency’s its priority. A due date in red has passed while the entry is still open. Status updates keep their date and time and are never edited.</p>
+      <p>A risk’s rating is likelihood × impact (6 or more out of 9 is High), an issue’s its impact and a dependency’s its priority. A due date in red has passed while the entry is still open. Status updates keep their date and time and are never edited. The columns work as on Items: <b>▾</b> on a heading sorts or filters it, drag a heading to move it or its edge to resize it.</p>
       <p>Set the statuses, likelihood and impact levels, priorities and dependency types the register offers in <b>Workspace settings → Register</b>.</p></div>
+  </main>
+
+  <!-- ============ MEETINGS ============ -->
+  <main id="view-meetings" class="view view-fill hidden">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <div class="mode-seg" role="radiogroup" aria-label="Show">
+          <label title="The meetings and their minutes"><input type="radio" name="mt-mode" value="minutes" /><span>Minutes</span></label>
+          <label title="Every action taken from the minutes, across meetings"><input type="radio" name="mt-mode" value="actions" /><span>Actions <b id="mt-open-count" class="seg-count" hidden></b></span></label>
+        </div>
+        <input id="mt-q" type="search" placeholder="Search the minutes…" aria-label="Search the minutes and actions" />
+        <select id="mt-series" class="tb-select" aria-label="Meeting series" hidden></select>
+        <button type="button" id="btn-mt-series" class="btn btn-ghost" title="The workspace’s regular meetings: set one up, see what’s next and what’s due minutes">Series…</button>
+        <button type="button" id="act-clear" class="btn btn-ghost" hidden>Clear filters</button>
+        <span id="mt-count" class="grid-count"></span>
+      </div>
+      <div class="toolbar-actions">
+        <button id="btn-mt-add" class="btn btn-primary">+ New meeting</button>
+        <button id="btn-act-add" class="btn btn-primary" hidden>+ Add action</button>
+        <div class="tb-menu">
+          <button type="button" class="btn btn-menu" data-menu="ex-meetings" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
+          <div id="ex-meetings" class="tb-pop tb-pop-right tb-pop-list" hidden>
+            <button type="button" id="btn-mt-csv" title="Download what's shown (filters applied) as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="mt-split" class="rp-split mt-split">
+      <div class="table-wrap rp-list mt-list">
+        <table id="mt-table" class="ov-table">
+          <thead><tr><th class="mt-date">Date</th><th>Meeting</th><th class="mt-acts" title="Open actions / all actions from the meeting">Actions</th></tr></thead>
+          <tbody id="mt-body"></tbody>
+        </table>
+      </div>
+      <div id="mt-divider" class="rp-divider" title="Drag to resize · double-click to reset"></div>
+      <section id="mt-pane" class="rp-pane mt-pane" aria-label="Selected meeting"></section>
+    </div>
+    <div id="mt-actions" class="table-wrap" hidden>
+      <table id="actions-table" class="act-table">
+        <colgroup></colgroup>
+        <thead></thead>
+        <tbody id="act-body"></tbody>
+      </table>
+    </div>
+    <div class="help" hidden><p><b>Minutes</b> lists the workspace’s meetings newest first; select one to read its minutes beside the list (<b>↑</b> <b>↓</b> move through them). Paste minutes in as they were written — by an LLM or a person — and any Markdown formatting is kept. The search box reads the whole of every meeting: title, series, attendees, the minutes and their actions, and marks the matches.</p>
+      <p><b>Series…</b> is where the workspace’s regular meetings are set up — a name, how often, the date of the first meeting and the usual attendees. A meeting recorded against a series takes its name, attendees and the date due; when a meeting has come round without minutes, the top of the list says so.</p>
+      <p><b>Extract actions</b> reads the minutes for actions — an <i>Actions</i>, <i>Action items</i> or <i>Next steps</i> section, a table of actions, lines starting <i>Action:</i>, checkboxes — and works out the owner and due date where it can (<i>by Friday</i>, <i>12 Nov</i>). Nothing is added until you’ve looked them over. Saving new minutes offers this straight away.</p>
+      <p><b>Actions</b> tracks every action across meetings: tick one off when it’s done, click it to change the wording, owner or due date, or link it to <span data-term="items">items</span> on the plan. A due date in red has passed. Headings work like a spreadsheet’s: <b>▾</b> sorts or filters (open actions are shown until the Status filter says otherwise), drag a heading to move the column or its edge to resize it (double-click to fit), right-click for autofit. The dashboard and the menu show how many are open.</p></div>
   </main>
 
   <!-- ============ WHAT CHANGED ============ -->
@@ -372,7 +426,7 @@
             <label class="pop-field"><span>Owner</span><select id="gf-owner"></select></label>
             <div class="pop-field"><span>Type</span><div id="gf-type" class="pop-seg" role="group" aria-label="Type"></div></div>
             <div class="pop-field"><span>RAG</span><div id="gf-rag" class="rag-pick sm" role="group" aria-label="RAG"></div></div>
-            <div class="pop-field"><span>Show</span><div class="pop-seg"><button type="button" id="gf-late" aria-pressed="false" title="Only items past their end date and not complete, or tasks that should have started">Only overdue or late starting</button></div></div>
+            <div class="pop-field"><span>Show</span><div class="pop-seg pop-stack"><button type="button" id="gf-late" aria-pressed="false" title="Only items past their end date and not complete, or tasks that should have started">Only overdue or late starting</button><button type="button" id="gf-crit" aria-pressed="false" title="Only items with no float: any slip moves a top level milestone (or the plan's end)">Only the critical path</button></div></div>
             <button type="button" id="gf-clear" class="link-btn pop-reset" title="Show everything again, and clear the search" hidden>Clear all filters</button>
           </div>
         </div>
@@ -421,6 +475,10 @@
               <label class="check"><input type="checkbox" id="toggle-months" checked /> Bottom timescale</label>
               <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
               <label class="check" title="Show where each item was planned when the baseline was set"><input type="checkbox" id="toggle-baseline" checked /> Baseline</label>
+            </div>
+            <div class="pop-field"><span>Critical path</span>
+              <label class="check" title="Pick out the items with no float — any slip moves a top level milestone — and the links between them; everything else fades"><input type="checkbox" id="toggle-critical" /> Pick out on the chart</label>
+              <small id="critical-note" class="pop-note"></small>
             </div>
             <label class="pop-field"><span>Dependency lines</span>
               <select id="link-mode">
@@ -505,6 +563,7 @@
         <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#0f8b8d" stroke-width="1.5"/><path d="M18 1 L25 5 L18 9 Z" fill="#0f8b8d"/></svg> Depends on</span>
         <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#7c3aed"/></svg> Rolls up to</span>
         <span class="legend-item" id="legend-baseline" hidden><i class="bar bar-base"></i> Baseline</span>
+        <span class="legend-item" id="legend-critical" hidden><svg width="26" height="10"><path d="M1 5 H25" stroke="#e60000" stroke-width="2.4"/></svg> Critical path</span>
         <span class="legend-item"><i class="late-dot"></i> Overdue</span>
         <span class="legend-item"><i class="tl-ring"></i> <span data-term="Top">Top level milestone</span></span>
         <span class="legend-item"><i class="clash-flag"></i> Roll-up clash (flagged)</span>
@@ -890,6 +949,133 @@
         <button type="button" id="rd-issue" class="btn" title="The risk has happened: close it and raise an issue in its place" hidden>Became an issue</button>
         <span class="spacer"></span>
         <button type="button" id="rd-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ MEETING DIALOG ============ -->
+  <dialog id="meeting-dialog" class="edit-dialog meeting-dialog">
+    <form id="meeting-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge mtg">Meeting</span>
+        <h2 id="mt-heading">New meeting</h2>
+        <button type="button" id="mt-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="form-grid mt-grid">
+        <label class="span2">Title<input name="title" placeholder="e.g. Steering group" /></label>
+        <label>Date<input name="date" type="date" /></label>
+        <label>Series<select name="series_id" title="The regular meeting this is one of, or a one-off"></select></label>
+        <label class="span2">Attendees<input name="attendees" placeholder="Who was there — separate names with commas" /></label>
+        <label class="span3">Link<input name="link" placeholder="Where the recording, transcript or original notes live (optional)" /></label>
+        <label class="span3">Minutes <span class="md-hint">— paste them in as written; Markdown headings, lists and bold are kept</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here"></textarea></label>
+      </div>
+      <p id="mt-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <button type="button" id="mt-delete" class="btn btn-danger">Delete</button>
+        <span class="dlg-hint mt-foot-hint">Saving looks through new minutes for actions to add.</span>
+        <span class="spacer"></span>
+        <button type="button" id="mt-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ MEETING SERIES ============ -->
+  <dialog id="series-dialog" class="edit-dialog series-dialog">
+    <form id="series-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge mtg">Series</span>
+        <h2 id="sr-heading">New meeting series</h2>
+        <button type="button" id="sr-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="form-grid">
+        <label class="span3">Name<input name="name" placeholder="e.g. Weekly stand-up, Steering group" /></label>
+        <label>How often<select name="cadence"></select></label>
+        <label><span class="field-label-text">First meeting</span><input name="start" type="date" title="The others are counted from this date: the same weekday each week or fortnight, or the same day each month" /></label>
+        <p class="sr-preview" id="sr-preview"></p>
+        <label class="span3">Usual attendees<input name="attendees" placeholder="Who’s normally there — each meeting starts with these" /></label>
+        <label class="span3">Notes<textarea name="notes" rows="2" placeholder="What the meeting is for (optional)"></textarea></label>
+      </div>
+      <p id="sr-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <button type="button" id="sr-delete" class="btn btn-danger" title="Its meetings are kept, as one-offs">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="sr-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="series-list-dialog" class="edit-dialog series-list-dialog">
+    <form method="dialog">
+      <header class="dlg-head">
+        <span class="type-badge mtg">Series</span>
+        <h2>Regular meetings</h2>
+        <button type="button" id="sl-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <p class="cf-intro">A series is a meeting that happens regularly. Each meeting is recorded against its series, which fills in its name, attendees and date; when a meeting has come round without minutes, the list says so.</p>
+      <div class="table-wrap sl-wrap">
+        <table class="ov-table sl-table">
+          <thead><tr><th>Series</th><th>How often</th><th>Recorded</th><th>Next</th><th></th></tr></thead>
+          <tbody id="sl-body"></tbody>
+        </table>
+      </div>
+      <footer class="dlg-foot">
+        <button type="button" id="sl-new" class="btn btn-primary">+ New series</button>
+        <span class="spacer"></span>
+        <button type="button" id="sl-done" class="btn">Close</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ EXTRACT ACTIONS (REVIEW) ============ -->
+  <dialog id="extract-dialog" class="edit-dialog extract-dialog">
+    <form id="extract-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge mtg">Actions</span>
+        <h2 id="mx-heading">Possible actions in the minutes</h2>
+        <button type="button" id="mx-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <p class="mx-meeting" id="mx-meeting"></p>
+      <p class="cf-intro" id="mx-intro"></p>
+      <div class="table-wrap mx-wrap">
+        <table class="mx-table">
+          <thead><tr><th class="mx-use" title="Add this one"></th><th>Action</th><th class="mx-owner">Owner</th><th class="mx-due">Due</th><th class="mx-note"></th></tr></thead>
+          <tbody id="mx-body"></tbody>
+        </table>
+      </div>
+      <p class="dlg-hint"><button type="button" id="mx-more" class="link-btn">+ Add a line the minutes didn’t mark as an action</button></p>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" id="mx-cancel" class="btn">Cancel</button>
+        <button type="submit" id="mx-add" class="btn btn-primary">Add</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ ACTION DIALOG ============ -->
+  <dialog id="action-dialog" class="edit-dialog action-dialog">
+    <form id="action-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge mtg">Action</span>
+        <h2 id="ad-heading">New action</h2>
+        <button type="button" id="ad-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="form-grid">
+        <label>Ref<input name="ref" placeholder="e.g. A4" /></label>
+        <label>Status<select name="status"></select></label>
+        <label>Due<input name="due" type="date" /></label>
+        <label class="span3">Action<textarea name="text" rows="2" placeholder="What is to be done"></textarea></label>
+        <label>Owner<input name="owner" list="people-list" placeholder="Who" /></label>
+        <label class="span2">From meeting<select name="meeting_id"></select></label>
+        <div class="span3 field"><span class="field-label">Linked to <small>— <span data-term="items">items</span> or streams it concerns</small></span><div id="ad-links" class="deps"></div></div>
+      </div>
+      <p id="ad-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <button type="button" id="ad-delete" class="btn btn-danger">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="ad-cancel" class="btn">Cancel</button>
         <button type="submit" class="btn btn-primary">Save</button>
       </footer>
     </form>

@@ -107,6 +107,9 @@ const state = {
   streams: [],            // stream details, every workspace: {workspace_id, name, lead, trend}
   raid: [],             // risks, issues and dependencies, every workspace: {id, workspace_id, kind, ref, title, …, links: ['item:12', 'stream:Design']}
   raidNotes: [],        // their notes, only ever added to: {id, workspace_id, raid_id, at, by, text}
+  meetingSeries: [],    // regular meetings, every workspace: {id, workspace_id, name, cadence, start, attendees, notes, created, updated}
+  meetings: [],         // meetings, every workspace: {id, workspace_id, title, date, series_id, attendees, link, minutes (Markdown), created, updated}
+  actions: [],          // actions from meetings, every workspace: {id, workspace_id, meeting_id, ref, text, owner, due, status, links, done_at, created, updated}
   reportComments: [],   // comments on passages of reports, every workspace: {id, workspace_id, report_id, field, quote, start, end, parent_id, at, by, text, resolved}
   lastWorkspaceId: 0,
   workspaceId: '',        // the workspace being viewed
@@ -126,6 +129,7 @@ const state = {
   showToday: true,
   linkMode: 'all',      // dependency lines: 'all', 'hover' (only the item under the pointer) or 'none'
   showBaseline: true,
+  showCritical: false,  // pick out the critical path: items with no float, and the links between them
   userZoomed: false, // once the user touches zoom, stop auto-fitting on resize
 };
 
@@ -361,7 +365,7 @@ async function loadData() {
     synced[file] = { version: r.headers.get('X-Version'), text };
     return text;
   }));
-  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, reportComments] = texts;
+  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, meetingSeries, meetings, actions, reportComments] = texts;
   state.workspaces = rowsToWorkspaces(parseAny(workspaces));
   state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
@@ -373,9 +377,13 @@ async function loadData() {
   state.updates = rowsToUpdates(parseAny(updates));
   state.raid = rowsToRaid(parseAny(raid));
   state.raidNotes = rowsToRaidNotes(parseAny(raidNotes));
+  state.meetingSeries = rowsToSeries(parseAny(meetingSeries));
+  state.meetings = rowsToMeetings(parseAny(meetings));
+  state.actions = rowsToActions(parseAny(actions));
   state.reportComments = rowsToComments(parseAny(reportComments));
   dataLoaded = true;
   if (created) await saveWorkspaces();
+  if (seriesFromNames()) await Promise.all([saveSeries('Meeting series created from names'), saveMeetings()]);
   state.items = allItems;
   state.reports = allReports;
   state.otherItems = [];
@@ -445,6 +453,9 @@ const saveUpdates = (msg) => saveCSV('updates', msg);
 const saveStreams = (msg) => saveCSV('streams', msg);
 const saveRaid = (msg) => saveCSV('raid', msg);
 const saveRaidNotes = (msg) => saveCSV('raid-notes', msg);
+const saveSeries = (msg) => saveCSV('meeting-series', msg);
+const saveMeetings = (msg) => saveCSV('meetings', msg);
+const saveActions = (msg) => saveCSV('meeting-actions', msg);
 const saveComments = (msg) => saveCSV('report-comments', msg);
 
 /* ---- working together ---- */
@@ -497,6 +508,20 @@ const FILES = {
     parse: (t) => rowsToRaidNotes(parseAny(t)), all: () => state.raidNotes, set: (l) => { state.raidNotes = l; },
     csv: () => raidNotesToCSV(state.raidNotes), key: (n) => n.id,
     name: (n) => `Note on ${state.raid.find(r => r.id === n.raid_id)?.ref || 'an entry'}, ${fmtStamp(n.at)}`,
+  },
+  'meeting-series': {
+    parse: (t) => rowsToSeries(parseAny(t)), all: () => state.meetingSeries, set: (l) => { state.meetingSeries = l; },
+    csv: () => seriesToCSV(state.meetingSeries), key: (s) => s.id, quiet: ['updated'], name: (s) => `Meeting series ${s.name}`,
+  },
+  meetings: {
+    parse: (t) => rowsToMeetings(parseAny(t)), all: () => state.meetings, set: (l) => { state.meetings = l; },
+    csv: () => meetingsToCSV(state.meetings), key: (m) => m.id, quiet: ['updated'],
+    name: (m) => `Meeting ${m.title}${m.date ? `, ${fmtShort(m.date)}` : ''}`,
+  },
+  'meeting-actions': {
+    parse: (t) => rowsToActions(parseAny(t)), all: () => state.actions, set: (l) => { state.actions = l; },
+    csv: () => actionsToCSV(state.actions), key: (a) => a.id, quiet: ['updated'],
+    name: (a) => `Action ${a.ref || `#${a.id}`} ${a.text}`.trim(),
   },
   'report-comments': {
     parse: (t) => rowsToComments(parseAny(t)), all: () => state.reportComments, set: (l) => { state.reportComments = l; },
@@ -791,7 +816,7 @@ function wireConflicts() {
 // import, a block is fetched so the rest come straight from hand. Ids still in hand when the page
 // closes are never used, so a burst can leave a gap in the numbers. If the server can't be reached,
 // the next number after the highest seen is used.
-const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'report-comments': [] };
+const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'meeting-series': [], meetings: [], 'meeting-actions': [], 'report-comments': [] };
 const idLastTaken = {};
 function takeId(file, fallback) {
   const burst = Date.now() - (idLastTaken[file] || 0) < 2000;
@@ -838,15 +863,16 @@ function flashStatus(msg, ok, sticky) {
 // to take back). Undo puts the snapshot back and saves what it changes.
 
 const undoStack = []; // [{ label, snap }], newest last
-const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'reportComments'];
-const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', reportComments: 'report-comments' };
+const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'meetingSeries', 'meetings', 'actions', 'reportComments'];
+const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', meetingSeries: 'meeting-series', meetings: 'meetings', actions: 'meeting-actions', reportComments: 'report-comments' };
 
 function snapshotData() {
   syncEditorToState();
   return {
     items: JSON.stringify(allItems()), reports: JSON.stringify(allReports()), updates: JSON.stringify(state.updates),
     workspaces: JSON.stringify(state.workspaces), statuses: JSON.stringify(state.statuses), streams: JSON.stringify(state.streams),
-    raid: JSON.stringify(state.raid), raidNotes: JSON.stringify(state.raidNotes), reportComments: JSON.stringify(state.reportComments), workspaceId: state.workspaceId,
+    raid: JSON.stringify(state.raid), raidNotes: JSON.stringify(state.raidNotes), meetingSeries: JSON.stringify(state.meetingSeries), meetings: JSON.stringify(state.meetings), actions: JSON.stringify(state.actions),
+    reportComments: JSON.stringify(state.reportComments), workspaceId: state.workspaceId,
   };
 }
 
@@ -894,6 +920,9 @@ async function undoLast() {
   state.streams = back.streams;
   state.raid = back.raid;
   state.raidNotes = back.raidNotes;
+  state.meetingSeries = back.meetingSeries;
+  state.meetings = back.meetings;
+  state.actions = back.actions;
   state.reportComments = back.reportComments;
   state.items = []; state.reports = [];
   state.otherItems = back.items;
@@ -908,7 +937,7 @@ async function undoLast() {
   showToast(`Undone: ${u.label}${kept ? ' · anything changed again since was left as it is' : ''}`);
   knockOn.clear();
   directEdits.clear();
-  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, reportComments: saveComments };
+  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, meetingSeries: saveSeries, meetings: saveMeetings, actions: saveActions, reportComments: saveComments };
   await Promise.all(changed.map(k => save[k]('Undone')));
 }
 
@@ -1106,6 +1135,92 @@ function topoOrder() {
   return order;
 }
 const hasCycle = () => topoOrder().length < state.items.length;
+
+/* ---- critical path and float ---- */
+// Float: how many days an item can slip before it moves a top level milestone downstream of it
+// (or, with none downstream, the plan's end). A backward pass over the chains, from the end: an
+// item's latest end is the tightest its successors allow — the latest start of what depends on it
+// (a day earlier between two tasks, as in enforceConstraints) or the latest end of the milestone
+// it rolls up to. A top level milestone is what float is measured against, so it passes its own
+// date upstream rather than its successors'. Items with no float are the critical path — done items
+// included, so it reads from start to finish, though they can't slip. Worked out once per redraw.
+let critInfo = null; // { of: Map id → { float, target, drivers, isTarget }, critical: Set of ids, loop }
+function criticalInfo() {
+  if (critInfo) return critInfo;
+  const byId = new Map(state.items.map(m => [m.id, m]));
+  const succ = successorMap();
+  const order = topoOrder();
+  const of = new Map(), critical = new Set();
+  const loop = order.length < state.items.length;
+  const dn = (iso) => Math.round(parseDate(iso) / MS_DAY);
+  const hasPred = new Set();
+  for (const list of succ.values()) for (const s of list) hasPred.add(s);
+  // the plan's end: the latest end among the items in a chain (a stray item linked to nothing doesn't count)
+  const ends = state.items.filter(m => m.end && (hasPred.has(m.id) || succ.get(m.id).length)).map(m => m.end).sort();
+  const planEnd = ends.length ? dn(ends.at(-1)) : 0;
+  if (!loop) {
+    for (const id of order.reverse()) {
+      const m = byId.get(id);
+      if (!m.end) continue;
+      let lf = null, target = null, drivers = [];
+      for (const s of succ.get(id)) {
+        const sm = byId.get(s), r = of.get(s);
+        if (!sm?.end || !r) continue;
+        let allowed = Infinity;
+        if (m.parent === s) allowed = r.passLf; // must end on or before the milestone it rolls up to
+        if (sm.deps.includes(id)) allowed = Math.min(allowed, r.passLf - (taskDays(sm) - 1) - (isTask(m) && isTask(sm) ? 1 : 0)); // must finish before it starts
+        if (allowed === Infinity) continue;
+        if (lf === null || allowed < lf) { lf = allowed; target = r.passTarget; drivers = [s]; }
+        else if (allowed === lf) drivers.push(s);
+      }
+      const end = dn(m.end), top = isTopLevel(m);
+      const linked = lf !== null || hasPred.has(id);
+      // a top level milestone with nothing downstream is a target, not something with float; an
+      // item linked to nothing has no float to speak of
+      const float = lf !== null ? lf - end : top || !linked ? null : planEnd - end;
+      of.set(id, {
+        float, target: lf !== null ? target : null, drivers, isTarget: top,
+        passLf: top ? end : lf ?? planEnd, passTarget: top ? id : target,
+      });
+      if (float !== null && float <= 0) critical.add(id);
+    }
+    for (const id of [...critical]) { const t = of.get(id).target; if (t) critical.add(t); } // the milestones the paths lead to
+  }
+  return (critInfo = { of, critical, loop });
+}
+const isCritical = (m) => criticalInfo().critical.has(m.id);
+// Is the link a → b on the critical path: both ends are, and b is what leaves a no room.
+const isCriticalLink = (a, b) => { const ci = criticalInfo(); return ci.critical.has(a) && ci.critical.has(b) && !!ci.of.get(a)?.drivers.includes(b); };
+// What to say about an item's float: [[critical, text], …] for the hover card and quick panel.
+function floatRows(m) {
+  const ci = criticalInfo(), r = ci.of.get(m.id);
+  if (!r || isDoneStatus(m.status)) return [];
+  const to = (id) => (id ? fullLabel(itemById(id)) : 'the plan’s end');
+  const rows = [];
+  if (r.isTarget) {
+    const n = [...ci.critical].filter(id => id !== m.id && ci.of.get(id).float <= 0 && ci.of.get(id).target === m.id).length;
+    if (n) rows.push([true, `${count(n, T.item, T.items)} on the critical path to this`]);
+  }
+  if (r.float === null) return rows;
+  if (r.float < 0) rows.push([true, `On the critical path: ends ${daysText(-r.float)} later than ${to(r.target)} allows`]);
+  else if (r.float === 0) rows.push([true, `On the critical path: any slip moves ${to(r.target)}`]);
+  else rows.push([false, `Can slip ${daysText(r.float)} before ${to(r.target)} moves`]);
+  return rows;
+}
+// The View menu's note on the critical path.
+function criticalNote() {
+  const ci = criticalInfo();
+  if (!state.items.length) return '';
+  if (ci.loop) return 'Can’t be worked out while dependencies form a loop.';
+  if (!ci.critical.size) return `Nothing is on a critical path yet: link ${T.items} with dependencies or roll-ups.`;
+  const on = [...ci.critical].filter(id => ci.of.get(id).float <= 0);
+  const targets = [...new Set(on.map(id => ci.of.get(id).target))];
+  const tops = targets.filter(Boolean), planEnd = targets.includes(null);
+  const where = targets.length === 1 ? ` to ${tops[0] ? fullLabel(itemById(tops[0])) : 'the plan’s end'}`
+    : ` to ${tops.length ? count(tops.length, T.top, T.tops) : ''}${tops.length && planEnd ? ' and ' : ''}${planEnd ? 'the plan’s end' : ''}`;
+  const done = on.filter(id => isDoneStatus(itemById(id).status)).length;
+  return `${count(ci.critical.size, T.item, T.items)} on the critical path${where}${done ? ` (${done} done)` : ''}.`;
+}
 
 function shiftItem(m, n) {
   if (!n || !m.start || !m.end) return;
@@ -1715,7 +1830,7 @@ function roundedPath(pts, r = 5) {
 
 // Elbow connector from the end of `a` to the start of `b`. The vertical run sits just before `b`,
 // so lines drop into what they lead to rather than hanging off early items across the chart.
-function drawLink(svg, a, b, rollup, rm, clash = false) {
+function drawLink(svg, a, b, rollup, rm, clash = false, crit = false) {
   const fx = a.x2 + (a.task ? 0 : rm.shapeS + 2), fy = a.cy;
   const tx = b.x1 - (b.task ? 0 : rm.shapeS + 3), ty = b.cy;
   let d;
@@ -1726,8 +1841,8 @@ function drawLink(svg, a, b, rollup, rm, clash = false) {
     d = roundedPath([[fx, fy], [fx + 7, fy], [fx + 7, midY], [tx - 9, midY], [tx - 9, ty], [tx, ty]]);
   }
   svg.appendChild(svgEl('path', {
-    d, fill: 'none', class: `gantt-link${clash ? ' clash' : ''}`, 'data-from': a.id, 'data-to': b.id,
-    stroke: clash ? G.accent : G.links[rollup ? 'roll' : 'dep'], 'stroke-width': clash ? 1.8 : 1.4, 'stroke-opacity': clash ? 0.9 : 0.75,
+    d, fill: 'none', class: `gantt-link${clash ? ' clash' : ''}${crit ? ' crit' : ''}`, 'data-from': a.id, 'data-to': b.id,
+    stroke: clash || crit ? G.accent : G.links[rollup ? 'roll' : 'dep'], 'stroke-width': crit ? 2.4 : clash ? 1.8 : 1.4, 'stroke-opacity': crit ? 1 : clash ? 0.9 : 0.75,
     'stroke-dasharray': rollup ? '4 3' : 'none',
     'marker-end': `url(#arrow-${rollup ? 'roll' : 'dep'})`,
   }));
@@ -1738,6 +1853,7 @@ function renderGantt() {
   container.innerHTML = '';
   hideTip();
   chainLinks = null;
+  critInfo = null;
   if (!state.rangeStart) return; // data not loaded yet
 
   const LABEL_W = labelWidth();
@@ -1772,7 +1888,7 @@ function renderGantt() {
   const height = headerH + bodyH + 8;
 
   const svg = svgEl('svg', {
-    width, height, viewBox: `0 0 ${width} ${height}`, class: state.linkMode === 'hover' ? 'links-hover' : '',
+    width, height, viewBox: `0 0 ${width} ${height}`, class: [state.linkMode === 'hover' && 'links-hover', state.showCritical && 'critical-on'].filter(Boolean).join(' '),
     xmlns: 'http://www.w3.org/2000/svg',
     style: `font-family:${getComputedStyle(document.body).fontFamily};`, // the page's typeface, so the chart matches it
   });
@@ -1950,13 +2066,17 @@ function renderGantt() {
   const clashed = new Set(clashList.map(x => x.c.id)), clashedInto = new Set(clashList.map(x => x.p.id));
 
   // ---- dependency + roll-up connectors (under the items) ----
-  if (state.linkMode !== 'none') {
+  // The critical path's own links are drawn whenever it's picked out, even with the lines hidden.
+  const crit = state.showCritical ? criticalInfo().critical : null;
+  const critLink = (a, b) => !!crit && isCriticalLink(a, b);
+  if (state.linkMode !== 'none' || crit) {
     const shown = (id) => pos.has(id) && !items.find(x => x.id === id)._collapsed; // folded streams draw no links
+    const all = state.linkMode !== 'none';
     for (const m of items) {
       if (m._collapsed) continue;
       const b = pos.get(m.id);
-      for (const d of m.deps) if (shown(d)) drawLink(svg, pos.get(d), b, false, rm);
-      if (m.parent && shown(m.parent)) drawLink(svg, b, pos.get(m.parent), true, rm, clashed.has(m.id));
+      for (const d of m.deps) if (shown(d) && (all || critLink(d, m.id))) drawLink(svg, pos.get(d), b, false, rm, false, critLink(d, m.id));
+      if (m.parent && shown(m.parent) && (all || critLink(m.id, m.parent))) drawLink(svg, b, pos.get(m.parent), true, rm, clashed.has(m.id), critLink(m.id, m.parent));
     }
   }
 
@@ -1965,6 +2085,10 @@ function renderGantt() {
     const { x1, x2, cy } = pos.get(m.id);
     const c = pal(m.status);
     const g = svgEl('g', { 'data-id': m.id, class: 'gantt-item' });
+    // the critical path picked out: everything off it fades (as an attribute, so the PNG keeps it)
+    const onPath = !!crit && crit.has(m.id);
+    if (crit && !onPath) g.setAttribute('opacity', 0.4);
+    else if (onPath) g.classList.add('crit');
 
     if (m._collapsed) {
       // a folded stream: every item on one row, small and unlabelled (the hover card still works)
@@ -1994,6 +2118,11 @@ function renderGantt() {
         x: x1, y: cy - bh / 2, width: Math.max(2, x2 - x1), height: bh, rx: Math.min(5, bh / 3),
         fill: `url(#${gradId(m.status)})`, stroke: c.dark, 'stroke-width': 1.2, filter: 'url(#ms-shadow)', class: 'gantt-shape',
       }));
+      // on the critical path: a red outline just outside the bar
+      if (onPath) g.appendChild(svgEl('rect', {
+        x: x1 - 2.5, y: cy - bh / 2 - 2.5, width: Math.max(2, x2 - x1) + 5, height: bh + 5, rx: Math.min(5, bh / 3) + 2,
+        fill: 'none', stroke: G.accent, 'stroke-width': 1.8, 'pointer-events': 'none', class: 'gantt-crit',
+      }));
       if (m._side === 'inside') {
         g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text, c.text));
         if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: G.muted, ...halo() }, m._meta));
@@ -2005,8 +2134,13 @@ function renderGantt() {
         stroke: G.strong, 'stroke-width': 1, 'stroke-dasharray': '2 3',
       }));
       drawShape(g, x1, cy, m.status, rm.shapeS);
-      // a top level milestone (under change control) wears a ring
-      if (isTopLevel(m)) g.appendChild(svgEl('circle', { cx: x1, cy, r: rm.shapeS + 5, fill: 'none', stroke: G.text, 'stroke-width': 1.4, 'pointer-events': 'none', class: 'gantt-tl' }));
+      // a top level milestone (under change control) wears a ring — red when the critical path leads to it;
+      // any other milestone on the path gets a red outline round its diamond
+      if (isTopLevel(m)) g.appendChild(svgEl('circle', { cx: x1, cy, r: rm.shapeS + 5, fill: 'none', stroke: onPath ? G.accent : G.text, 'stroke-width': onPath ? 2.2 : 1.4, 'pointer-events': 'none', class: 'gantt-tl' }));
+      else if (onPath) {
+        const s = rm.shapeS + 3.5;
+        g.appendChild(svgEl('path', { d: `M ${x1} ${cy - s} L ${x1 + s} ${cy} L ${x1} ${cy + s} L ${x1 - s} ${cy} Z`, fill: 'none', stroke: G.accent, 'stroke-width': 1.8, 'pointer-events': 'none', class: 'gantt-crit' }));
+      }
     }
     // a flagged roll-up clash: a red flag on the milestone's top-left corner
     if (clashedInto.has(m.id)) {
@@ -2339,11 +2473,11 @@ function syncGanttSticky() {
 // "packed" fits several items to a row by date, the other orders give each item its own row.
 // The sort is a per-browser preference.
 
-const ganttFilter = { q: '', stream: '', owner: '', type: '', rag: [], late: false };
+const ganttFilter = { q: '', stream: '', owner: '', type: '', rag: [], late: false, crit: false };
 const GANTT_SORT_DEFAULT = { streams: 'name', rows: 'packed', dir: 1 }; // streams A–Z, items packed by date
 const ganttSort = { ...GANTT_SORT_DEFAULT };
 
-const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.stream || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late);
+const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.stream || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late || ganttFilter.crit);
 
 function ganttMatches(m) {
   const f = ganttFilter, q = f.q.trim().toLowerCase();
@@ -2352,11 +2486,12 @@ function ganttMatches(m) {
     && (!f.type || (f.type === 'task' ? isTask(m) : f.type === 'top' ? isTopLevel(m) : !isTask(m)))
     && (!f.rag.length || f.rag.includes(m.status))
     && (!f.late || isLate(m) || isLateStart(m))
+    && (!f.crit || isCritical(m))
     && (!q || [m.ref, m.title, m.description, m.owner, streamName(m.stream_id), m.substream].join(' ').toLowerCase().includes(q));
 }
 
 function clearGanttFilters() {
-  Object.assign(ganttFilter, { q: '', stream: '', owner: '', type: '', rag: [], late: false });
+  Object.assign(ganttFilter, { q: '', stream: '', owner: '', type: '', rag: [], late: false, crit: false });
 }
 
 // Folded streams, per workspace (a per-browser preference).
@@ -2436,6 +2571,7 @@ function renderGanttFilters() {
     <button type="button" data-rag="${escAttr(st)}" aria-pressed="${f.rag.includes(st)}" style="--c:${STATUS[st].base};--t:${STATUS[st].text}">${escAttr(st)}</button>`).join('');
 
   document.getElementById('gf-late').setAttribute('aria-pressed', f.late);
+  document.getElementById('gf-crit').setAttribute('aria-pressed', f.crit);
   const q = document.getElementById('gf-q');
   if (document.activeElement !== q) q.value = f.q; // don't disturb the caret while typing
 
@@ -2445,6 +2581,7 @@ function renderGanttFilters() {
     f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : f.type === 'top' ? T.Tops : T.Milestones],
     f.rag.length && ['rag', 'RAG', f.rag.join(', ')],
     f.late && ['late', 'Show', 'Overdue or late starting'],
+    f.crit && ['crit', 'Show', 'Critical path'],
   ].filter(Boolean);
   const badge = document.getElementById('gf-badge');
   badge.hidden = !chips.length;
@@ -2478,6 +2615,9 @@ function renderGanttFilters() {
   document.getElementById('legend-baseline').hidden = !(state.showBaseline && moved);
   document.getElementById('link-mode').value = state.linkMode;
   document.getElementById('toggle-baseline').checked = state.showBaseline;
+  document.getElementById('toggle-critical').checked = state.showCritical;
+  document.getElementById('critical-note').textContent = criticalNote();
+  document.getElementById('legend-critical').hidden = !(state.showCritical && criticalInfo().critical.size);
 
   writeHash();
   const fmtR = (d) => d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }).replace(' ', ' ’');
@@ -2528,12 +2668,13 @@ function wireGanttFilters() {
     renderGantt();
   });
   document.getElementById('gf-late').addEventListener('click', () => { ganttFilter.late = !ganttFilter.late; renderGantt(); });
+  document.getElementById('gf-crit').addEventListener('click', () => { ganttFilter.crit = !ganttFilter.crit; renderGantt(); });
   document.getElementById('gf-clear').addEventListener('click', () => { clearGanttFilters(); renderGantt(); });
   document.getElementById('gf-chips').addEventListener('click', (e) => {
     const k = e.target.closest('[data-unfilter]')?.dataset.unfilter;
     if (!k) return;
     if (k === 'all') clearGanttFilters();
-    else ganttFilter[k] = k === 'rag' ? [] : k === 'late' ? false : '';
+    else ganttFilter[k] = k === 'rag' ? [] : k === 'late' || k === 'crit' ? false : '';
     renderGantt();
   });
   document.getElementById('gs-streams').addEventListener('change', (e) => { ganttSort.streams = e.target.value; saveSort(); });
@@ -2566,6 +2707,7 @@ function showTip(m, e) {
     ${clashTipRows(m)}
     ${isLate(m) ? `<div class="tip-row tip-late">${lateText(m)}</div>` : isLateStart(m) ? `<div class="tip-row tip-late amber">${lateStartText(m)}</div>` : ''}
     ${baselineRow(m)}
+    ${floatRows(m).map(([crit, text]) => `<div class="tip-row ${crit ? 'tip-crit' : 'tip-muted'}">${escAttr(text)}</div>`).join('')}
     ${where ? `<div class="tip-row tip-muted">${where}</div>` : ''}
     ${tipLinks(m)}
     ${m.description ? `<div class="tip-desc">${escAttr(m.description)}</div>` : ''}
@@ -2841,14 +2983,17 @@ function setDatalist(id, values) {
     dl.id = id;
     document.body.appendChild(dl);
   }
-  dl.innerHTML = [...new Set(values.filter(Boolean))].map(v => `<option value="${escAttr(v)}"></option>`).join('');
+  const vals = [...new Set(values.filter(Boolean))];
+  dl.innerHTML = vals.map(v => `<option value="${escAttr(v)}"></option>`).join('');
+  // With nothing to offer yet, the boxes that use the list lose their ▾ and read as plain text boxes.
+  document.querySelectorAll(`input[list="${id}"]`).forEach(i => i.toggleAttribute('data-nolist', !vals.length));
 }
 
 function refreshDatalists() {
   setDatalist('stream-list', workspaceStreams().map(l => l.name));
   setDatalist('substream-list', state.items.map(m => m.substream));
   setDatalist('owner-list', state.items.map(m => m.owner));
-  setDatalist('people-list', [...allItems().map(m => m.owner), ...state.workspaces.flatMap(p => [p.owner, p.lead])].sort());
+  setDatalist('people-list', [...allItems().map(m => m.owner), ...state.workspaces.flatMap(p => [p.owner, p.lead]), ...state.actions.map(a => a.owner)].sort());
 }
 
 /* ---- spreadsheet-style tables: sort, filter, move and size columns ---- */
@@ -3039,13 +3184,14 @@ function sortRows(t, rows, valueOf, tie) {
     const va = valueOf(a, key), vb = valueOf(b, key);
     const ea = va === '', eb = vb === '';
     if (ea || eb) return ea - eb || tie(a, b);
-    const c = key === 'status' ? STATUSES.indexOf(va) - STATUSES.indexOf(vb)
+    const c = tableCol(t, key)?.kind === 'status' ? STATUSES.indexOf(va) - STATUSES.indexOf(vb)
       : typeof va === 'number' ? va - vb
       : String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: 'base' });
     return c * dir || tie(a, b);
   });
 }
 function sortWords(c) {
+  if (c.words) return c.words;
   switch (c.kind) {
     case 'date': return ['Sort oldest to newest', 'Sort newest to oldest'];
     case 'number': return ['Sort smallest to largest', 'Sort largest to smallest'];
@@ -4244,6 +4390,7 @@ function renderQuick() {
     ${isTopLevel(m) ? `<p class="q-note q-tl">⚠ Top level ${escAttr(T.milestone)} — under change control. Saving a new date asks for confirmation.</p>` : ''}
     ${rollsTo ? `<p class="q-note">Rolls up to ${escAttr(fullLabel(rollsTo))} (${fmtNice(rollsTo.end)}). Ending after it asks whether to move it or flag the clash.</p>` : ''}
     ${deps ? `<p class="q-note">Moving the ${task ? 'end ' : ''}date moves ${deps} dependent ${escAttr(deps > 1 ? T.items : T.item)} by the same amount.</p>` : ''}
+    ${floatRows(m).map(([crit, text]) => `<p class="q-note${crit ? ' q-crit' : ''}">${escAttr(text)}</p>`).join('')}
     <p class="q-msg">${escAttr(quickMsg)}</p>
     <div class="q-save">
       <span class="q-unsaved"></span>
@@ -4403,17 +4550,19 @@ function mdList(items) {
 
 function mdToHtml(src) {
   const out = [];
-  let para = [], list = [], quote = [];
+  let para = [], list = [], quote = [], table = [];
   const flush = () => {
     if (para.length) out.push(`<p>${para.map(mdInline).join('<br>')}</p>`);
     if (list.length) out.push(mdList(list));
     if (quote.length) out.push(`<blockquote>${quote.map(mdInline).join('<br>')}</blockquote>`);
-    para = []; list = []; quote = [];
+    if (table.length) out.push(mdTable(table));
+    para = []; list = []; quote = []; table = [];
   };
   for (const raw of String(src ?? '').replace(/\r\n?/g, '\n').split('\n')) {
     const line = escAttr(raw.replace(/\t/g, '  '));
     let m;
     if (!line.trim()) flush();
+    else if (/^\s*\|.*\|\s*$/.test(line)) { if (!table.length) flush(); table.push(line.trim().slice(1, -1).split('|').map(c => c.trim())); }
     else if ((m = line.match(/^ {0,3}(#{1,3})\s+(.*?)\s*#*$/))) { flush(); out.push(`<h${m[1].length + 3}>${mdInline(m[2])}</h${m[1].length + 3}>`); }
     else if ((m = line.match(/^( *)([-*+•]|\d+[.)])\s+(.*)$/))) {
       if (para.length || quote.length) { const l = list; list = []; flush(); list = l; }
@@ -4427,12 +4576,23 @@ function mdToHtml(src) {
   return out.join('');
 }
 
+// A table as the minutes an LLM writes have them: | a | b | rows, with a |---|---| rule under the headings.
+function mdTable(rows) {
+  const rule = rows.length > 1 && rows[1].every(c => /^:?-+:?$/.test(c));
+  const head = rule ? rows[0] : null;
+  const body = rule ? rows.slice(2) : rows;
+  const cells = (r, tag) => r.map(c => `<${tag}>${mdInline(c)}</${tag}>`).join('');
+  return `<table>${head ? `<thead><tr>${cells(head, 'th')}</tr></thead>` : ''}<tbody>${body.map(r => `<tr>${cells(r, 'td')}</tr>`).join('')}</tbody></table>`;
+}
+
 // One line of plain text, for list cells where the full formatting won't fit.
 function mdToText(src) {
   const held = [];
   return String(src ?? '')
     .replace(/\\([\\`*_~[\]#>+\-.)•])/g, (_, c) => `\u0000${held.push(c) - 1}\u0000`)
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^ *\|(?: *:?-+:? *\|)+ *$/gm, '') // a table's rule
+    .replace(/^ *\| *| *\| *$/gm, '').replace(/ *\| */g, ' · ') // its cells
     .replace(/^ *(#{1,3}|[-*+•]|\d+[.)]|>)\s+/gm, '')
     .replace(/(\*\*|__|~~|`)/g, '')
     .replace(/(^|\W)[*_](\S.*?)[*_](?=\W|$)/g, '$1$2')
@@ -4994,6 +5154,7 @@ async function deleteOrphanReports() {
 function rerenderCurrentView() {
   updateDueBadge();
   updateRaidBadge();
+  updateMeetingsBadge();
   if (isShown('gantt')) renderGantt();
   if (isShown('dash')) renderDash();
   if (isShown('reports')) renderReports();
@@ -5002,6 +5163,7 @@ function rerenderCurrentView() {
   if (isShown('streams')) renderStreamOverview();
   if (isShown('changes')) renderChanges();
   if (isShown('raid')) renderRaid();
+  if (isShown('meetings')) renderMeetings();
 }
 
 /* ---- reports list ---- */
@@ -6620,6 +6782,7 @@ function applyWorkspaceChrome() {
   updatePageHead();
   updateDueBadge();
   updateRaidBadge();
+  updateMeetingsBadge();
 }
 
 // The Gantt key lists the workspace's own RAG options.
@@ -6629,7 +6792,7 @@ function renderRagLegend() {
     <span class="legend-item"><i class="dot" style="background:${paletteOf(s.color).base}"></i> ${escAttr(s.name)}${s.description ? ` — ${escAttr(s.description)}` : ''}</span>`).join('');
 }
 
-const VIEW_TITLES = { overview: () => 'Portfolio', streams: () => 'Streams', workspaces: () => 'Portfolio', dash: () => 'Dashboard', gantt: () => 'Plan', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date log', raid: () => 'RAID' };
+const VIEW_TITLES = { overview: () => 'Portfolio', streams: () => 'Streams', workspaces: () => 'Portfolio', dash: () => 'Dashboard', gantt: () => 'Plan', editor: () => T.Items, reports: () => 'Reports', changes: () => 'What changed', dates: () => 'Date log', raid: () => 'RAID', meetings: () => 'Meetings' };
 function updatePageHead() {
   const view = currentView();
   const p = currentWorkspace();
@@ -7093,7 +7256,8 @@ function confirmDeleteWorkspace(p) {
   const n = (k) => state[k].filter(x => x.workspace_id === p.id).length;
   const rows = [
     [st.items.length, t.item, t.items], [st.reports.length, 'report', 'reports'], [n('updates'), 'weekly update', 'weekly updates'],
-    [n('raid'), 'risk, issue or dependency', 'risks, issues and dependencies'], [n('streams'), 'stream', 'streams'], [n('reportComments'), 'report comment', 'report comments'],
+    [n('raid'), 'risk, issue or dependency', 'risks, issues and dependencies'], [n('meetingSeries'), 'meeting series', 'meeting series'], [n('meetings'), 'meeting', 'meetings'], [n('actions'), 'meeting action', 'meeting actions'],
+    [n('streams'), 'stream', 'streams'], [n('reportComments'), 'report comment', 'report comments'],
   ].filter(([c]) => c);
   document.getElementById('del-heading').textContent = `Delete the workspace ${p.name}?`;
   document.getElementById('del-list').innerHTML = rows.length
@@ -7143,12 +7307,18 @@ async function deleteWorkspace() {
   state.raid = state.raid.filter(r => r.workspace_id !== p.id);
   const hadNotes = state.raidNotes.some(n => n.workspace_id === p.id);
   state.raidNotes = state.raidNotes.filter(n => n.workspace_id !== p.id);
+  const hadSeries = state.meetingSeries.some(s => s.workspace_id === p.id);
+  state.meetingSeries = state.meetingSeries.filter(s => s.workspace_id !== p.id);
+  const hadMeetings = state.meetings.some(m => m.workspace_id === p.id);
+  state.meetings = state.meetings.filter(m => m.workspace_id !== p.id);
+  const hadActions = state.actions.some(a => a.workspace_id === p.id);
+  state.actions = state.actions.filter(a => a.workspace_id !== p.id);
   const hadComments = state.reportComments.some(c => c.workspace_id === p.id);
   state.reportComments = state.reportComments.filter(c => c.workspace_id !== p.id);
   applyWorkspaceChrome();
   rerenderCurrentView();
   offerUndo(snap, `Deleted the workspace ${p.name}${lost.length ? ` and its ${lost.join(' and ')}` : ''}`);
-  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadStreams && saveStreams(), hadRaid && saveRaid(), hadNotes && saveRaidNotes(), hadComments && saveComments()]);
+  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadStreams && saveStreams(), hadRaid && saveRaid(), hadNotes && saveRaidNotes(), hadSeries && saveSeries(), hadMeetings && saveMeetings(), hadActions && saveActions(), hadComments && saveComments()]);
 }
 
 function wireWorkspaces() {
@@ -7447,7 +7617,7 @@ function renderDash() {
   const cards = [dashGlance(p, rg), dashHero(items), dashTiles(p, items)];
   if (items.length) {
     cards.push(dashStand(items, rg), dashStreams(p, items, rg), dashWeekly(p, rg), dashSlip(items), dashMonths(items, rg), dashOwners(items),
-      dashComing(items), dashRisks(p));
+      dashComing(items), dashRisks(p), dashActions());
     if (!reportsOff()) cards.push(dashReports());
   }
   document.getElementById('dash-grid').innerHTML = cards.join('')
@@ -7508,6 +7678,7 @@ function dashTiles(p, items) {
   const high = ri.filter(r => raidRating(r).level === 'High').length;
   const blocked = deps.filter(r => r.status === 'Blocked').length, atRisk = deps.filter(r => r.status === 'At risk').length;
   const due = reportsOff() ? null : reportsDue().length;
+  const openActs = actionsOf().filter(a => !isActionDone(a)), lateActs = openActs.filter(actionOverdue).length;
   const tile = (key, label, value, sub, go, tone = '', extra = '') => dashBtn(`dash-tile${tone ? ` tone-${tone}` : ''}`, go, null,
     `<span class="dash-tile-l">${label}</span><span class="dash-tile-v">${value}</span>${sub ? `<span class="dash-tile-s">${sub}</span>` : ''}${extra}`, `id="dash-tile-${key}"`);
   const tiles = [
@@ -7520,6 +7691,8 @@ function dashTiles(p, items) {
     tile('raid', 'Open risks & issues', ri.length, high ? `${count(high, 'rated High', 'rated High')}` : ri.length ? 'none rated High' : 'Register is clear', { k: 'raid' }, high ? 'bad' : ''),
     tile('deps', 'Open dependencies', deps.length, blocked || atRisk ? [blocked && `${blocked} blocked`, atRisk && `${atRisk} at risk`].filter(Boolean).join(' · ') : deps.length ? 'none blocked' : 'None open',
       { k: 'raid', kind: 'dependency' }, blocked ? 'bad' : atRisk ? 'warn' : ''),
+    tile('actions', 'Open actions', openActs.length, lateActs ? count(lateActs, 'overdue', 'overdue') : openActs.length ? 'none overdue' : state.meetings.some(m => m.workspace_id === p.id) ? 'All done' : 'No meetings yet',
+      { k: 'meetings', tab: 'actions' }, lateActs ? 'bad' : ''),
     tile('dates', 'Date changes', '<span class="dash-tile-wait">…</span>', 'in the last 30 days', { k: 'view', view: 'dates' }),
   ];
   return `<div class="dash-tiles" style="--span:12">${tiles.join('')}</div>`;
@@ -7675,6 +7848,18 @@ function dashRisks(p) {
     { span: 4, actions: dashBtn('btn btn-sm', { k: 'raid' }, null, 'Register') });
 }
 
+// Open actions from meetings, soonest due first.
+function dashActions() {
+  const open = actionsOf().filter(a => !isActionDone(a));
+  const rows = [...open].sort(actionOrder).slice(0, 8);
+  const body = rows.length ? `<ul class="dash-list">${rows.map(a => `<li>${dashBtn('dash-item', { k: 'action', id: a.id }, null,
+      `<span class="dash-item-t">${a.ref ? `<b>${escAttr(a.ref)}</b> ` : ''}${escAttr(a.text)}</span>
+       <small>${escAttr([a.owner, meetingById(a.meeting_id)?.title].filter(Boolean).join(' · ')) || 'No owner'}${a.due ? ` · <span class="${actionOverdue(a) ? 'dv-late-text' : ''}">due ${fmtShort(a.due)}</span>` : ''}</small>`)}</li>`).join('')}</ul>`
+    : dashEmpty(state.meetings.some(m => m.workspace_id === state.workspaceId) ? 'No open actions.' : 'No meetings recorded yet.');
+  return dashCard('actions', 'Meeting actions', count(open.length, 'open', 'open'), body,
+    { span: 4, actions: dashBtn('btn btn-sm', { k: 'meetings', tab: 'actions' }, null, 'All actions') });
+}
+
 // The reports written most recently.
 function dashReports() {
   const rows = [...state.reports].sort((a, b) => (b.updated || b.created).localeCompare(a.updated || a.created)).slice(0, 8);
@@ -7717,12 +7902,23 @@ async function dashGo(go) {
     case 'raid': {
       raidFilter.kind = go.kind || '';
       raidFilter.status = 'open';
+      raidFilter.q = '';
+      document.getElementById('raid-q').value = '';
+      clearTableFilters(raidTable);
       switchView('raid');
       const r = go.id && state.raid.find(x => x.id === go.id);
       if (r) openRaidDialog(r);
       return;
     }
     case 'reports': rptMode = go.mode || 'all'; return switchView('reports');
+    case 'meetings': setMeetingsMode(go.tab || 'minutes'); return switchView('meetings');
+    case 'action': {
+      setMeetingsMode('actions');
+      switchView('meetings');
+      const a = state.actions.find(x => x.id === go.id);
+      if (a) openActionDialog(a);
+      return;
+    }
     case 'report': showReportsFor(go.item); return selectReport(go.id);
     case 'update': {
       openUpdateDialog(go.stream ? streamSubject(p, go.stream) : programSubject(p));
@@ -8096,11 +8292,12 @@ const noteLine = (n) => `<span class="note-when">${fmtStamp(n.at)}${n.by ? ` · 
 const raidFilter = { kind: '', status: 'open', q: '', link: '' };
 let raidRows = []; // as last rendered, for the CSV
 
-function raidMatches(r, ignoreKind) {
+function raidMatches(r, ignoreKind, ignoreQ) {
   const f = raidFilter;
   if (!ignoreKind && f.kind && r.kind !== f.kind) return false;
   if (f.status === 'open' ? isClosed(r) : f.status === 'done' && !isClosed(r)) return false;
   if (f.link && !r.links.includes(f.link) && !(r.stream_id && f.link === `stream:${r.stream_id}`)) return false;
+  if (ignoreQ) return true;
   const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
   const hay = [r.ref, r.title, r.description, r.owner, r.party, r.response, r.impact_if, r.mitigation, r.accountable, streamName(r.stream_id), r.rag, r.priority, r.dep_type, RAID_KINDS[r.kind].one, r.status,
@@ -8112,35 +8309,60 @@ const STATUS_ORDER = { Blocked: 0, 'At risk': 1, 'In progress': 2, Open: 3, 'Not
 const raidOrder = (a, b) => (isClosed(a) - isClosed(b)) || (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3) || raidRating(b).score - raidRating(a).score
   || (a.due || '9999').localeCompare(b.due || '9999') || cmpRef(a, b);
 
-// The table's columns: one set for everything, and one for dependencies alone.
+// The table: a spreadsheet-style one like Items (see makeTable), with one set of columns for
+// everything and one for dependencies alone. Columns the two share keep one width.
 const dash = '<span class="muted">—</span>';
 const cellOr = (v) => (v ? escAttr(v) : dash);
-const RAID_TABLES = {
-  all: [
-    ['Ref', '', (r) => (r.ref ? escAttr(r.ref) : dash), 'raid-ref'],
-    ['Type', '', (r) => `<span class="raid-kind raid-kind-${r.kind}">${RAID_KINDS[r.kind].one}</span>`],
-    ['Title', 'raid-title', (r) => raidTitleCell(r), 'raid-title'],
-    ['Linked to', '', (r) => r.links.map(l => linkChip(l)).join('') || dash, 'raid-links'],
-    ['Owner', '', (r) => cellOr(r.owner)],
-    ['Rating', '', (r) => ratingPill(raidRating(r), ratingTitle(r)), '', 'Risks: likelihood × impact. Issues: impact. Dependencies: priority'],
-    ['Status', '', raidStatusBadge],
-    ['Due', '', (r) => dueCell(r), 'raid-due'],
-    ['Response', 'raid-resp', (r) => cellOr(r.response), 'raid-resp'],
-  ],
-  dependency: [
-    ['Ref', '', (r) => (r.ref ? escAttr(r.ref) : dash), 'raid-ref'],
-    ['Title', 'raid-title', (r) => raidTitleCell(r), 'raid-title'],
-    ['Type', '', (r) => cellOr(r.dep_type)],
-    ['Stream', '', (r) => streamGo(r.stream_id)],
-    ['Linked to', '', (r) => r.links.map(l => linkChip(l)).join('') || dash, 'raid-links'],
-    ['Owner', '', (r) => cellOr(r.owner)],
-    ['Accountable', '', (r) => cellOr(r.accountable)],
-    ['Priority', '', (r) => ratingPill(raidRating(r))],
-    ['RAG', '', (r) => (r.rag ? statusPill(r.rag, ragOf(r.workspace_id).map) : dash)],
-    ['Status', '', raidStatusBadge],
-    ['Due', '', (r) => dueCell(r), 'raid-due'],
-    ['Latest update', 'raid-resp', (r) => { const n = notesOf(r)[0]; return n ? `${noteLine(n)}${notesOf(r).length > 1 ? `<small class="muted"> · ${notesOf(r).length - 1} earlier</small>` : ''}` : dash; }, 'raid-resp raid-note'],
-  ],
+const kindRank = (label) => Object.values(RAID_KINDS).findIndex(d => d.one === label);
+const levelRank = (v) => { const i = ['High', 'Medium', 'Low'].indexOf(v); return i < 0 ? 3 + prioRank(v) : i; };
+const prioRank = (v) => { const i = wsList(state.workspaceId, 'dep_priorities').indexOf(v); return i < 0 ? 99 : i; };
+// Blocked and at risk, then in progress, then open; closed after everything.
+const statusRank = (v) => (closesAny(v) ? 10 : 0) + (STATUS_ORDER[v] ?? 3);
+const linkLabels = (r) => r.links.map(l => linkInfo(l).label);
+const RAID_COLS = {
+  ref: { key: 'ref', label: 'Ref', w: 84 },
+  kind: { key: 'kind', label: 'Type', w: 130, vals: (r) => RAID_KINDS[r.kind].one, sort: (r) => kindRank(RAID_KINDS[r.kind].one), order: (a, b) => kindRank(a) - kindRank(b), words: ['Sort risks, issues, dependencies', 'Sort dependencies, issues, risks'] },
+  title: { key: 'title', label: 'Title', w: 300, blank: '(Untitled)' },
+  dep_type: { key: 'dep_type', label: 'Type', w: 110, blank: '(No type)' },
+  stream_id: { key: 'stream_id', label: 'Stream', w: 130, vals: (r) => streamName(r.stream_id), sort: (r) => streamName(r.stream_id), blank: '(No stream)' },
+  links: { key: 'links', label: 'Linked to', w: 220, vals: linkLabels, sort: (r) => linkLabels(r).join(', '), blank: '(Not linked)' },
+  owner: { key: 'owner', label: 'Owner', w: 130, blank: '(No owner)' },
+  accountable: { key: 'accountable', label: 'Accountable', w: 140, blank: '(Nobody)' },
+  rating: { key: 'rating', label: 'Rating', w: 92, title: 'Risks: likelihood × impact. Issues: impact. Dependencies: priority', vals: (r) => raidRating(r).label, sort: (r) => (raidRating(r).label ? raidRating(r).score : ''), order: (a, b) => levelRank(a) - levelRank(b), words: ['Sort lowest to highest', 'Sort highest to lowest'], blank: '(Not rated)' },
+  priority: { key: 'priority', label: 'Priority', w: 100, sort: (r) => (r.priority ? prioRank(r.priority) : ''), order: (a, b) => prioRank(a) - prioRank(b), words: ['Sort highest to lowest', 'Sort lowest to highest'], blank: '(No priority)' },
+  rag: { key: 'rag', label: 'RAG', w: 110, kind: 'status', blank: '(No RAG)' },
+  status: { key: 'status', label: 'Status', w: 112, sort: (r) => statusRank(r.status), order: (a, b) => statusRank(a) - statusRank(b), words: ['Sort open to closed', 'Sort closed to open'] },
+  due: { key: 'due', label: 'Due', w: 100, kind: 'date', show: fmtNice, blank: '(No date)' },
+  response: { key: 'response', label: 'Response', w: 260, blank: '(None)' },
+  latest: { key: 'latest', label: 'Latest update', w: 280, vals: (r) => notesOf(r)[0]?.text || '', sort: (r) => notesOf(r)[0]?.at || '', words: ['Sort oldest to newest', 'Sort newest to oldest'], blank: '(No updates)' },
+};
+const RAID_SETS = {
+  all: ['ref', 'kind', 'title', 'links', 'owner', 'rating', 'status', 'due', 'response'],
+  dependency: ['ref', 'title', 'dep_type', 'stream_id', 'links', 'owner', 'accountable', 'priority', 'rag', 'status', 'due', 'latest'],
+};
+const raidMode = () => (raidFilter.kind === 'dependency' ? 'dependency' : 'all');
+const raidTable = makeTable({
+  table: 'raid-table', store: 'milestone-tracker.raid-grid', mode: 'all',
+  cols: () => RAID_SETS[raidMode()].map(k => RAID_COLS[k]),
+  rows: () => raidOf().filter(r => raidMatches(r)),
+  onChange: () => renderRaid(),
+});
+const RAID_CELLS = {
+  ref: (r) => `<td class="raid-ref">${r.ref ? escAttr(r.ref) : dash}</td>`,
+  kind: (r) => `<td><span class="raid-kind raid-kind-${r.kind}">${RAID_KINDS[r.kind].one}</span></td>`,
+  title: (r) => `<td class="raid-title">${raidTitleCell(r)}</td>`,
+  dep_type: (r) => `<td>${cellOr(r.dep_type)}</td>`,
+  stream_id: (r) => `<td>${streamGo(r.stream_id)}</td>`,
+  links: (r) => `<td class="raid-links">${r.links.map(l => linkChip(l)).join('') || dash}</td>`,
+  owner: (r) => `<td>${cellOr(r.owner)}</td>`,
+  accountable: (r) => `<td>${cellOr(r.accountable)}</td>`,
+  rating: (r) => `<td>${ratingPill(raidRating(r), ratingTitle(r))}</td>`,
+  priority: (r) => `<td>${ratingPill(raidRating(r))}</td>`,
+  rag: (r) => `<td>${r.rag ? statusPill(r.rag, ragOf(r.workspace_id).map) : dash}</td>`,
+  status: (r) => `<td>${raidStatusBadge(r)}</td>`,
+  due: (r) => `<td class="raid-due">${dueCell(r)}</td>`,
+  response: (r) => `<td class="raid-resp">${cellOr(r.response)}</td>`,
+  latest: (r) => { const n = notesOf(r)[0]; return `<td class="raid-resp raid-note">${n ? `${noteLine(n)}${notesOf(r).length > 1 ? `<small class="muted"> · ${notesOf(r).length - 1} earlier</small>` : ''}` : dash}</td>`; },
 };
 function raidTitleCell(r) {
   return `<b>${escAttr(r.title) || '<span class="muted">(untitled)</span>'}</b>${r.description ? `<div class="raid-desc">${escAttr(r.description)}</div>` : ''}`
@@ -8161,17 +8383,24 @@ function renderRaid() {
   chip.hidden = !raidFilter.link;
   chip.innerHTML = raidFilter.link ? `Linked to ${escAttr(linkInfo(raidFilter.link).title)}<button type="button" data-raid-all title="Show everything">✕</button>` : '';
   document.getElementById('btn-raid-add').textContent = `+ Add ${raidFilter.kind ? RAID_KINDS[raidFilter.kind].one.toLowerCase() : ''}`.trim();
-  raidRows = base.filter(r => raidMatches(r)).sort(raidOrder);
-  const cols = RAID_TABLES[raidFilter.kind === 'dependency' ? 'dependency' : 'all'];
-  document.getElementById('raid-head').innerHTML = `<tr>${cols.map(([h, cls, , , title]) => `<th class="${cls}" ${title ? `title="${escAttr(title)}"` : ''}>${h}</th>`).join('')}</tr>`;
-  document.getElementById('raid-body').innerHTML = raidRows.map(r => `<tr data-raid="${r.id}" class="raid-row${isClosed(r) ? ' closed' : ''}">
-      ${cols.map(([, , cell, cls]) => `<td class="${cls || ''}">${cell(r)}</td>`).join('')}
-    </tr>`).join('')
+  // The headings are redrawn when the column set changes (dependencies alone, or not).
+  if (raidTable.mode !== raidMode() || !tableEl(raidTable).querySelector('thead th')) {
+    raidTable.mode = raidMode();
+    saveTablePrefs(raidTable);
+    renderTableHead(raidTable);
+  } else updateHeadState(raidTable);
+  const scope = base.filter(r => raidMatches(r, false, true)); // before the search and heading filters
+  const valueOf = (r, key) => { const c = tableCol(raidTable, key); return c?.sort ? c.sort(r) : r[key] ?? ''; };
+  raidRows = sortRows(raidTable, scope.filter(r => raidMatches(r) && passesFilters(raidTable, r)), valueOf, raidOrder);
+  const cols = raidTable.cols();
+  document.getElementById('raid-body').innerHTML = raidRows.map(r => `<tr data-raid="${r.id}" class="raid-row${isClosed(r) ? ' closed' : ''}">${cols.map(c => RAID_CELLS[c.key](r)).join('')}</tr>`).join('')
     || `<tr><td colspan="${cols.length}" class="grid-empty">${all.length ? 'Nothing matches the filters.' : 'No risks, issues or dependencies yet. Use <b>+ Add</b> to record one.'}</td></tr>`;
+  const filtered = Object.keys(raidTable.filters).length > 0 || !!raidFilter.q.trim();
   const overdue = raidRows.filter(raidOverdue).length;
   const blocked = raidRows.filter(r => r.status === 'Blocked').length;
-  document.getElementById('raid-count').textContent = count(raidRows.length, 'entry', 'entries')
+  document.getElementById('raid-count').textContent = (filtered ? `Showing ${raidRows.length} of ${scope.length}` : count(raidRows.length, 'entry', 'entries'))
     + (blocked ? ` · ${blocked} blocked` : '') + (overdue ? ` · ${overdue} overdue` : '');
+  document.getElementById('raid-clear').hidden = !filtered;
   updateRaidBadge();
 }
 
@@ -8190,6 +8419,7 @@ function showRaidFor(link) {
   raidFilter.kind = '';
   raidFilter.status = '';
   raidFilter.q = '';
+  clearTableFilters(raidTable);
   document.getElementById('raid-q').value = '';
   document.querySelectorAll('dialog[open]').forEach(d => d.close());
   switchView('raid');
@@ -8650,6 +8880,13 @@ function wireRaid() {
   document.getElementById('raid-link').addEventListener('click', (e) => { if (e.target.closest('[data-raid-all]')) { raidFilter.link = ''; raidFilter.status = 'open'; renderRaid(); } });
   document.getElementById('btn-raid-add').onclick = () => openRaidDialog(null, { links: raidFilter.link ? [raidFilter.link] : [] });
   document.getElementById('btn-raid-csv').onclick = downloadRaidCSV;
+  wireTable(raidTable);
+  document.getElementById('raid-clear').onclick = () => {
+    clearTableFilters(raidTable);
+    raidFilter.q = '';
+    document.getElementById('raid-q').value = '';
+    renderRaid();
+  };
   document.getElementById('raid-body').addEventListener('click', (e) => {
     const go = e.target.closest('[data-raid-go]');
     if (go) return goToLink(go.dataset.raidGo);
@@ -9765,6 +10002,1030 @@ function downloadPNG() {
   img.src = url;
 }
 
+/* ================= meetings ================= */
+// A workspace's regular meetings keep their minutes here, pasted in as an LLM (or a person) wrote
+// them: Markdown is kept and shown formatted. The meetings are listed newest first beside the
+// minutes being read, and searched as full text (title, series, attendees, the minutes and their
+// actions), with the matches marked. The actions agreed at meetings are tracked across them on
+// the Actions tab: **Extract actions** reads the minutes for action lines (an Actions / Next steps
+// section, a table of actions, lines starting "Action:", checkboxes), works out the owner and due
+// date where it can, and puts them up for review before they're added. Actions can be added by
+// hand too, and are ticked off from the Actions tab, the minutes pane or the dashboard.
+
+const SERIES_COLUMNS = ['id', 'workspace_id', 'name', 'cadence', 'start', 'attendees', 'notes', 'created', 'updated'];
+const MEETING_CADENCES = ['Weekly', 'Fortnightly', 'Monthly'];
+const MEETING_COLUMNS = ['id', 'workspace_id', 'title', 'date', 'series_id', 'attendees', 'link', 'minutes', 'created', 'updated'];
+const ACTION_COLUMNS = ['id', 'workspace_id', 'meeting_id', 'ref', 'text', 'owner', 'due', 'status', 'links', 'done_at', 'created', 'updated'];
+const ACTION_STATUSES = ['Open', 'Done'];
+
+// Rows as records, by column name; ids that aren't positive integers, or repeat, are replaced.
+function readRecords(rows, cols) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const list = rows.slice(1).map(r => Object.fromEntries(cols.map(k => [k, (r[header.indexOf(k)] ?? '').trim()])));
+  let last = Math.max(0, ...list.map(r => (/^\d+$/.test(r.id) ? +r.id : 0)));
+  const seen = new Set();
+  for (const r of list) {
+    if (!/^\d+$/.test(r.id) || seen.has(r.id)) r.id = String(++last);
+    seen.add(r.id);
+  }
+  return list;
+}
+// A date from a file, as YYYY-MM-DD (a spreadsheet's 3/11/2026 or 3 Nov 2026 is read too), or blank.
+const fileDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v) && parseDate(v) ? v : readDate(v, localDateOrder()) || '');
+
+/* ---- series: a workspace's regular meetings ---- */
+// A series has a name, a cadence and the date of its first meeting; the dates of the others follow
+// from those (weekly and fortnightly on the same weekday, monthly on the same day of the month).
+// Each meeting is one of a series, or a one-off.
+function rowsToSeries(rows) {
+  const ids = new Set(state.workspaces.map(p => p.id));
+  return readRecords(rows, SERIES_COLUMNS).map(x => ({ ...x, cadence: fromList(x.cadence, MEETING_CADENCES), start: fileDate(x.start) }))
+    .map(x => ({ ...x, cadence: MEETING_CADENCES.includes(x.cadence) ? x.cadence : '' })).filter(x => ids.has(x.workspace_id) && x.name);
+}
+const seriesToCSV = (list) => [SERIES_COLUMNS.join(','), ...list.map(x => SERIES_COLUMNS.map(k => csvEscape(x[k])).join(','))].join('\n') + '\n';
+const nextSeriesId = () => takeId('meeting-series', () => String(Math.max(0, ...state.meetingSeries.map(x => +x.id || 0)) + 1));
+const seriesById = (id) => (id ? state.meetingSeries.find(x => x.id === id) : undefined);
+const seriesName = (id) => seriesById(id)?.name || '';
+const seriesOf = (workspaceId = state.workspaceId) => state.meetingSeries.filter(x => x.workspace_id === workspaceId).sort((a, b) => a.name.localeCompare(b.name));
+const seriesMeetings = (id) => state.meetings.filter(m => m.series_id === id);
+// The n-th meeting of a series counted from its first (n = 0), or '' without a cadence or start.
+function seriesDate(x, n) {
+  if (!x.cadence || !x.start) return '';
+  if (x.cadence !== 'Monthly') return addDays(x.start, n * (x.cadence === 'Weekly' ? 7 : 14));
+  const d = parseDate(x.start);
+  const last = new Date(d.getFullYear(), d.getMonth() + n + 1, 0).getDate(); // a 31st falls on the month's last day
+  return fmtISO(new Date(d.getFullYear(), d.getMonth() + n, Math.min(d.getDate(), last)));
+}
+// The latest meeting date of the series on or before `on`, and the first after it.
+function seriesAround(x, on = todayISO()) {
+  if (!x.cadence || !x.start) return { last: '', next: '' };
+  if (x.start > on) return { last: '', next: x.start };
+  let n = 0;
+  while (seriesDate(x, n + 1) <= on) n++;
+  return { last: seriesDate(x, n), next: seriesDate(x, n + 1) };
+}
+// A series is due minutes when its latest meeting has come round and none are recorded for that date.
+const seriesDue = (x) => { const { last } = seriesAround(x); return last && !seriesMeetings(x.id).some(m => m.date === last) ? last : ''; };
+// The date a new meeting of the series takes: the one due minutes, else the next to come.
+const seriesNextDate = (x) => seriesDue(x) || seriesAround(x).next || todayISO();
+const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
+const cadenceText = (x) => (!x.cadence ? 'No fixed cadence' : !x.start ? x.cadence
+  : x.cadence === 'Monthly' ? `Monthly, on the ${ordinal(parseDate(x.start).getDate())}` : `${x.cadence}, on ${parseDate(x.start).toLocaleDateString('en-GB', { weekday: 'long' })}s`);
+
+// Meetings from before series were records named their series: each name becomes a series of
+// the workspace (no cadence yet), and the meetings point at it. Returns true when anything changed.
+function seriesFromNames() {
+  let changed = false;
+  for (const m of state.meetings) {
+    if (!m._series) continue;
+    let x = state.meetingSeries.find(y => y.workspace_id === m.workspace_id && y.name.toLowerCase() === m._series.toLowerCase());
+    if (!x) {
+      const now = new Date().toISOString();
+      state.meetingSeries.push(x = { id: nextSeriesId(), workspace_id: m.workspace_id, name: m._series, cadence: '', start: '', attendees: '', notes: '', created: now, updated: now });
+    }
+    m.series_id = x.id;
+    delete m._series;
+    changed = true;
+  }
+  return changed;
+}
+
+function rowsToMeetings(rows) {
+  const ids = new Set(state.workspaces.map(p => p.id));
+  return readRecords(rows, [...MEETING_COLUMNS, 'series']).map(({ series, ...m }) => ({ ...m, date: fileDate(m.date), minutes: m.minutes.replace(/\r\n?/g, '\n'), ...(series && !m.series_id ? { _series: series } : {}) }))
+    .filter(m => ids.has(m.workspace_id));
+}
+const meetingsToCSV = (list) => [MEETING_COLUMNS.join(','), ...list.map(m => MEETING_COLUMNS.map(k => csvEscape(m[k])).join(','))].join('\n') + '\n';
+const DONE_WORDS = /^(done|complete|completed|closed|finished|yes|y|x|✓)$/i;
+function rowsToActions(rows) {
+  const ids = new Set(state.workspaces.map(p => p.id));
+  return readRecords(rows, ACTION_COLUMNS).map(a => ({
+    ...a, due: fileDate(a.due), status: DONE_WORDS.test(a.status) ? 'Done' : 'Open',
+    links: [...new Set(a.links.split(';').map(raidLink).filter(Boolean))],
+  })).filter(a => ids.has(a.workspace_id) && a.text);
+}
+const actionsToCSV = (list) => [ACTION_COLUMNS.join(','), ...list.map(a => ACTION_COLUMNS.map(k => csvEscape(k === 'links' ? a.links.join(';') : a[k])).join(','))].join('\n') + '\n';
+
+const nextMeetingId = () => takeId('meetings', () => String(Math.max(0, ...state.meetings.map(m => +m.id || 0)) + 1));
+const nextActionId = () => takeId('meeting-actions', () => String(Math.max(0, ...state.actions.map(a => +a.id || 0)) + 1));
+// The next free action ref in a workspace: A1, A2… (`taken`: refs given out but not yet saved).
+function nextActionRef(workspaceId = state.workspaceId, taken = []) {
+  const n = [...state.actions.filter(a => a.workspace_id === workspaceId).map(a => a.ref), ...taken].map(r => r.match(/^A-?(\d+)$/i)?.[1]).filter(Boolean);
+  return `A${Math.max(0, ...n.map(Number)) + 1}`;
+}
+
+const meetingById = (id) => (id ? state.meetings.find(m => m.id === id) : undefined);
+// Newest first.
+const byMeetingDate = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.created || '').localeCompare(a.created || '') || +b.id - +a.id;
+const meetingsOf = (workspaceId = state.workspaceId) => state.meetings.filter(m => m.workspace_id === workspaceId).sort(byMeetingDate);
+const actionsOf = (workspaceId = state.workspaceId) => state.actions.filter(a => a.workspace_id === workspaceId);
+const isActionDone = (a) => a.status === 'Done';
+const actionOverdue = (a) => !isActionDone(a) && !!a.due && a.due < todayISO();
+// Open before done; then soonest due (none last), then by ref.
+const actionOrder = (a, b) => isActionDone(a) - isActionDone(b) || (a.due || '9999').localeCompare(b.due || '9999') || cmpRef(a, b);
+const actionsFor = (meetingId) => state.actions.filter(a => a.meeting_id === meetingId).sort(actionOrder);
+// The people the workspace knows: owners, leads and attendees, so a name in a line can be recognised.
+const knownPeople = () => [...new Set([...state.items.map(m => m.owner), ...state.raid.filter(r => r.workspace_id === state.workspaceId).map(r => r.owner),
+  ...actionsOf().map(a => a.owner), ...[currentWorkspace()].flatMap(p => [p.owner, p.lead]), ...[...meetingsOf(), ...seriesOf()].flatMap(m => m.attendees.split(/[,;\n]| and /))]
+  .map(s => (s || '').trim()).filter(s => s.length > 1))];
+
+/* ---- reading actions out of the minutes ---- */
+// Every bullet, numbered line and table row in a section headed Actions, Action items, Next steps,
+// Follow-ups or To do (up to the next heading at the same or a higher level; a bold line or one
+// ending in a colon heads a section too) and, anywhere in the minutes, a line that starts
+// "Action:" or with a checkbox. A sub-bullet giving only the owner or the date belongs to the
+// bullet above it. Each comes back as { text, owner, due, done, key } — see readActionLine.
+const ACTION_HEAD = /^(actions?|action\s*(items?|points?|log|list|register|summary)|next\s*steps?|follow[\s-]*ups?|to[\s-]?dos?|agreed\s*actions?|actions?\s*(agreed|arising|required|and\s*next\s*steps|&\s*next\s*steps|and\s*owners|&\s*owners)|outstanding\s*actions?|new\s*actions?|tasks?\s*(assigned|agreed)?)\b/i;
+const ACTION_MARK = /^\**\s*(action|ap|todo|to\s*do|action\s*(item|point))\s*\**\s*[:\-–—]\s*/i;
+const CHECKBOX = /^\[([ xX])\]\s*/;
+
+function actionCandidates(minutes, meetingDate, people = []) {
+  const lines = String(minutes ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const found = [];
+  let section = 0;  // the level of the actions heading we're under (a bold or "Actions:" line counts as 7); 0 outside one
+  let table = null; // the columns of the table being read: { text, owner, due }
+  let groupOwner = ''; // a name on a bullet of its own, owning the bullets indented under it
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { table = null; continue; }
+    const h = line.match(/^(#{1,6})\s+(.*?)\s*#*$/) || line.match(/^(?:\*\*|__)(.+?)(?:\*\*|__):?$/) || line.match(/^([A-Za-z][\w &/-]{1,40}):$/);
+    if (h) {
+      const level = h[2] !== undefined ? h[1].length : 7, text = (h[2] !== undefined ? h[2] : h[1]).replace(/[*_`]/g, '').trim();
+      if (section && level <= section) section = 0;
+      if (ACTION_HEAD.test(text)) section = level;
+      table = null;
+      groupOwner = '';
+      continue;
+    }
+    if (line.startsWith('|')) {
+      const cells = line.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      if (cells.every(c => /^:?-{2,}:?$/.test(c) || !c)) continue; // the rule under the headings
+      if (!table) {
+        const heads = cells.map(c => c.toLowerCase());
+        const col = (re) => heads.findIndex(c => re.test(c));
+        const owner = col(/owner|who|assigned|responsible|by whom|person|name/), due = col(/due|by when|deadline|date|when|target/);
+        let text = col(/action|item|task|what|description|next step|activity/);
+        if (text < 0 && owner >= 0 && due >= 0) text = heads.findIndex((c, i) => i !== owner && i !== due);
+        if (text >= 0 && (section || /action/.test(heads[text]) || (owner >= 0 && due >= 0))) { table = { text, owner, due }; continue; }
+      }
+      if (!table) continue;
+      const cell = (i) => (i >= 0 ? cells[i] || '' : '');
+      if (cell(table.text)) found.push({ raw: cell(table.text), owner: cell(table.owner), dueText: cell(table.due) });
+      continue;
+    }
+    table = null;
+    const bullet = line.match(/^(?:[-*+•]|\d+[.)])\s+(.*)$/);
+    const body = bullet ? bullet[1] : line;
+    const flagged = CHECKBOX.test(body) || ACTION_MARK.test(body);
+    if (!section && !flagged) continue;
+    const indented = /^\s{2,}/.test(raw) || /^\t/.test(raw);
+    if (!bullet && !flagged) { // prose in the section: a wrapped line of the bullet above, or "None this week" to pass over
+      if (found.length && indented && found.at(-1).open) found.at(-1).raw += ' ' + line;
+      continue;
+    }
+    const sub = bullet && indented && found.length && body.match(/^\**(owner|who|assigned(?: to)?|due|by|deadline|when|target)\**\s*[:\-–—]?\s*(.+)$/i);
+    if (sub) { if (/^(owner|who|assigned)/i.test(sub[1])) found.at(-1).owner ||= sub[2]; else found.at(-1).dueText ||= sub[2]; continue; }
+    // A bullet that is only a name, with the actions indented under it: "- Jane" / "  - Send the plan".
+    if (bullet && !indented && !flagged) {
+      const name = plainText(body).replace(/:$/, '').trim();
+      groupOwner = name.split(/\s+/).length <= 4 && !DATE_PHRASE.test(name) && plausibleName(name, people) || '';
+      if (groupOwner) continue;
+    }
+    found.push({ raw: body, open: true, owner: indented && groupOwner || '' });
+  }
+  const seen = new Set();
+  return found.map(f => readActionLine(f, meetingDate, people)).filter(a => a.text && !seen.has(a.key) && seen.add(a.key));
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const MONTH_RE = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+const WEEKDAY_RE = '((?:mon|fri|sun)(?:day)?|tue(?:sday|s)?|wed(?:nesday|s)?|thu(?:rsday|rs|r)?|sat(?:urday)?)';
+// A date as people write one in minutes. Plain words (tomorrow, Friday, end of month) are read
+// from the meeting's date.
+const DATE_PHRASE = new RegExp(`\\b(\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[/.]\\d{1,2}(?:[/.]\\d{2,4})?|\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH_RE}\\.?(?:,?\\s+\\d{4})?|${MONTH_RE}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?`
+  + `|(?:next\\s+|this\\s+|on\\s+)?${WEEKDAY_RE}|tomorrow|today|next\\s+week|(?:end\\s+of\\s+(?:the\\s+|this\\s+)?(?:week|month)|eow|eom)|in\\s+(?:a|\\d+)\\s+(?:days?|weeks?))\\b\\.?`, 'i');
+const DUE_CUE = /(?:\b(?:by|due|deadline|before|target|until|no later than|on|for|date)\b\s*[:\-–—]?\s*)?$/i;
+
+const isoOf = (y, mo, d) => { const dt = new Date(y, mo - 1, d); return mo >= 1 && mo <= 12 && dt.getMonth() === mo - 1 && dt.getDate() === d ? fmtISO(dt) : ''; };
+// A day and month without a year: the first time that date comes round on or after the meeting.
+function nearDate(d, mo, y, base) {
+  if (y) return isoOf(y.length === 2 ? 2000 + +y : +y, mo, d);
+  const b = parseDate(base).getFullYear();
+  const c = [b - 1, b, b + 1].map(yy => isoOf(yy, mo, d)).filter(Boolean);
+  return c.find(x => x >= base) || c.at(-1) || '';
+}
+function readDatePhrase(phrase, base) {
+  const t = phrase.toLowerCase().replace(/\.$/, '').replace(/\s+/g, ' ').trim();
+  const bd = parseDate(base);
+  let m;
+  if ((m = t.match(/^\d{4}-\d{2}-\d{2}$/))) return parseDate(t) ? t : '';
+  if ((m = t.match(/^(\d{1,2})[/.](\d{1,2})(?:[/.](\d{2,4}))?$/))) {
+    let [d, mo] = localDateOrder() === 'mdy' ? [+m[2], +m[1]] : [+m[1], +m[2]];
+    if (mo > 12 && d <= 12) [d, mo] = [mo, d];
+    return nearDate(d, mo, m[3], base);
+  }
+  if ((m = t.match(new RegExp(`^(\\d{1,2})(?:st|nd|rd|th)? (?:of )?${MONTH_RE}(?:,? (\\d{4}))?$`)))) return nearDate(+m[1], MONTHS.indexOf(m[2].slice(0, 3)) + 1, m[3], base);
+  if ((m = t.match(new RegExp(`^${MONTH_RE} (\\d{1,2})(?:st|nd|rd|th)?(?:,? (\\d{4}))?$`)))) return nearDate(+m[2], MONTHS.indexOf(m[1].slice(0, 3)) + 1, m[3], base);
+  if ((m = t.match(new RegExp(`^(?:(next|this|on) )?${WEEKDAY_RE}$`)))) { // the coming one (a meeting on a Friday puts "Friday" a week on)
+    const want = WEEKDAYS.indexOf(m[2].slice(0, 3));
+    let n = (want - bd.getDay() + 7) % 7;
+    if (!n && m[1] !== 'this') n = 7;
+    return addDays(base, n);
+  }
+  if (t === 'today') return base;
+  if (t === 'tomorrow') return addDays(base, 1);
+  if (t === 'next week') return addDays(base, 7);
+  if (/^(end of (the |this )?week|eow)$/.test(t)) return addDays(base, (5 - bd.getDay() + 7) % 7);
+  if (/^(end of (the |this )?month|eom)$/.test(t)) return fmtISO(new Date(bd.getFullYear(), bd.getMonth() + 1, 0));
+  if ((m = t.match(/^in (a|\d+) (day|week)s?$/))) return addDays(base, (m[1] === 'a' ? 1 : +m[1]) * (m[2] === 'week' ? 7 : 1));
+  return '';
+}
+// The due date in a line, and the line without it (and without "by" / "due" / the brackets round it).
+function takeDue(text, base) {
+  const m = text.match(DATE_PHRASE);
+  if (!m) return { text, due: '' };
+  const due = readDatePhrase(m[1], base);
+  if (!due) return { text, due: '' };
+  const before = text.slice(0, m.index).replace(DUE_CUE, '').replace(/[\s(\[,;:\-–—]+$/, '');
+  let after = text.slice(m.index + m[0].length).replace(/^\s*[)\]]/, '');
+  if (/[(\[]\s*$/.test(before)) after = after.replace(/^\s*[)\]]/, '');
+  return { text: `${before.replace(/[(\[]\s*$/, '')} ${after}`, due };
+}
+
+// The owner in a line. "**Jane**: do X", "Jane to do X", "do X — Jane", "do X (Jane)", "Owner: Jane"
+// and "@jane" all read; a name is one to four capitalised words (or someone the workspace knows),
+// and words that start a sentence rather than name anyone are passed over.
+const NOT_NAMES = new Set(['action', 'actions', 'note', 'notes', 'decision', 'decisions', 'owner', 'due', 'by', 'todo', 'to', 'do', 'ap', 'next', 'steps', 'need',
+  'needs', 'agreed', 'follow', 'up', 'ensure', 'confirm', 'review', 'update', 'send', 'share', 'check', 'complete', 'schedule', 'set', 'arrange', 'book', 'prepare',
+  'draft', 'circulate', 'agree', 'finalise', 'finalize', 'the', 'a', 'an', 'we', 'i', 'it', 'this', 'that', 'also', 'please', 'someone', 'item', 'status', 'deadline',
+  'who', 'what', 'when', 'done', 'open', 'new', 'tbc', 'tbd', 'n/a', 'none', 'no', 'risk', 'issue', 'plan', 'report', 'meeting', 'minutes', 'discussion', 'outcome',
+  'decided', 'noted', 'raised', 'closed', 'carried', 'continue', 'start', 'stop', 'make', 'get', 'add', 'remove', 'create', 'write', 'test', 'deploy', 'move', 'escalate',
+  'chase', 'ask', 'speak', 'talk', 'organise', 'organize', 'investigate', 'look', 'find', 'provide', 'produce', 'publish', 'post', 'raise', 'log', 'track', 'monitor']);
+const NAME_WORD = '(?:[A-Z][\\w\'’.-]*|[A-Z]\\.|de|van|von|der|le|la|di|da|bin|al|el|mc|mac)';
+const NAMES_RE = `((?:${NAME_WORD}(?:\\s+${NAME_WORD}){0,3})(?:\\s*(?:,|&|and|\\/)\\s*${NAME_WORD}(?:\\s+${NAME_WORD}){0,3})*)`;
+function plausibleName(s, people) {
+  const t = s.replace(/[*_]/g, '').trim();
+  if (!t || t.length > 50) return '';
+  if (people.some(p => p.toLowerCase() === t.toLowerCase())) return t;
+  if (/^(all|everyone|everybody|team|the team|all attendees|whole team)$/i.test(t)) return t;
+  const words = t.split(/\s*(?:,|&|\band\b|\/)\s*|\s+/).filter(Boolean);
+  if (NOT_NAMES.has(words[0].toLowerCase()) || words.length > 8) return '';
+  if (words.every(w => NOT_NAMES.has(w.toLowerCase()))) return '';
+  return t;
+}
+function takeOwner(text, people) {
+  const named = (s) => plausibleName(s, people);
+  let m, owner = '';
+  const clean = (s) => s.replace(/^\s*[:\-–—,]+\s*|\s*[:\-–—,(]+\s*$/g, '').trim();
+  if ((m = text.match(new RegExp(`^\\**${NAMES_RE}\\**\\s*[:\\-–—]\\s+(.+)$`))) && (owner = named(m[1]))) return { text: clean(m[2]), owner };
+  if ((m = text.match(new RegExp(`^\\**${NAMES_RE}\\**\\s+(?:to(?!\\s+be\\b)|will|is to|are to|should|must|has to|have to|needs? to|agreed to|volunteered to|would)\\s+(.+)$`))) && (owner = named(m[1]))) return { text: clean(m[2]), owner };
+  if ((m = text.match(new RegExp(`\\b(?:owner|assigned(?: to)?|responsible|who|action by|lead)\\s*[:\\-–—]\\s*\\**${NAMES_RE}\\**`, 'i'))) && (owner = named(m[1]))) return { text: clean(text.replace(m[0], ' ').replace(/\(\s*\)|\[\s*\]/g, '')), owner };
+  if ((m = text.match(new RegExp(`^(.+?)\\s*[(\\[]\\s*\\**${NAMES_RE}\\**\\s*[)\\]]\\s*\\.?$`))) && (owner = named(m[2]))) return { text: clean(m[1]), owner };
+  if ((m = text.match(new RegExp(`^(.+?)\\s+[-–—]\\s*\\**${NAMES_RE}\\**\\s*\\.?$`))) && (owner = named(m[2]))) return { text: clean(m[1]), owner };
+  if ((m = text.match(/(?:^|\s)@([\w.-]+)/))) return { text: clean(text.replace(m[0], ' ')), owner: m[1].replace(/[._]/g, ' ') };
+  // "Do X — Jane and Tom" / "(Jane)" where the names are known, whatever their case
+  for (const p of [...people].sort((a, b) => b.length - a.length)) {
+    const re = new RegExp(`^(.+?)\\s*(?:[(\\[]\\s*|[-–—]\\s*)${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[)\\]]?\\s*\\.?$`, 'i');
+    if ((m = text.match(re))) return { text: clean(m[1]), owner: p };
+  }
+  return { text, owner: '' };
+}
+const actionKey = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const plainText = (s) => s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/(\*\*|__|~~|`)/g, '').replace(/(^|\s)[*_](\S.*?)[*_](?=\s|$|[.,;:])/g, '$1$2');
+function readActionLine(f, meetingDate, people) {
+  let text = plainText(f.raw.trim());
+  let done = false;
+  const box = text.match(CHECKBOX);
+  if (box) { done = box[1] !== ' '; text = text.slice(box[0].length); }
+  text = text.replace(ACTION_MARK, '');
+  if (/^(?:\(done\)|\[done\]|done:|✓|✔)\s*/i.test(text)) { done = true; text = text.replace(/^(?:\(done\)|\[done\]|done:|✓|✔)\s*/i, ''); }
+  if (/\((?:done|complete|completed|closed)\)\s*\.?$/i.test(text)) { done = true; text = text.replace(/\s*\((?:done|complete|completed|closed)\)\s*\.?$/i, ''); }
+  const base = meetingDate && parseDate(meetingDate) ? meetingDate : todayISO();
+  let due = f.dueText ? readDatePhrase(f.dueText, base) || (f.dueText.match(DATE_PHRASE) && readDatePhrase(f.dueText.match(DATE_PHRASE)[1], base)) || fileDate(f.dueText) : '';
+  if (!due) ({ text, due } = takeDue(text, base));
+  let owner = f.owner ? plainText(f.owner).trim() : '';
+  if (!owner) ({ text, owner } = takeOwner(text, people));
+  text = text.replace(/\s+/g, ' ').replace(/\(\s*\)|\[\s*\]/g, '').replace(/^[\s\-–—:;,.]+|[\s\-–—:;,(]+$/g, '').trim();
+  if (text && /^[a-z]/.test(text)) text = text[0].toUpperCase() + text.slice(1);
+  return { text, owner, due, done, key: actionKey(text) };
+}
+
+// An action already tracked in the workspace that reads as this candidate (the same words, or one
+// inside the other when they're long enough to be sure).
+function trackedAs(c) {
+  return actionsOf().find(a => { const k = actionKey(a.text); return k === c.key || (Math.min(k.length, c.key.length) >= 25 && (k.includes(c.key) || c.key.includes(k))); });
+}
+const untrackedCandidates = (m) => actionCandidates(m.minutes, m.date, knownPeople()).filter(c => !trackedAs(c));
+
+/* ---- the Meetings page ---- */
+let mtMode = 'minutes';   // 'minutes' (the list and the pane) or 'actions' (every action in the workspace)
+let mtSelId = null;       // the meeting in the pane
+let mtFlash = [];         // words to mark in the pane once, from Find
+const mtFilter = { q: '', series: '' };
+let mtRows = [], actRows = []; // as last shown, for ↑ ↓ and the CSV
+
+function setMeetingsMode(mode) {
+  mtMode = mode === 'actions' ? 'actions' : 'minutes';
+  saveAppPrefs({ meetingsMode: mtMode });
+}
+const searchWords = (q) => q.toLowerCase().split(/\s+/).filter(Boolean);
+const meetingHay = (m) => [m.title, seriesName(m.series_id), m.attendees, m.date, m.date && fmtNice(m.date), m.link, mdToText(m.minutes), ...actionsFor(m.id).flatMap(a => [a.ref, a.text, a.owner])].join(' ').toLowerCase();
+function meetingMatches(m, words) {
+  if (mtFilter.series && m.series_id !== mtFilter.series) return false;
+  if (!words.length) return true;
+  const hay = meetingHay(m);
+  return words.every(w => hay.includes(w));
+}
+
+function renderMeetings() {
+  const actions = mtMode === 'actions';
+  document.querySelectorAll('[name="mt-mode"]').forEach(r => { r.checked = r.value === mtMode; });
+  document.getElementById('mt-split').hidden = actions;
+  document.getElementById('mt-actions').hidden = !actions;
+  document.getElementById('mt-series').hidden = actions || !seriesOf().length;
+  document.getElementById('btn-mt-series').hidden = actions;
+  if (!actions) document.getElementById('act-clear').hidden = true;
+  document.getElementById('btn-mt-add').hidden = actions;
+  document.getElementById('btn-act-add').hidden = !actions;
+  document.getElementById('mt-q').placeholder = actions ? 'Search actions…' : 'Search the minutes…';
+  document.getElementById('btn-mt-csv').textContent = actions ? 'Download actions CSV' : 'Download meetings CSV';
+  const open = actionsOf().filter(a => !isActionDone(a));
+  const seg = document.getElementById('mt-open-count');
+  seg.textContent = open.length;
+  seg.hidden = !open.length;
+  seg.classList.toggle('seg-count-late', open.some(actionOverdue));
+  if (actions) renderActions(); else renderMeetingList();
+  updateMeetingsBadge();
+}
+
+// Matches marked in the text under `root`.
+function markWords(root, words) {
+  if (!words.length) return;
+  const re = new RegExp(words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const n of nodes) {
+    const hits = [...n.nodeValue.matchAll(re)];
+    if (!hits.length) continue;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const h of hits) {
+      frag.append(n.nodeValue.slice(last, h.index));
+      const mark = document.createElement('mark');
+      mark.textContent = h[0];
+      frag.append(mark);
+      last = h.index + h[0].length;
+    }
+    frag.append(n.nodeValue.slice(last));
+    n.replaceWith(frag);
+  }
+}
+// A snippet of the minutes round the first match, with the matches marked.
+function searchSnippet(text, words) {
+  const low = text.toLowerCase();
+  const at = Math.min(...words.map(w => low.indexOf(w)).filter(i => i >= 0));
+  if (!Number.isFinite(at)) return '';
+  const from = Math.max(0, at - 50), to = Math.min(text.length, at + 110);
+  const span = document.createElement('span');
+  span.textContent = `${from ? '…' : ''}${text.slice(from, to).trim()}${to < text.length ? '…' : ''}`;
+  markWords(span, words);
+  return span.innerHTML;
+}
+
+function renderMeetingList() {
+  const all = meetingsOf();
+  const series = seriesOf();
+  const sel = document.getElementById('mt-series');
+  if (mtFilter.series && !seriesById(mtFilter.series)) mtFilter.series = '';
+  sel.innerHTML = `<option value="">Every series</option>${series.map(x => `<option value="${x.id}" ${x.id === mtFilter.series ? 'selected' : ''}>${escAttr(x.name)}</option>`).join('')}`;
+  const words = searchWords(mtFilter.q);
+  mtRows = all.filter(m => meetingMatches(m, words));
+  if (!mtRows.some(m => m.id === mtSelId)) mtSelId = mtRows[0]?.id || null; // the newest is open unless one was chosen
+  // Series whose latest meeting has no minutes yet, with a way to record them.
+  const due = series.filter(x => (!mtFilter.series || x.id === mtFilter.series) && seriesDue(x));
+  const rows = due.map(x => `<tr class="mt-due"><td colspan="3"><div><span class="mt-due-what"><b>${escAttr(x.name)}</b> · ${fmtNice(seriesDue(x))} — no minutes yet</span>
+      <button type="button" class="btn btn-sm" data-mt-record="${x.id}">Record minutes</button></div></td></tr>`);
+  let month = null;
+  for (const m of mtRows) {
+    const mo = m.date ? m.date.slice(0, 7) : '';
+    if (mo !== month) {
+      month = mo;
+      rows.push(`<tr class="mt-month"><td colspan="3">${mo ? parseDate(m.date).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'No date'}</td></tr>`);
+    }
+    const acts = actionsFor(m.id), openN = acts.filter(a => !isActionDone(a)).length, late = acts.some(actionOverdue);
+    const snippet = words.length ? searchSnippet(mdToText(m.minutes), words) : '';
+    const d = m.date && parseDate(m.date);
+    rows.push(`<tr data-mid="${m.id}" class="mt-row${m.id === mtSelId ? ' selected' : ''}" tabindex="0">
+      <td class="mt-date">${d ? `<b>${d.getDate()}</b><small>${d.toLocaleDateString('en-GB', { weekday: 'short' })}</small>` : '<span class="muted">—</span>'}</td>
+      <td class="mt-title"><b>${escAttr(m.title) || '<span class="muted">(untitled)</span>'}</b>${seriesName(m.series_id) ? `<span class="mt-series">${escAttr(seriesName(m.series_id))}</span>` : ''}
+        ${m.attendees ? `<div class="mt-sub">${escAttr(m.attendees)}</div>` : ''}${snippet ? `<div class="mt-snip">${snippet}</div>` : ''}</td>
+      <td class="mt-acts">${acts.length ? `<span class="mt-act-n${openN ? (late ? ' late' : ' open') : ''}" title="${count(openN, 'open action', 'open actions')} of ${acts.length}">${openN}<small>/${acts.length}</small></span>` : ''}</td></tr>`);
+  }
+  document.getElementById('mt-body').innerHTML = rows.join('')
+    || `<tr><td colspan="3" class="grid-empty">${all.length ? 'Nothing matches.' : 'No meetings yet. <b>+ New meeting</b> records one with its minutes.'}</td></tr>`;
+  document.getElementById('mt-count').textContent = count(mtRows.length, 'meeting', 'meetings');
+  renderMeetingPane(words);
+}
+
+const actionLine = (a) => `<li class="mt-act${isActionDone(a) ? ' done' : ''}${actionOverdue(a) ? ' late' : ''}">
+    <label class="mt-act-tick" title="${isActionDone(a) ? 'Done — untick to reopen' : 'Tick when done'}"><input type="checkbox" data-act-done="${a.id}" ${isActionDone(a) ? 'checked' : ''} /></label>
+    <button type="button" class="mt-act-text" data-act-edit="${a.id}" title="Edit this action">${a.ref ? `<b>${escAttr(a.ref)}</b> ` : ''}${escAttr(a.text)}</button>
+    <span class="mt-act-meta">${escAttr(a.owner) || '<i>no owner</i>'}${a.due ? ` · <span class="mt-due">${actionOverdue(a) ? 'overdue' : 'due'} ${fmtShort(a.due)}</span>` : ''}</span></li>`;
+
+function renderMeetingPane(words = []) {
+  const pane = document.getElementById('mt-pane');
+  const m = meetingById(mtSelId);
+  if (!m) {
+    pane.innerHTML = `<p class="pane-empty">${meetingsOf().length ? 'Select a meeting to read its minutes.' : 'Each meeting’s minutes are read here, with the actions taken from them.'}</p>`;
+    return;
+  }
+  const i = mtRows.findIndex(x => x.id === m.id);
+  const acts = actionsFor(m.id), openN = acts.filter(a => !isActionDone(a)).length;
+  const fresh = untrackedCandidates(m).length;
+  pane.innerHTML = `
+    <div class="pane-bar">
+      <div class="pane-nav"><button type="button" data-mt-step="-1" title="Newer meeting (↑)" ${i <= 0 ? 'disabled' : ''}>↑</button><button type="button" data-mt-step="1" title="Older meeting (↓)" ${i < 0 || i >= mtRows.length - 1 ? 'disabled' : ''}>↓</button></div>
+      <span class="pane-pos">${i >= 0 ? `${i + 1} of ${mtRows.length}` : ''}</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-sm" data-mt-extract title="Read the minutes for actions and add them to the Actions tab">Extract actions${fresh ? ` <b class="seg-count">${fresh}</b>` : ''}</button>
+      <button type="button" class="btn btn-sm" data-mt-edit>Edit</button>
+    </div>
+    <article class="pane-doc mt-doc">
+      <header class="mt-head">
+        <h2>${escAttr(m.title) || '<span class="muted">(untitled)</span>'}</h2>
+        <div class="mt-meta">${[m.date && fmtNice(m.date), seriesName(m.series_id)].filter(Boolean).map(escAttr).join(' · ')}${m.link ? `${m.date || m.series_id ? ' · ' : ''}${linkOut(withScheme(m.link))}` : ''}</div>
+        ${m.attendees ? `<div class="mt-meta mt-attendees"><b>Attendees</b> ${escAttr(m.attendees)}</div>` : ''}
+      </header>
+      <section class="pane-sec"><h3>Minutes</h3>${m.minutes.trim() ? `<div class="md mt-minutes">${mdToHtml(m.minutes)}</div>` : '<p class="muted">No minutes recorded. <button type="button" class="link-btn" data-mt-edit>Add them</button></p>'}</section>
+      <section class="pane-sec mt-act-sec"><h3>Actions ${acts.length ? `<small>${openN} open of ${acts.length}</small>` : ''}</h3>
+        ${acts.length ? `<ul class="mt-act-list">${acts.map(actionLine).join('')}</ul>` : '<p class="muted mt-none">No actions tracked from this meeting yet.</p>'}
+        ${fresh ? `<p class="mt-hint mt-fresh">${count(fresh, 'possible action', 'possible actions')} in the minutes ${fresh === 1 ? 'isn’t' : 'aren’t'} tracked yet. <button type="button" class="link-btn" data-mt-extract>Review and add</button></p>` : ''}
+        <p class="mt-hint"><button type="button" class="link-btn" data-act-new>+ Add an action by hand</button></p>
+      </section>
+    </article>`;
+  const hl = words.length ? words : mtFlash;
+  mtFlash = [];
+  if (hl.length) {
+    markWords(pane.querySelector('.mt-doc'), hl);
+    const first = pane.querySelector('mark');
+    if (first && pane.scrollHeight > pane.clientHeight) first.scrollIntoView({ block: 'center' });
+  } else pane.scrollTop = 0;
+}
+
+function selectMeeting(id, focusRow) {
+  mtSelId = id;
+  renderMeetingList();
+  const row = document.querySelector(`#mt-body tr[data-mid="${CSS.escape(id)}"]`);
+  row?.scrollIntoView({ block: 'nearest' });
+  if (focusRow) row?.focus();
+  writeHash();
+}
+function stepMeeting(n) {
+  const i = mtRows.findIndex(m => m.id === mtSelId);
+  const next = mtRows[Math.min(mtRows.length - 1, Math.max(0, (i < 0 ? -1 : i) + n))];
+  if (next && next.id !== mtSelId) selectMeeting(next.id, document.activeElement?.closest?.('#mt-body'));
+}
+// The Meetings page open on a meeting, from Find or an action's row; `q`: words to mark once.
+function showMeeting(id, q = '') {
+  mtFlash = searchWords(q);
+  mtFilter.q = '';
+  mtFilter.series = '';
+  document.getElementById('mt-q').value = '';
+  setMeetingsMode('minutes');
+  mtSelId = id;
+  document.querySelectorAll('dialog[open]').forEach(d => d.close());
+  if (isShown('meetings')) { renderMeetings(); writeHash(); } else switchView('meetings');
+}
+
+// The menu shows how many actions are open in the workspace, in red when any is overdue.
+function updateMeetingsBadge() {
+  const open = actionsOf().filter(a => !isActionDone(a)), late = open.filter(actionOverdue).length;
+  const b = document.getElementById('nav-meetings-count');
+  b.hidden = !open.length;
+  b.textContent = open.length;
+  b.title = `${count(open.length, 'open action', 'open actions')}${late ? `, ${late} overdue` : ''}`;
+  b.classList.toggle('nav-badge-quiet', !late);
+}
+
+/* ---- the Actions tab ---- */
+// A spreadsheet-style table like Items and the Reports list: sort, filter, move and size the
+// columns from their headings (see makeTable). It starts filtered to open actions.
+const ACT_COLS = [
+  { key: 'ref', label: 'Ref', w: 84 },
+  { key: 'text', label: 'Action', w: 380 },
+  { key: 'owner', label: 'Owner', w: 140, blank: '(No owner)' },
+  { key: 'due', label: 'Due', w: 110, kind: 'date', show: fmtNice, blank: '(No date)' },
+  { key: 'meeting_id', label: 'From', w: 210, vals: (a) => actionSource(a), sort: (a) => meetingById(a.meeting_id)?.date || '', title: 'The meeting the action was taken from' },
+  { key: 'status', label: 'Status', w: 96, sort: (a) => ACTION_STATUSES.indexOf(a.status), order: (x, y) => ACTION_STATUSES.indexOf(x) - ACTION_STATUSES.indexOf(y) },
+  { key: 'done_at', label: 'Done on', w: 110, kind: 'date', vals: (a) => a.done_at.slice(0, 10), show: fmtNice, blank: '(Not done)' },
+];
+const actionSource = (a) => meetingById(a.meeting_id)?.title || (a.meeting_id ? '(Deleted meeting)' : '(Added by hand)');
+const actTable = makeTable({ table: 'actions-table', store: 'milestone-tracker.actions-grid', cols: () => ACT_COLS, rows: () => actionsOf(), onChange: () => renderMeetings() });
+const ACT_CELLS = {
+  ref: (a) => `<td class="act-ref">${a.ref ? escAttr(a.ref) : dash}</td>`,
+  text: (a) => `<td class="act-text">${escAttr(a.text)}${a.links.length ? `<div class="act-links">${a.links.map(l => linkChip(l)).join('')}</div>` : ''}</td>`,
+  owner: (a) => `<td>${cellOr(a.owner)}</td>`,
+  due: (a) => `<td class="act-due">${a.due ? `<span class="${actionOverdue(a) ? 'late' : ''}" ${actionOverdue(a) ? 'title="Overdue"' : ''}>${fmtShort(a.due)}</span>` : dash}</td>`,
+  meeting_id: (a) => { const m = meetingById(a.meeting_id); return `<td class="act-from">${m ? `<button type="button" class="link-btn" data-mt-open="${m.id}" title="Read the minutes">${escAttr(m.title) || '(untitled)'}</button>${m.date ? `<small>${fmtShort(m.date)}</small>` : ''}` : `<span class="muted">${a.meeting_id ? 'A deleted meeting' : 'Added by hand'}</span>`}</td>`; },
+  status: (a) => `<td class="act-done"><label class="mt-act-tick" title="${isActionDone(a) ? 'Done — untick to reopen' : 'Tick when done'}"><input type="checkbox" data-act-done="${a.id}" ${isActionDone(a) ? 'checked' : ''} /> <span>${a.status}</span></label></td>`,
+  done_at: (a) => `<td class="act-due">${a.done_at ? fmtShort(a.done_at.slice(0, 10)) : dash}</td>`,
+};
+function actionMatches(a, words) {
+  if (!words.length) return true;
+  const hay = [a.ref, a.text, a.owner, a.status, a.due, actionSource(a), ...a.links.map(l => linkInfo(l).label)].join(' ').toLowerCase();
+  return words.every(w => hay.includes(w));
+}
+function renderActions() {
+  const all = actionsOf();
+  updateHeadState(actTable);
+  const words = searchWords(mtFilter.q);
+  const valueOf = (a, key) => { const c = ACT_COLS.find(x => x.key === key); return c.sort ? c.sort(a) : a[key]; };
+  actRows = sortRows(actTable, all.filter(a => passesFilters(actTable, a) && actionMatches(a, words)), valueOf, actionOrder);
+  const cols = actTable.cols();
+  document.getElementById('act-body').innerHTML = actRows.map(a => `<tr data-act="${a.id}" class="act-row${isActionDone(a) ? ' done' : ''}">${cols.map(c => ACT_CELLS[c.key](a)).join('')}</tr>`).join('')
+    || `<tr><td colspan="${cols.length}" class="grid-empty">${all.length ? 'No actions match the filters.' : 'No actions yet. They come from a meeting’s minutes (<b>Extract actions</b> on the Minutes tab) or <b>+ Add action</b>.'}</td></tr>`;
+  const filtered = Object.keys(actTable.filters).length > 0 || !!words.length;
+  const late = actRows.filter(actionOverdue).length;
+  document.getElementById('mt-count').textContent = `${filtered ? `Showing ${actRows.length} of ${all.length}` : count(actRows.length, 'action', 'actions')}${late ? ` · ${late} overdue` : ''}`;
+  document.getElementById('act-clear').hidden = !filtered;
+}
+
+async function setActionDone(id, done) {
+  const a = state.actions.find(x => x.id === id);
+  if (!a || isActionDone(a) === done) return;
+  const now = new Date().toISOString();
+  Object.assign(a, { status: done ? 'Done' : 'Open', done_at: done ? now : '', updated: now });
+  rerenderCurrentView();
+  await saveActions(`Action ${a.ref} ${done ? 'done' : 'reopened'}`);
+}
+
+function downloadMeetingsCSV() {
+  renderMeetings();
+  const p = currentWorkspace();
+  const slug = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
+  let head, lines, name;
+  if (mtMode === 'actions') {
+    head = ['Ref', 'Action', 'Owner', 'Due', 'Status', 'Done on', 'Meeting', 'Meeting date', 'Linked to'];
+    lines = actRows.map(a => [a.ref, a.text, a.owner, a.due, a.status, a.done_at.slice(0, 10), meetingById(a.meeting_id)?.title || '', meetingById(a.meeting_id)?.date || '', a.links.map(l => linkInfo(l).title).join('; ')]);
+    name = 'meeting-actions';
+  } else {
+    head = ['Date', 'Title', 'Series', 'Attendees', 'Link', 'Minutes', 'Open actions', 'Actions'];
+    lines = mtRows.map(m => { const acts = actionsFor(m.id); return [m.date, m.title, seriesName(m.series_id), m.attendees, m.link, m.minutes, acts.filter(a => !isActionDone(a)).length, acts.map(a => `${a.ref} ${a.text}${a.owner ? ` (${a.owner})` : ''}${a.due ? ` due ${a.due}` : ''} — ${a.status}`).join('\n')]; });
+    name = 'meetings';
+  }
+  const blob = new Blob(['﻿' + [head, ...lines].map(r => r.map(csvEscape).join(',')).join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.download = `${slug}-${name}-${fmtISO(new Date())}.csv`;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+
+/* ---- the meeting dialog ---- */
+let mtEditing = null, mtOpened = null;
+const MT_FIELDS = ['title', 'date', 'series_id', 'attendees', 'link', 'minutes'];
+
+// `preset.series_id` starts a new meeting of that series: its name, usual attendees and next date.
+function openMeetingDialog(m, preset = {}) {
+  hideQuick();
+  hideTip();
+  mtEditing = m;
+  mtOpened = m && structuredClone(m);
+  const f = document.getElementById('meeting-form').elements;
+  const v = m || { title: '', date: todayISO(), series_id: preset.series_id || '', attendees: '', link: '', minutes: '' };
+  fillSeriesSelect(f.series_id, v.series_id);
+  for (const k of MT_FIELDS) if (k !== 'series_id') f[k].value = v[k] ?? '';
+  if (!m && v.series_id) takeSeries(f, seriesById(v.series_id));
+  document.getElementById('mt-delete').hidden = !m;
+  document.getElementById('mt-error').textContent = '';
+  document.getElementById('mt-heading').textContent = m ? 'Edit meeting' : 'New meeting';
+  refreshDatalists();
+  document.getElementById('meeting-dialog').showModal();
+  f.title.focus();
+}
+
+async function submitMeeting(e) {
+  e.preventDefault();
+  const f = document.getElementById('meeting-form').elements;
+  const err = document.getElementById('mt-error');
+  const v = Object.fromEntries(MT_FIELDS.map(k => [k, f[k].value.replace(/\r\n?/g, '\n').trim()]));
+  if (!v.title) return (err.textContent = 'Give the meeting a title.');
+  if (v.date && !parseDate(v.date)) return (err.textContent = 'The date isn’t a date.');
+  if (v.series_id === 'new') return (err.textContent = 'Set up the series first, or choose One-off.');
+  if (mtEditing && !state.meetings.includes(mtEditing)) return (err.textContent = 'Someone else has just deleted this meeting.');
+  const now = new Date().toISOString();
+  let m = mtEditing;
+  if (m) Object.assign(m, changedFrom(v, mtOpened), { updated: now });
+  else state.meetings.push(m = { id: nextMeetingId(), workspace_id: state.workspaceId, ...v, created: now, updated: now });
+  const minutesChanged = !mtEditing || v.minutes !== mtOpened.minutes;
+  const changed = !mtEditing || !same(m, mtOpened);
+  document.getElementById('meeting-dialog').close();
+  mtSelId = m.id;
+  setMeetingsMode('minutes');
+  if (isShown('meetings')) { renderMeetings(); writeHash(); } else switchView('meetings');
+  // New minutes are read for actions straight away; nothing is added without a look first.
+  if (minutesChanged && untrackedCandidates(m).length) openExtractDialog(m);
+  if (changed) await saveMeetings(`Meeting ${mtEditing ? 'saved' : 'added'}`);
+}
+
+// The meeting goes; its actions stay, marked as from a deleted meeting, since they may still be open.
+async function deleteMeeting() {
+  const m = mtEditing;
+  if (!m) return;
+  const snap = snapshotData();
+  state.meetings = state.meetings.filter(x => x !== m);
+  document.getElementById('meeting-dialog').close();
+  if (mtSelId === m.id) mtSelId = null;
+  rerenderCurrentView();
+  offerUndo(snap, `Deleted the meeting ${m.title}`);
+  await saveMeetings('Meeting deleted');
+}
+
+// The series list in the meeting dialog: one-off, each series of the workspace, or a new one.
+function fillSeriesSelect(sel, current) {
+  sel.innerHTML = '<option value="">One-off meeting</option>'
+    + seriesOf().map(x => `<option value="${x.id}" ${x.id === current ? 'selected' : ''}>${escAttr(x.name)}</option>`).join('')
+    + (current && !seriesById(current) ? `<option value="${escAttr(current)}" selected>(a deleted series)</option>` : '')
+    + '<option value="new">+ New series…</option>';
+}
+// A new meeting takes its series' name, usual attendees and the next date due.
+function takeSeries(f, x) {
+  const was = f.series_id.dataset.was ? seriesById(f.series_id.dataset.was) : null;
+  if (!x) return;
+  if (!f.title.value.trim() || (was && f.title.value.trim() === was.name)) f.title.value = x.name;
+  if (!f.attendees.value.trim() || (was && f.attendees.value.trim() === was.attendees)) f.attendees.value = x.attendees;
+  if (!mtEditing) f.date.value = seriesNextDate(x);
+  f.series_id.dataset.was = x.id;
+}
+
+/* ---- the series dialogs ---- */
+let srEditing = null, srOpened = null, srThen = null; // srThen: what to do with the series saved (the meeting dialog waiting on it)
+const SR_FIELDS = ['name', 'cadence', 'start', 'attendees', 'notes'];
+
+function openSeriesDialog(x, then = null) {
+  srEditing = x;
+  srOpened = x && structuredClone(x);
+  srThen = then;
+  const f = document.getElementById('series-form').elements;
+  const v = x || { name: '', cadence: 'Weekly', start: todayISO(), attendees: '', notes: '' };
+  f.cadence.innerHTML = '<option value="">No fixed cadence</option>' + optionList(MEETING_CADENCES, v.cadence);
+  for (const k of SR_FIELDS) if (k !== 'cadence') f[k].value = v[k] ?? '';
+  document.getElementById('sr-delete').hidden = !x;
+  document.getElementById('sr-error').textContent = '';
+  document.getElementById('sr-heading').textContent = x ? `Edit ${x.name}` : 'New meeting series';
+  updateSeriesPreview();
+  document.getElementById('series-dialog').showModal();
+  f.name.focus();
+}
+// What the cadence and first date add up to: the next few meeting dates.
+function updateSeriesPreview() {
+  const f = document.getElementById('series-form').elements;
+  const x = { cadence: f.cadence.value, start: f.start.value };
+  f.start.closest('label').querySelector('.field-label-text').textContent = x.cadence ? 'First meeting' : 'First meeting (optional)';
+  const el = document.getElementById('sr-preview');
+  if (!x.cadence || !x.start || !parseDate(x.start)) { el.textContent = x.cadence ? 'Give the date of the first meeting and the rest follow from it.' : 'Meetings are recorded as they happen, on any date.'; return; }
+  const { last, next } = seriesAround(x);
+  const n = last ? Math.round(daysBetween(x.start, last) / (x.cadence === 'Weekly' ? 7 : x.cadence === 'Fortnightly' ? 14 : 30)) : -1;
+  const coming = [0, 1, 2].map(i => seriesDate(x, Math.max(0, n + (last ? 1 : 0)) + i)).filter(Boolean);
+  el.textContent = `${cadenceText(x)}. ${last ? `Latest meeting ${fmtNice(last)}; ` : ''}then ${coming.map(fmtNice).join(', ')}…`;
+}
+async function submitSeries(e) {
+  e.preventDefault();
+  const f = document.getElementById('series-form').elements;
+  const err = document.getElementById('sr-error');
+  const v = Object.fromEntries(SR_FIELDS.map(k => [k, f[k].value.trim()]));
+  if (!v.name) return (err.textContent = 'Give the series a name.');
+  if (v.cadence && !v.start) return (err.textContent = 'Give the date of the first meeting, so the others can be counted from it.');
+  if (v.start && !parseDate(v.start)) return (err.textContent = 'The first meeting’s date isn’t a date.');
+  if (seriesOf().some(x => x !== srEditing && x.name.toLowerCase() === v.name.toLowerCase())) return (err.textContent = `There’s already a series called ${v.name} in this workspace.`);
+  if (srEditing && !state.meetingSeries.includes(srEditing)) return (err.textContent = 'Someone else has just deleted this series.');
+  const now = new Date().toISOString();
+  let x = srEditing;
+  if (x) Object.assign(x, changedFrom(v, srOpened), { updated: now });
+  else state.meetingSeries.push(x = { id: nextSeriesId(), workspace_id: state.workspaceId, ...v, created: now, updated: now });
+  const changed = !srEditing || !same(x, srOpened);
+  document.getElementById('series-dialog').close();
+  if (srThen) srThen(x); else { rerenderCurrentView(); if (document.getElementById('series-list-dialog').open) renderSeriesList(); }
+  srThen = null;
+  if (changed) await saveSeries(`Meeting series ${srEditing ? 'saved' : 'added'}`);
+}
+// The series goes; its meetings stay, as one-offs.
+async function deleteSeries() {
+  const x = srEditing;
+  if (!x) return;
+  const snap = snapshotData();
+  state.meetingSeries = state.meetingSeries.filter(y => y !== x);
+  let meetings = false;
+  for (const m of state.meetings) if (m.series_id === x.id) { m.series_id = ''; meetings = true; }
+  document.getElementById('series-dialog').close();
+  srThen = null;
+  rerenderCurrentView();
+  if (document.getElementById('series-list-dialog').open) renderSeriesList();
+  offerUndo(snap, `Deleted the series ${x.name}${meetings ? ' (its meetings are kept as one-offs)' : ''}`);
+  await Promise.all([saveSeries('Meeting series deleted'), meetings && saveMeetings()]);
+}
+
+// Every series of the workspace, with its cadence, how many meetings it has and what's next.
+function openSeriesList() {
+  renderSeriesList();
+  document.getElementById('series-list-dialog').showModal();
+}
+function renderSeriesList() {
+  const list = seriesOf();
+  document.getElementById('sl-body').innerHTML = list.map(x => {
+    const n = seriesMeetings(x.id).length, due = seriesDue(x), { next } = seriesAround(x);
+    return `<tr data-series="${x.id}" class="sl-row">
+      <td class="sl-name"><b>${escAttr(x.name)}</b>${x.attendees ? `<div class="mt-sub">${escAttr(x.attendees)}</div>` : ''}</td>
+      <td>${escAttr(cadenceText(x))}</td>
+      <td class="sl-n">${n ? count(n, 'meeting', 'meetings') : '<span class="muted">none yet</span>'}</td>
+      <td class="sl-next">${due ? `<span class="late">Minutes due for ${fmtShort(due)}</span>` : next ? `Next ${fmtNice(next)}` : '<span class="muted">—</span>'}</td>
+      <td class="sl-act"><button type="button" class="btn btn-sm" data-series-record="${x.id}">${due ? 'Record minutes' : '+ Meeting'}</button></td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="grid-empty">No series yet. A series is a regular meeting — a weekly stand-up, a monthly steering group — that each meeting is recorded against.</td></tr>';
+}
+
+/* ---- extracting actions: the review ---- */
+let mxMeeting = null, mxRows = []; // candidates as edited: { text, owner, due, done, use, tracked }
+
+function openExtractDialog(m) {
+  mxMeeting = m;
+  const people = knownPeople();
+  mxRows = actionCandidates(m.minutes, m.date, people).map(c => { const t = trackedAs(c); return { ...c, use: !t, tracked: t }; });
+  const found = mxRows.length;
+  if (!found) mxRows.push({ text: '', owner: '', due: '', done: false, use: true, tracked: null });
+  document.getElementById('mx-heading').textContent = found ? `${count(found, 'possible action', 'possible actions')} in the minutes` : 'No action lines found';
+  document.getElementById('mx-meeting').textContent = `${m.title}${m.date ? ` · ${fmtNice(m.date)}` : ''}`;
+  document.getElementById('mx-intro').innerHTML = found
+    ? 'Each line below was read as an action. Tick the ones to add, and put right anything misread — the wording, who owns it, when it’s due. Lines already tracked are unticked.'
+    : 'The minutes have no Actions or Next steps section, lines starting <b>Action:</b>, or checkboxes. Type any actions here to add them.';
+  renderExtractRows();
+  document.getElementById('extract-dialog').showModal();
+  document.querySelector('#mx-body input[data-mx="text"]')?.focus();
+}
+function renderExtractRows() {
+  document.getElementById('mx-body').innerHTML = mxRows.map((r, i) => `<tr class="${r.use ? '' : 'off'}">
+      <td class="mx-use"><input type="checkbox" data-mx-use="${i}" ${r.use ? 'checked' : ''} title="Add this one" /></td>
+      <td class="mx-text"><input data-mx="text" data-i="${i}" value="${escAttr(r.text)}" placeholder="What is to be done" /></td>
+      <td class="mx-owner"><input data-mx="owner" data-i="${i}" value="${escAttr(r.owner)}" list="people-list" placeholder="Who" /></td>
+      <td class="mx-due"><input type="date" data-mx="due" data-i="${i}" value="${escAttr(r.due)}" /></td>
+      <td class="mx-note">${r.tracked ? `<span title="${escAttr(r.tracked.text)}">Already tracked as ${escAttr(r.tracked.ref || `#${r.tracked.id}`)}</span>` : r.done ? 'Marked done in the minutes' : ''}</td>
+    </tr>`).join('');
+  const n = mxRows.filter(r => r.use && r.text.trim()).length;
+  document.getElementById('mx-add').textContent = n ? `Add ${count(n, 'action', 'actions')}` : 'Add';
+  document.getElementById('mx-add').disabled = !n;
+}
+async function submitExtract(e) {
+  e.preventDefault();
+  const m = mxMeeting;
+  const rows = mxRows.filter(r => r.use && r.text.trim());
+  if (!m || !rows.length) return;
+  const snap = snapshotData();
+  const now = new Date().toISOString();
+  const taken = [];
+  for (const r of rows) {
+    const ref = nextActionRef(m.workspace_id, taken);
+    taken.push(ref);
+    state.actions.push({ id: nextActionId(), workspace_id: m.workspace_id, meeting_id: m.id, ref, text: r.text.trim(), owner: r.owner.trim(), due: r.due, status: r.done ? 'Done' : 'Open', links: [], done_at: r.done ? now : '', created: now, updated: now });
+  }
+  document.getElementById('extract-dialog').close();
+  rerenderCurrentView();
+  offerUndo(snap, `Added ${count(rows.length, 'action', 'actions')} from ${m.title}`);
+  await saveActions(`${count(rows.length, 'action', 'actions')} added from the minutes`);
+}
+
+/* ---- the action dialog ---- */
+let adEditing = null, adOpened = null, adLinks = [];
+const AD_FIELDS = ['ref', 'text', 'owner', 'due', 'status', 'meeting_id'];
+
+function openActionDialog(a, preset = {}) {
+  hideQuick();
+  hideTip();
+  adEditing = a;
+  adOpened = a && structuredClone(a);
+  const f = document.getElementById('action-form').elements;
+  const v = a || { ref: nextActionRef(), text: '', owner: '', due: '', status: 'Open', meeting_id: preset.meeting_id || '', links: [] };
+  f.meeting_id.innerHTML = '<option value="">— none: added by hand</option>'
+    + meetingsOf().map(m => `<option value="${m.id}" ${m.id === v.meeting_id ? 'selected' : ''}>${escAttr(`${m.date ? `${fmtShort(m.date)} · ` : ''}${m.title}`)}</option>`).join('')
+    + (v.meeting_id && !meetingById(v.meeting_id) ? `<option value="${escAttr(v.meeting_id)}" selected>(a deleted meeting)</option>` : '');
+  f.status.innerHTML = optionList(ACTION_STATUSES, v.status);
+  for (const k of AD_FIELDS) if (k !== 'meeting_id' && k !== 'status') f[k].value = v[k] ?? '';
+  adLinks = [...v.links];
+  document.getElementById('ad-delete').hidden = !a;
+  document.getElementById('ad-error').textContent = '';
+  document.getElementById('ad-heading').textContent = a ? `Edit ${a.ref || 'action'}` : 'New action';
+  refreshDatalists();
+  renderAdLinks();
+  document.getElementById('action-dialog').showModal();
+  f.text.focus();
+}
+// Linked items and streams as chips, and a list to add more (as the register's dialog does).
+function renderAdLinks() {
+  const streams = streamsInOrder().filter(Boolean);
+  const free = (l) => !adLinks.includes(l);
+  const streamOpts = streams.filter(id => free(`stream:${id}`)).map(id => `<option value="stream:${escAttr(id)}">${escAttr(streamName(id))} (whole stream)</option>`).join('');
+  const groups = streams.map(id => {
+    const items = state.items.filter(m => m.stream_id === id && free(`item:${m.id}`)).sort(cmpRef);
+    return items.length ? `<optgroup label="${escAttr(streamName(id))}">${items.map(m => `<option value="item:${m.id}">${escAttr(fullLabel(m))}</option>`).join('')}</optgroup>` : '';
+  }).join('');
+  const loose = state.items.filter(m => !streamById(m.stream_id) && free(`item:${m.id}`)).sort(cmpRef);
+  document.getElementById('ad-links').innerHTML = adLinks.map(l => linkChip(l, true)).join('') +
+    `<select id="ad-addlink" class="add-dep"><option value="">+ link ${escAttr(T.item)} or stream</option>
+      ${streamOpts ? `<optgroup label="Streams">${streamOpts}</optgroup>` : ''}${groups}
+      ${loose.length ? `<optgroup label="(No stream)">${loose.map(m => `<option value="item:${m.id}">${escAttr(fullLabel(m))}</option>`).join('')}</optgroup>` : ''}
+    </select>`;
+}
+async function submitAction(e) {
+  e.preventDefault();
+  const f = document.getElementById('action-form').elements;
+  const err = document.getElementById('ad-error');
+  const v = Object.fromEntries(AD_FIELDS.map(k => [k, f[k].value.trim()]));
+  v.links = [...adLinks];
+  if (!v.text) return (err.textContent = 'Say what is to be done.');
+  if (v.due && !parseDate(v.due)) return (err.textContent = 'The due date isn’t a date.');
+  if (v.ref && actionsOf().some(a => a !== adEditing && a.ref.toLowerCase() === v.ref.toLowerCase())) return (err.textContent = `${v.ref} is already used in this workspace.`);
+  if (adEditing && !state.actions.includes(adEditing)) return (err.textContent = 'Someone else has just deleted this action.');
+  const now = new Date().toISOString();
+  const done = v.status === 'Done';
+  v.done_at = done ? (adEditing?.done_at || now) : '';
+  let a = adEditing;
+  if (a) Object.assign(a, changedFrom(v, adOpened), { updated: now });
+  else state.actions.push(a = { id: nextActionId(), workspace_id: state.workspaceId, ...v, created: now, updated: now });
+  document.getElementById('action-dialog').close();
+  rerenderCurrentView();
+  if (!adEditing || !same(a, adOpened)) await saveActions(`Action ${adEditing ? 'saved' : 'added'}`);
+}
+async function deleteAction() {
+  const a = adEditing;
+  if (!a) return;
+  const snap = snapshotData();
+  state.actions = state.actions.filter(x => x !== a);
+  document.getElementById('action-dialog').close();
+  rerenderCurrentView();
+  offerUndo(snap, `Deleted action ${a.ref || a.text}`);
+  await saveActions('Action deleted');
+}
+
+function wireMeetings() {
+  const prefs = loadAppPrefs();
+  mtMode = prefs.meetingsMode === 'actions' ? 'actions' : 'minutes';
+  document.querySelectorAll('[name="mt-mode"]').forEach(r => r.addEventListener('change', () => { setMeetingsMode(r.value); renderMeetings(); writeHash(); }));
+  document.getElementById('mt-q').oninput = (e) => { mtFilter.q = e.target.value; renderMeetings(); };
+  document.getElementById('mt-series').onchange = (e) => { mtFilter.series = e.target.value; renderMeetings(); };
+  actTable.filters = { status: ['Open'] }; // what's still to do, until the Status filter says otherwise
+  renderTableHead(actTable);
+  wireTable(actTable);
+  document.getElementById('act-clear').onclick = () => { clearTableFilters(actTable); mtFilter.q = ''; document.getElementById('mt-q').value = ''; renderMeetings(); };
+  document.getElementById('btn-mt-add').onclick = () => openMeetingDialog(null);
+  document.getElementById('btn-mt-series').onclick = openSeriesList;
+  document.getElementById('btn-act-add').onclick = () => openActionDialog(null);
+  document.getElementById('btn-mt-csv').onclick = downloadMeetingsCSV;
+
+  // the list
+  const body = document.getElementById('mt-body');
+  body.addEventListener('click', (e) => {
+    const rec = e.target.closest('[data-mt-record]');
+    if (rec) return openMeetingDialog(null, { series_id: rec.dataset.mtRecord });
+    const row = e.target.closest('[data-mid]');
+    if (row) selectMeeting(row.dataset.mid);
+  });
+  body.addEventListener('keydown', (e) => { const row = e.target.closest('[data-mid]'); if (row && e.key === 'Enter') selectMeeting(row.dataset.mid, true); });
+  // ↑ / ↓ move through the list wherever focus is, except while typing
+  document.addEventListener('keydown', (e) => {
+    if (!isShown('meetings') || mtMode !== 'minutes' || document.querySelector('dialog[open]')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); stepMeeting(e.key === 'ArrowDown' ? 1 : -1); }
+  });
+
+  // the pane
+  const pane = document.getElementById('mt-pane');
+  pane.addEventListener('click', (e) => {
+    const t = e.target;
+    const step = t.closest('[data-mt-step]');
+    if (step) return stepMeeting(+step.dataset.mtStep);
+    if (t.closest('[data-mt-extract]')) return openExtractDialog(meetingById(mtSelId));
+    if (t.closest('[data-mt-edit]')) return openMeetingDialog(meetingById(mtSelId));
+    if (t.closest('[data-act-new]')) return openActionDialog(null, { meeting_id: mtSelId });
+    const edit = t.closest('[data-act-edit]');
+    if (edit) return openActionDialog(state.actions.find(a => a.id === edit.dataset.actEdit) || null);
+    const go = t.closest('[data-raid-go]');
+    if (go) goToLink(go.dataset.raidGo);
+  });
+  pane.addEventListener('change', (e) => { if (e.target.matches('[data-act-done]')) setActionDone(e.target.dataset.actDone, e.target.checked); });
+  const split = document.getElementById('mt-split');
+  const divider = document.getElementById('mt-divider');
+  if (prefs.mtListW) split.style.setProperty('--mt-list-w', prefs.mtListW + 'px');
+  divider.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    const list = split.querySelector('.rp-list');
+    const startX = e.clientX, startW = list.getBoundingClientRect().width;
+    divider.setPointerCapture(e.pointerId);
+    document.body.classList.add('col-resizing');
+    const max = () => split.getBoundingClientRect().width - 340;
+    const move = (ev) => split.style.setProperty('--mt-list-w', Math.round(Math.min(max(), Math.max(240, startW + ev.clientX - startX))) + 'px');
+    const up = () => {
+      divider.removeEventListener('pointermove', move);
+      divider.removeEventListener('pointerup', up);
+      document.body.classList.remove('col-resizing');
+      saveAppPrefs({ mtListW: parseInt(split.style.getPropertyValue('--mt-list-w'), 10) || null });
+    };
+    divider.addEventListener('pointermove', move);
+    divider.addEventListener('pointerup', up);
+  });
+  divider.addEventListener('dblclick', () => { split.style.removeProperty('--mt-list-w'); saveAppPrefs({ mtListW: null }); });
+
+  // the actions table
+  const acts = document.getElementById('act-body');
+  acts.addEventListener('click', (e) => {
+    const t = e.target;
+    const open = t.closest('[data-mt-open]');
+    if (open) return showMeeting(open.dataset.mtOpen);
+    const go = t.closest('[data-raid-go]');
+    if (go) return goToLink(go.dataset.raidGo);
+    if (t.closest('label, input')) return;
+    const row = t.closest('[data-act]');
+    if (row) openActionDialog(state.actions.find(a => a.id === row.dataset.act) || null);
+  });
+  acts.addEventListener('change', (e) => { if (e.target.matches('[data-act-done]')) setActionDone(e.target.dataset.actDone, e.target.checked); });
+
+  // dialogs
+  const close = (id) => () => document.getElementById(id).close();
+  const backdrop = (id) => { const d = document.getElementById(id); d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); };
+  document.getElementById('meeting-form').addEventListener('submit', submitMeeting);
+  document.getElementById('meeting-form').elements.series_id.addEventListener('change', (e) => {
+    const f = document.getElementById('meeting-form').elements;
+    if (e.target.value !== 'new') return takeSeries(f, seriesById(e.target.value));
+    // A new series, set up on top of the meeting dialog; the meeting then takes it.
+    openSeriesDialog(null, (x) => { fillSeriesSelect(f.series_id, x.id); takeSeries(f, x); });
+    document.getElementById('series-dialog').addEventListener('close', () => { if (f.series_id.value === 'new') f.series_id.value = f.series_id.dataset.was || ''; }, { once: true });
+  });
+  document.getElementById('series-form').addEventListener('submit', submitSeries);
+  document.getElementById('series-form').elements.cadence.addEventListener('change', updateSeriesPreview);
+  document.getElementById('series-form').elements.start.addEventListener('input', updateSeriesPreview);
+  document.getElementById('sr-cancel').onclick = close('series-dialog');
+  document.getElementById('sr-close').onclick = close('series-dialog');
+  document.getElementById('sr-delete').onclick = deleteSeries;
+  backdrop('series-dialog');
+  document.getElementById('sl-close').onclick = close('series-list-dialog');
+  document.getElementById('sl-done').onclick = close('series-list-dialog');
+  document.getElementById('sl-new').onclick = () => openSeriesDialog(null);
+  document.getElementById('sl-body').addEventListener('click', (e) => {
+    const rec = e.target.closest('[data-series-record]');
+    if (rec) { document.getElementById('series-list-dialog').close(); return openMeetingDialog(null, { series_id: rec.dataset.seriesRecord }); }
+    const row = e.target.closest('[data-series]');
+    if (row) openSeriesDialog(seriesById(row.dataset.series));
+  });
+  backdrop('series-list-dialog');
+  document.getElementById('mt-cancel').onclick = close('meeting-dialog');
+  document.getElementById('mt-close').onclick = close('meeting-dialog');
+  document.getElementById('mt-delete').onclick = deleteMeeting;
+  backdrop('meeting-dialog');
+
+  document.getElementById('extract-form').addEventListener('submit', submitExtract);
+  document.getElementById('mx-cancel').onclick = close('extract-dialog');
+  document.getElementById('mx-close').onclick = close('extract-dialog');
+  document.getElementById('mx-more').onclick = () => { mxRows.push({ text: '', owner: '', due: '', done: false, use: true, tracked: null }); renderExtractRows(); document.querySelector('#mx-body tr:last-child input[data-mx="text"]').focus(); };
+  document.getElementById('mx-body').addEventListener('input', (e) => {
+    const k = e.target.dataset.mx;
+    if (!k) return;
+    const r = mxRows[+e.target.dataset.i];
+    r[k] = e.target.value;
+    if (k === 'text' && !r.use && r.text.trim()) { r.use = true; e.target.closest('tr').classList.remove('off'); e.target.closest('tr').querySelector('[data-mx-use]').checked = true; }
+    const n = mxRows.filter(x => x.use && x.text.trim()).length;
+    document.getElementById('mx-add').textContent = n ? `Add ${count(n, 'action', 'actions')}` : 'Add';
+    document.getElementById('mx-add').disabled = !n;
+  });
+  document.getElementById('mx-body').addEventListener('change', (e) => {
+    if (!e.target.matches('[data-mx-use]')) return;
+    mxRows[+e.target.dataset.mxUse].use = e.target.checked;
+    e.target.closest('tr').classList.toggle('off', !e.target.checked);
+    const n = mxRows.filter(x => x.use && x.text.trim()).length;
+    document.getElementById('mx-add').textContent = n ? `Add ${count(n, 'action', 'actions')}` : 'Add';
+    document.getElementById('mx-add').disabled = !n;
+  });
+  backdrop('extract-dialog');
+
+  document.getElementById('action-form').addEventListener('submit', submitAction);
+  document.getElementById('ad-cancel').onclick = close('action-dialog');
+  document.getElementById('ad-close').onclick = close('action-dialog');
+  document.getElementById('ad-delete').onclick = deleteAction;
+  document.getElementById('ad-links').addEventListener('change', (e) => {
+    if (e.target.id !== 'ad-addlink' || !e.target.value) return;
+    adLinks.push(e.target.value);
+    renderAdLinks();
+    document.getElementById('ad-addlink').focus();
+  });
+  document.getElementById('ad-links').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rdrm]');
+    if (!b) return;
+    adLinks = adLinks.filter(l => l !== b.dataset.rdrm);
+    renderAdLinks();
+    document.getElementById('ad-addlink').focus();
+  });
+  backdrop('action-dialog');
+}
+
 /* ================= find (⌘K) ================= */
 // One box to jump anywhere: any item in any workspace (by ref, title, owner or stream), a
 // workspace, or a page. Every word typed has to match; refs and the starts of titles rank first.
@@ -9776,7 +11037,7 @@ function palPages() {
   return [
     ['overview', 'Portfolio'], ['workspaces', 'Portfolio · cards'], ['dash', `Dashboard · ${ws.name}`], ['gantt', `Plan · ${ws.name}`],
     ['editor', `${T.Items} · ${ws.name}`], ['reports', `Reports · ${ws.name}`], ['due', `Reports due · ${ws.name}`], ['weekly', `Weekly updates · ${ws.name}`],
-    ['raid', `RAID · ${ws.name}`],
+    ['raid', `RAID · ${ws.name}`], ['meetings', `Meetings · ${ws.name}`], ['actions', `Meeting actions · ${ws.name}`],
     ['changes', `What changed · ${ws.name}`], ['dates', `Date log · ${ws.name}`], ['streams', `Streams · ${ws.name}`],
   ].map(([view, label]) => ({ kind: 'page', view, label, hay: label.toLowerCase() }));
 }
@@ -9806,6 +11067,16 @@ function palSearch(q) {
     const s = score(r.ref, r.title, [r.ref, r.title, r.owner, RAID_KINDS[r.kind].one, p?.code, p?.name].join(' ').toLowerCase());
     if (s >= 0) hits.push({ kind: 'raid', r, p, s: s + 0.25 });
   }
+  for (const m of state.meetings) { // minutes are searched as full text
+    const p = workspaceById(m.workspace_id);
+    const s = score('', m.title, [m.title, seriesName(m.series_id), m.attendees, m.date, m.date && fmtNice(m.date), mdToText(m.minutes), p?.code, p?.name].join(' ').toLowerCase());
+    if (s >= 0) hits.push({ kind: 'meeting', m, p, s: s + 0.3 });
+  }
+  for (const a of state.actions) {
+    const p = workspaceById(a.workspace_id);
+    const s = score(a.ref, a.text, [a.ref, a.text, a.owner, a.status, meetingById(a.meeting_id)?.title, p?.code, p?.name].join(' ').toLowerCase());
+    if (s >= 0) hits.push({ kind: 'action', a, p, s: s + 0.3 });
+  }
   return hits.sort((a, b) => a.s - b.s || (a.kind === 'item' && b.kind === 'item' ? (a.p.id === state.workspaceId ? -1 : 0) - (b.p.id === state.workspaceId ? -1 : 0) || cmpRef(a.m, b.m) : 0)).slice(0, 40);
 }
 
@@ -9822,6 +11093,12 @@ function renderPalette() {
     } else if (h.kind === 'raid') {
       main = `${h.r.ref ? `<b class="ref">${escAttr(h.r.ref)}</b> ` : ''}${escAttr(h.r.title)}`;
       sub = `<span>${escAttr([RAID_KINDS[h.r.kind].one, h.r.status, h.p.code || h.p.name, h.r.owner].filter(Boolean).join(' · '))}</span>`;
+    } else if (h.kind === 'meeting') {
+      main = `${escAttr(h.m.title)}`;
+      sub = `<span>${escAttr(['Meeting', h.m.date && fmtNice(h.m.date), seriesName(h.m.series_id), h.p.code || h.p.name].filter(Boolean).join(' · '))}</span>`;
+    } else if (h.kind === 'action') {
+      main = `${h.a.ref ? `<b class="ref">${escAttr(h.a.ref)}</b> ` : ''}${escAttr(h.a.text)}`;
+      sub = `<span>${escAttr(['Action', h.a.status, h.a.owner, h.p.code || h.p.name].filter(Boolean).join(' · '))}</span>`;
     } else if (h.kind === 'ws') {
       main = `${escAttr(h.p.name)}${h.p.code ? ` <span class="prog-code">${escAttr(h.p.code)}</span>` : ''}`;
       sub = '<span>Workspace</span>';
@@ -9855,6 +11132,8 @@ async function pickPalette(i) {
   if (h.kind === 'page') {
     if (h.view === 'due' || h.view === 'weekly') { rptMode = h.view; return switchView('reports'); }
     if (h.view === 'reports') rptMode = 'all';
+    if (h.view === 'actions') { setMeetingsMode('actions'); return switchView('meetings'); }
+    if (h.view === 'meetings') setMeetingsMode('minutes');
     return switchView(h.view);
   }
   if (h.kind === 'ws') return switchWorkspace(h.p.id, 'dash');
@@ -9862,6 +11141,16 @@ async function pickPalette(i) {
     if (h.p.id !== state.workspaceId) await switchWorkspace(h.p.id, 'raid');
     else switchView('raid');
     return openRaidDialog(h.r);
+  }
+  if (h.kind === 'meeting') {
+    if (h.p.id !== state.workspaceId) await switchWorkspace(h.p.id, 'meetings');
+    return showMeeting(h.m.id, document.getElementById('pal-q').value);
+  }
+  if (h.kind === 'action') {
+    if (h.p.id !== state.workspaceId) await switchWorkspace(h.p.id, 'meetings');
+    setMeetingsMode('actions');
+    switchView('meetings');
+    return openActionDialog(h.a);
   }
   if (h.p.id !== state.workspaceId) await switchWorkspace(h.p.id, 'gantt');
   showItemOnGantt(h.m.id);
@@ -9904,7 +11193,7 @@ function wirePalette() {
 /* ================= links ================= */
 // The address says where you are, so it can be bookmarked or sent to someone: the view, the
 // workspace and, on the Gantt chart, its search and filters — e.g.
-// #/ws/3/gantt?stream=Delivery&rag=Red,Amber&late=1. #…&item=12 opens the chart on item 12.
+// #/ws/3/gantt?stream=Delivery&rag=Red,Amber&late=1 (crit=1: only the critical path). #…&item=12 opens the chart on item 12.
 
 let routeReady = false; // until the first view is shown, nothing is written over the address
 let lastHash = '';
@@ -9923,7 +11212,9 @@ function readHash() {
   if (TYPES.includes(q.get('type'))) filter.type = q.get('type');
   if (q.get('rag')) filter.rag = q.get('rag').split(',').filter(Boolean);
   if (q.get('late') === '1') filter.late = true;
-  return { ws: m[1] ? decodeURIComponent(m[1]) : '', view: m[2], filter: m[2] === 'gantt' && Object.keys(filter).length ? filter : null, item: q.get('item') || '' };
+  if (q.get('crit') === '1') filter.crit = true;
+  return { ws: m[1] ? decodeURIComponent(m[1]) : '', view: m[2], filter: m[2] === 'gantt' && Object.keys(filter).length ? filter : null, item: q.get('item') || '',
+    meeting: m[2] === 'meetings' ? q.get('m') || '' : '', tab: m[2] === 'meetings' && q.get('tab') === 'actions' ? 'actions' : '' };
 }
 
 function writeHash() {
@@ -9939,7 +11230,12 @@ function writeHash() {
     if (f.type) q.set('type', f.type);
     if (f.rag.length) q.set('rag', f.rag.join(','));
     if (f.late) q.set('late', '1');
+    if (f.crit) q.set('crit', '1');
     if (q.toString()) h += `?${q}`;
+  }
+  if (view === 'meetings') { // the tab, and the meeting being read
+    if (mtMode === 'actions') h += '?tab=actions';
+    else if (mtSelId && meetingById(mtSelId)) h += `?m=${encodeURIComponent(mtSelId)}`;
   }
   lastHash = h; // remembered even when the address already says so, or the next typed address could be mistaken for ours
   if (h === location.hash) return;
@@ -9957,6 +11253,7 @@ async function followHash() {
     Object.assign(ganttFilter, filter);
     if (name) ganttFilter.stream = streamIdFor(state.workspaceId, name, false) || name;
   }
+  if (link.view === 'meetings') { setMeetingsMode(link.tab || 'minutes'); if (link.meeting) mtSelId = link.meeting; }
   switchView(link.view);
   if (link.item && itemById(link.item)) showItemOnGantt(link.item);
 }
@@ -10058,7 +11355,7 @@ function svgToPNG(svg, w, h) {
 
 /* ================= wiring ================= */
 
-const VIEWS = ['overview', 'workspaces', 'dash', 'gantt', 'editor', 'reports', 'raid', 'changes', 'dates', 'streams'];
+const VIEWS = ['overview', 'workspaces', 'dash', 'gantt', 'editor', 'reports', 'raid', 'meetings', 'changes', 'dates', 'streams'];
 const APP_VIEWS = ['overview', 'workspaces']; // views across every workspace
 const isShown = (view) => !document.getElementById(`view-${view}`).classList.contains('hidden');
 const currentView = () => VIEWS.find(isShown) || 'gantt';
@@ -10082,6 +11379,7 @@ function switchView(view) {
   else if (view === 'changes') renderChanges();
   else if (view === 'dates') renderDates();
   else if (view === 'raid') renderRaid();
+  else if (view === 'meetings') renderMeetings();
   else renderWorkspaces();
   for (const v of VIEWS) document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
   document.querySelectorAll('.nav-item[data-view]').forEach(b => {
@@ -10171,6 +11469,7 @@ function wireEvents() {
   wireOverview();
   wireRaid();
   wireRaidImport();
+  wireMeetings();
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
@@ -10199,6 +11498,7 @@ function wireEvents() {
   document.getElementById('toggle-today').onchange = (e) => { state.showToday = e.target.checked; renderGantt(); };
   document.getElementById('link-mode').onchange = (e) => { state.linkMode = e.target.value; saveAppPrefs({ linkMode: state.linkMode }); renderGantt(); };
   document.getElementById('toggle-baseline').onchange = (e) => { state.showBaseline = e.target.checked; saveAppPrefs({ showBaseline: state.showBaseline }); renderGantt(); };
+  document.getElementById('toggle-critical').onchange = (e) => { state.showCritical = e.target.checked; saveAppPrefs({ showCritical: state.showCritical }); renderGantt(); };
   document.getElementById('fold-all').onclick = () => foldAllStreams(true);
   document.getElementById('unfold-all').onclick = () => foldAllStreams(false);
   document.getElementById('baseline-set').onclick = () => setBaseline(true);
@@ -10403,6 +11703,7 @@ async function loadConfig() {
   applyTheme();
   if (['all', 'hover', 'none'].includes(prefs.linkMode)) state.linkMode = prefs.linkMode;
   if (prefs.showBaseline === false) state.showBaseline = false;
+  if (prefs.showCritical === true) state.showCritical = true;
   wireEvents();
   await loadConfig();
   const linked = readHash()?.ws;
@@ -10420,6 +11721,7 @@ async function loadConfig() {
   applyWorkspaceChrome();
   const link = readHash();
   if (link?.filter) Object.assign(ganttFilter, link.filter);
+  if (link?.view === 'meetings') { setMeetingsMode(link.tab || 'minutes'); if (link.meeting) mtSelId = link.meeting; }
   switchView(link?.view || (VIEWS.includes(prefs.view) ? prefs.view : 'dash'));
   setTimescale(prefs.timescale); // Quarters fits; the ResizeObserver keeps it fitted as layout settles
   if (link?.item && itemById(link.item)) requestAnimationFrame(() => showItemOnGantt(link.item)); // after the fit, so the card lands beside the item

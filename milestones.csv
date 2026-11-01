@@ -1,5 +1,5 @@
 id,workspace_id,ref,title,type,description,stream_id,substream,owner,start,end,rag,parent,depends_on,baseline_start,baseline_end,gitlab_url,use_case_url
-1,1,1.1,Project Kickoff,milestone,Initial mobilisation and team onboarding,2,Governance,Sarah Patel,2026-01-12,2026-01-12,Green,,,,,,
+1,1,1.1,Project Kickoff,milestone,Initial mobilisation and team onboarding,3,Governance,Priya Shah,2026-01-12,2026-01-12,Green,,,,,,
 2,1,1.2,Requirements Gathering,task,Workshops with business stakeholders,1,Governance,Sarah Patel,2026-01-13,2026-02-05,Complete,3,1,,,https://gitlab.example.com/platform/requirements,https://wiki.example.com/use-cases/2
 3,1,1.3,Requirements Signed Off,milestone,Business requirements baselined with stakeholders,1,Governance,Sarah Patel,2026-02-06,2026-02-06,Complete,,,,,,https://wiki.example.com/use-cases/3
 4,1,2.1,Solution Architecture,task,Design the target solution architecture,3,Architecture,Tom Reed,2026-02-09,2026-02-27,Complete,5,3,,,,https://wiki.example.com/use-cases/4
@@ -10,7 +10,7 @@ id,workspace_id,ref,title,type,description,stream_id,substream,owner,start,end,r
 9,1,3.2,Vendor Contract Signed,milestone,Commercial terms agreed with implementation partner,4,Procurement,James Okoro,2026-04-24,2026-04-24,Complete,,,,,,
 10,1,4.1,Build Phase 1,task,Core platform features,5,Build,Lucy Chen,2026-04-30,2026-06-11,Red,11,5;9,,,,
 11,1,4.2,Build Phase 1 Complete,milestone,Core platform features code complete,5,Build,Lucy Chen,2026-06-11,2026-06-11,Complete,,,,,,
-12,1,4.3,Build Phase 2,task,Integrations and reporting,5,Build,Lucy Chen,2026-06-11,2026-08-17,Green,13,11,,,,
+12,1,4.3,Build Phase 2,task,Integrations and reporting,5,Build,Lucy Chen,2026-06-11,2026-08-17,Complete,13,11,,,,
 13,1,4.4,Build Phase 2 Complete,milestone,All features code complete,5,Build,Lucy Chen,2026-08-17,2026-08-17,Complete,,,,,,
 14,1,4.5,Integration Testing,task,End-to-end integration testing,5,Test,Mark Evans,2026-06-11,2026-08-10,Complete,16,11,,,,
 15,1,4.6,Security Pen Test,task,Independent penetration test of the platform,5,Test,Mark Evans,2026-07-06,2026-07-17,Complete,16,11,,,,
@@ -36,3 +36,4 @@ id,workspace_id,ref,title,type,description,stream_id,substream,owner,start,end,r
 35,2,4.1,Staff Communications,task,"Briefings, building tours and move-day guides",10,Change,Maya Clarke,2026-09-07,2026-12-11,Green,,,,,,
 36,2,4.2,Move Weekend,task,"Crates packed, moved and unpacked",10,Move,Daniel Wright,2026-12-12,2026-12-13,Not Started,37,34,,,,
 37,2,4.3,Office Open,milestone,Staff working from the new head office,10,Move,Daniel Wright,2026-12-14,2026-12-14,Not Started,,,,,,
+39,3,,Decom,milestone,,11,,,2027-12-31,2027-12-31,Not Started,,,,,,

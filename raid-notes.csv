@@ -2,3 +2,7 @@ id,workspace_id,raid_id,at,by,text
 1,1,2,2026-10-20T10:24:30.083Z,,Extract delayed: legacy team waiting on DBA access. Escalated to programme board.
 2,1,2,2026-10-20T10:24:43.911Z,,DBA access granted; first extract due Friday.
 4,1,1,2026-10-20T13:16:31.765Z,,fdsdfsfd
+6,1,2,2026-10-30T19:16:17.518Z,,This is a status update
+9,1,1,2026-10-30T19:26:31.415Z,,Happened — became issue I1.
+10,1,4,2026-10-30T19:26:31.415Z,,"Raised from risk R1, rated High (likelihood High, impact Medium).
+Mitigation was: Weekly check-ins with supplier; fallback extract script prepared"
