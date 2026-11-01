@@ -7559,7 +7559,7 @@ function downloadOverviewCSV(forStream) {
 /* ================= dashboard ================= */
 // One page that answers "how is this workspace doing?", in order of what people come for: the
 // headline (RAG, progress against the time that's gone, the latest weekly update), what needs
-// attention, the quieter counts, one chart card with a tab per way of slicing the plan (by RAG,
+// attention, the headline counts, one chart card with a tab per way of slicing the plan (by RAG,
 // stream, owner and month, the weekly RAG record, movement against the baseline), then what's
 // coming up, the open risks, meeting actions and the latest reports. Every number is a way in — it opens the Gantt chart, the register or the
 // reports showing just those things — and every chart has a table twin (the Table toggle), so
@@ -7623,7 +7623,7 @@ function renderDash() {
   const sel = document.getElementById('dash-horizon');
   sel.innerHTML = DASH_HORIZONS.map(n => `<option value="${n}" ${n === dashHorizon ? 'selected' : ''}>Next ${n} days</option>`).join('');
   document.getElementById('dash-asof').textContent = `${count(items.length, T.item, T.items)} · ${fmtNice(today)}`;
-  const cards = [dashSummary(p, items, rg), dashAttention(p, items), dashCounts(p, items)];
+  const cards = [dashSummary(p, items, rg), dashTiles(p, items), dashAttention(p, items)];
   if (items.length) {
     cards.push(dashCharts(p, items, rg), dashComing(items), dashRisks(p), dashActions());
     if (!reportsOff()) cards.push(dashReports());
@@ -7707,32 +7707,41 @@ function dashAttention(p, items) {
   const body = rows.length ? `<ul class="dash-att">${rows.map(r => `<li>${dashBtn(`dash-att-row tone-${r.tone}`, r.go, null,
       `<span class="dash-att-n">${r.n}</span><span class="dash-att-t"><b>${r.what}</b><small>${r.detail}</small></span><span class="dash-att-go" aria-hidden="true">›</span>`)}</li>`).join('')}</ul>`
     : `<p class="dash-all-clear">Nothing needs attention: nothing overdue, blocked or rated High.</p>`;
-  return dashCard('attention', 'Needs attention', rows.length ? count(rows.length, 'thing', 'things') : '', body, { span: 7 });
+  return dashCard('attention', 'Needs attention', rows.length ? count(rows.length, 'thing', 'things') : '', body, { span: 5 });
 }
 
-// The quieter counts, each a way in.
-function dashCounts(p, items) {
+// Headline counts, each a way in.
+function dashTiles(p, items) {
   const open = items.filter(m => !isDoneStatus(m.status));
   const ms = items.filter(m => !isTask(m));
   const closed = ms.filter(m => isDoneStatus(m.status)).length;
   const doneNames = STATUSES.filter(st => isDoneStatus(st));
+  const late = open.filter(isLate), lateStart = open.filter(isLateStart);
   const horizon = addDays(todayISO(), dashHorizon);
   const soon = open.filter(m => m.end >= todayISO() && m.end <= horizon);
   const raid = raidOf().filter(r => !isClosed(r));
-  const ri = raid.filter(r => r.kind !== 'dependency').length, deps = raid.filter(r => r.kind === 'dependency').length;
-  const openActs = actionsOf().filter(a => !isActionDone(a)).length;
-  const row = (key, label, value, sub, go, extra = '') => `<li>${dashBtn('dash-count', go, null,
-    `<span class="dash-count-l">${label}${sub ? `<small>${sub}</small>` : ''}</span>${extra}<span class="dash-count-v">${value}</span>`, `id="dash-count-${key}"`)}</li>`;
-  const body = `<ul class="dash-counts">
-    ${row('closed', `${T.Milestones} closed`, `${closed}<small>/${ms.length}</small>`, ms.length ? `${pct(closed, ms.length)}%` : '', { k: 'gantt', type: 'milestone', rag: doneNames },
-      ms.length ? `<span class="dv-meter dv-meter-sm"><i class="dv-meter-fill" style="width:${pct(closed, ms.length)}%"></i></span>` : '')}
-    ${row('soon', `Due in ${dashHorizon} days`, soon.length, soon.length ? `${count(soon.filter(m => !isTask(m)).length, T.milestone, T.milestones)}, ${count(soon.filter(isTask).length, T.task, T.tasks)}` : '', { k: 'scroll', card: 'coming' })}
-    ${row('raid', 'Open risks & issues', ri, '', { k: 'raid' })}
-    ${row('deps', 'Open dependencies', deps, '', { k: 'raid', kind: 'dependency' })}
-    ${row('actions', 'Open actions', openActs, '', { k: 'meetings', tab: 'actions' })}
-    ${row('dates', 'Date changes', '<span class="dash-tile-wait">…</span>', 'last 30 days', { k: 'view', view: 'dates' })}
-  </ul>`;
-  return dashCard('counts', 'In numbers', '', body, { span: 5 });
+  const ri = raid.filter(r => r.kind !== 'dependency'), deps = raid.filter(r => r.kind === 'dependency');
+  const high = ri.filter(r => raidRating(r).level === 'High').length;
+  const blocked = deps.filter(r => r.status === 'Blocked').length, atRisk = deps.filter(r => r.status === 'At risk').length;
+  const due = reportsOff() ? null : reportsDue().length;
+  const openActs = actionsOf().filter(a => !isActionDone(a)), lateActs = openActs.filter(actionOverdue).length;
+  const tile = (key, label, value, sub, go, tone = '', extra = '') => dashBtn(`dash-tile${tone ? ` tone-${tone}` : ''}`, go, null,
+    `<span class="dash-tile-l">${label}</span><span class="dash-tile-v">${value}</span>${sub ? `<span class="dash-tile-s">${sub}</span>` : ''}${extra}`, `id="dash-tile-${key}"`);
+  const tiles = [
+    tile('closed', `${T.Milestones} closed`, `${closed}<small>/${ms.length}</small>`, ms.length ? `${pct(closed, ms.length)}% of them` : `No ${T.milestones} yet`,
+      { k: 'gantt', type: 'milestone', rag: doneNames }, '', `<span class="dv-meter dv-meter-sm"><i class="dv-meter-fill" style="width:${pct(closed, ms.length)}%"></i></span>`),
+    tile('late', 'Overdue', late.length, lateStart.length ? `+ ${count(lateStart.length, 'late start', 'late starts')}` : late.length ? 'past their end date' : 'Nothing overdue',
+      { k: 'gantt', late: true }, late.length ? 'bad' : 'good'),
+    tile('soon', `Due in ${dashHorizon} days`, soon.length, soon.length ? `${count(soon.filter(m => !isTask(m)).length, T.milestone, T.milestones)}, ${count(soon.filter(isTask).length, T.task, T.tasks)}` : 'Nothing falls due', { k: 'scroll', card: 'coming' }),
+    due == null ? '' : tile('due', 'Reports due', due, due ? 'for this period' : 'All reported', { k: 'reports', mode: 'due' }, due ? 'warn' : 'good'),
+    tile('raid', 'Open risks & issues', ri.length, high ? `${count(high, 'rated High', 'rated High')}` : ri.length ? 'none rated High' : 'Register is clear', { k: 'raid' }, high ? 'bad' : ''),
+    tile('deps', 'Open dependencies', deps.length, blocked || atRisk ? [blocked && `${blocked} blocked`, atRisk && `${atRisk} at risk`].filter(Boolean).join(' · ') : deps.length ? 'none blocked' : 'None open',
+      { k: 'raid', kind: 'dependency' }, blocked ? 'bad' : atRisk ? 'warn' : ''),
+    tile('actions', 'Open actions', openActs.length, lateActs ? count(lateActs, 'overdue', 'overdue') : openActs.length ? 'none overdue' : state.meetings.some(m => m.workspace_id === p.id) ? 'All done' : 'No meetings yet',
+      { k: 'meetings', tab: 'actions' }, lateActs ? 'bad' : ''),
+    tile('dates', 'Date changes', '<span class="dash-tile-wait">…</span>', 'in the last 30 days', { k: 'view', view: 'dates' }),
+  ];
+  return `<div class="dash-tiles" style="--span:12">${tiles.join('')}</div>`;
 }
 
 // The charts share one card: a tab for each way of slicing the plan. A tab with nothing to show
@@ -7748,7 +7757,7 @@ function dashCharts(p, items, rg) {
   const lead = `<div class="dash-tabs" role="tablist" aria-label="Chart">${tabs.map(([k, label]) =>
     `<button type="button" role="tab" class="dash-tab${k === tab ? ' on' : ''}" data-dash-tab="${k}" aria-selected="${k === tab}">${label}</button>`).join('')}</div>`;
   const missing = [!charts.slip && `No baseline yet: set one on the plan to see how far ${T.items} have moved.`, !charts.weekly && 'No weekly updates yet.'].filter(Boolean);
-  return dashCard('charts', '', c.sub, c.body + (missing.length ? `<p class="dash-more dash-missing">${missing.join(' ')}</p>` : ''), { span: 8, table: c.table, lead });
+  return dashCard('charts', '', c.sub, c.body + (missing.length ? `<p class="dash-more dash-missing">${missing.join(' ')}</p>` : ''), { span: 7, table: c.table, lead });
 }
 
 // Where the items stand: a stacked bar per kind of item, by RAG.
@@ -7885,7 +7894,7 @@ function dashComing(items) {
        <small>${escAttr(typeName(m))} · ${fmtShort(m.end)}${m.owner ? ` · ${escAttr(m.owner)}` : ''}${streamName(m.stream_id) ? ` · ${escAttr(streamName(m.stream_id))}` : ''}</small>`)}</li>`).join('')}</ul>
     ${list.length > shown.length ? `<p class="dash-more">${list.length - shown.length} more within ${dashHorizon} days.</p>` : ''}`
     : dashEmpty(`Nothing falls due in the next ${dashHorizon} days.`);
-  return dashCard('coming', 'Coming up', `${list.length} due in ${dashHorizon} days`, body, { span: 4 });
+  return dashCard('coming', 'Coming up', `${list.length} due in ${dashHorizon} days`, body, { span: 3 });
 }
 
 // The open risks, issues and dependencies that matter most: by rating, then by due date.
@@ -7897,7 +7906,7 @@ function dashRisks(p) {
        <small>${raidStatusBadge(r)}${r.owner ? ` · ${escAttr(r.owner)}` : ''}${r.due ? ` · <span class="${raidOverdue(r) ? 'dv-late-text' : ''}">due ${fmtShort(r.due)}</span>` : ''}</small>`)}</li>`).join('')}</ul>`
     : dashEmpty('No open risks, issues or dependencies.');
   return dashCard('risks', 'Risks, issues & dependencies', count(open.length, 'open', 'open'), body,
-    { span: 4, actions: dashBtn('btn btn-sm', { k: 'raid' }, null, 'Register') });
+    { span: 3, actions: dashBtn('btn btn-sm', { k: 'raid' }, null, 'Register') });
 }
 
 // Open actions from meetings, soonest due first.
@@ -7909,7 +7918,7 @@ function dashActions() {
        <small>${escAttr([a.owner, meetingById(a.meeting_id)?.title].filter(Boolean).join(' · ')) || 'No owner'}${a.due ? ` · <span class="${actionOverdue(a) ? 'dv-late-text' : ''}">due ${fmtShort(a.due)}</span>` : ''}</small>`)}</li>`).join('')}</ul>`
     : dashEmpty(state.meetings.some(m => m.workspace_id === state.workspaceId) ? 'No open actions.' : 'No meetings recorded yet.');
   return dashCard('actions', 'Meeting actions', count(open.length, 'open', 'open'), body,
-    { span: 4, actions: dashBtn('btn btn-sm', { k: 'meetings', tab: 'actions' }, null, 'All actions') });
+    { span: 3, actions: dashBtn('btn btn-sm', { k: 'meetings', tab: 'actions' }, null, 'All actions') });
 }
 
 // The reports written most recently.
@@ -7920,22 +7929,22 @@ function dashReports() {
        <small>${r.cadence} · period ending ${fmtShort(r.period_end)}${r.author ? ` · ${escAttr(r.author)}` : ''}</small>`)}</li>`).join('')}</ul>`
     : dashEmpty('No reports yet.');
   return dashCard('reports', 'Latest reports', count(state.reports.length, 'report', 'reports'), body,
-    { span: 4, actions: dashBtn('btn btn-sm', { k: 'view', view: 'reports' }, null, 'All reports') });
+    { span: 3, actions: dashBtn('btn btn-sm', { k: 'view', view: 'reports' }, null, 'All reports') });
 }
 
 // The Date changes count fills in once the date log has loaded (it's fetched, not held in memory).
 function dashDateChanges() {
   loadDateLog().then(() => {
-    const el = document.querySelector('#dash-count-dates .dash-count-v');
+    const el = document.querySelector('#dash-tile-dates .dash-tile-v');
     if (!el || !isShown('dash')) return;
     const since = addDays(todayISO(), -30);
     const rows = dlRows.filter(r => r.workspace_id === state.workspaceId && r.at.slice(0, 10) >= since && ['Changed', 'Knock-on'].includes(r.action));
     const saves = new Set(rows.map(r => `${r.at}|${r.item_id}`)), items = new Set(rows.map(r => r.item_id));
     const knock = new Set(rows.filter(r => r.action === 'Knock-on').map(r => `${r.at}|${r.item_id}`)).size;
     el.textContent = saves.size;
-    el.parentElement.querySelector('.dash-count-l small').textContent = saves.size ? `last 30 days, on ${count(items.size, T.item, T.items)}${knock ? ` (${knock} knock-on)` : ''}` : 'last 30 days';
+    el.nextElementSibling.textContent = saves.size ? `in 30 days, on ${count(items.size, T.item, T.items)}${knock ? ` (${knock} knock-on)` : ''}` : 'in the last 30 days';
   }).catch(() => {
-    const el = document.querySelector('#dash-count-dates .dash-count-v');
+    const el = document.querySelector('#dash-tile-dates .dash-tile-v');
     if (el) el.textContent = '—';
   });
 }
