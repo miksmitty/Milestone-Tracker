@@ -7557,10 +7557,11 @@ function downloadOverviewCSV(forStream) {
 }
 
 /* ================= dashboard ================= */
-// One page that answers "how is this workspace doing?": progress against the time that's gone,
-// what's overdue and what's coming up, where the items stand by RAG and by stream, the weekly RAG
-// record, movement against the baseline, the milestones ahead month by month, the open risks and
-// the latest reports. Every number is a way in — it opens the Gantt chart, the register or the
+// One page that answers "how is this workspace doing?", in order of what people come for: the
+// headline (RAG, progress against the time that's gone, the latest weekly update), what needs
+// attention, the quieter counts, one chart card with a tab per way of slicing the plan (by RAG,
+// stream, owner and month, the weekly RAG record, movement against the baseline), then what's
+// coming up, the open risks, meeting actions and the latest reports. Every number is a way in — it opens the Gantt chart, the register or the
 // reports showing just those things — and every chart has a table twin (the Table toggle), so
 // nothing depends on colour alone. The charts use the workspace's own RAG colours for RAG, and
 // one blue/red pair for early/late.
@@ -7592,10 +7593,10 @@ function dashProgress(items) {
 }
 
 // A card: title, a note, the body and, when it has one, a table twin behind the Table toggle.
-function dashCard(key, title, sub, body, { span = 6, table = null, actions = '', cls = '' } = {}) {
+function dashCard(key, title, sub, body, { span = 6, table = null, actions = '', cls = '', lead = '' } = {}) {
   const tbl = dashTables.has(key);
   return `<section class="dash-card ${cls}" style="--span:${span}" id="dash-${key}">
-    <div class="dash-head"><h2>${title}</h2>${sub ? `<span class="dash-sub">${sub}</span>` : ''}
+    <div class="dash-head">${lead}${title ? `<h2>${title}</h2>` : ''}${sub ? `<span class="dash-sub">${sub}</span>` : ''}
       <span class="dash-act">${actions}${table ? `<button type="button" class="dash-tbtn${tbl ? ' on' : ''}" data-dash-table="${key}" aria-pressed="${tbl}" title="Show the numbers as a table">Table</button>` : ''}</span></div>
     ${table ? `<div class="dash-chart" ${tbl ? 'hidden' : ''}>${body}</div><div class="dash-tbl" ${tbl ? '' : 'hidden'}>${table}</div>` : body}
   </section>`;
@@ -7622,10 +7623,9 @@ function renderDash() {
   const sel = document.getElementById('dash-horizon');
   sel.innerHTML = DASH_HORIZONS.map(n => `<option value="${n}" ${n === dashHorizon ? 'selected' : ''}>Next ${n} days</option>`).join('');
   document.getElementById('dash-asof').textContent = `${count(items.length, T.item, T.items)} · ${fmtNice(today)}`;
-  const cards = [dashGlance(p, rg), dashHero(items), dashTiles(p, items)];
+  const cards = [dashSummary(p, items, rg), dashAttention(p, items), dashCounts(p, items)];
   if (items.length) {
-    cards.push(dashStand(items, rg), dashStreams(p, items, rg), dashWeekly(p, rg), dashSlip(items), dashMonths(items, rg), dashOwners(items),
-      dashComing(items), dashRisks(p), dashActions());
+    cards.push(dashCharts(p, items, rg), dashComing(items), dashRisks(p), dashActions());
     if (!reportsOff()) cards.push(dashReports());
   }
   document.getElementById('dash-grid').innerHTML = cards.join('')
@@ -7635,75 +7635,120 @@ function renderDash() {
 
 /* ---- the cards ---- */
 
-// The workspace at a glance: its overall RAG and trend, who runs it, its dates and the latest weekly update.
-function dashGlance(p, rg) {
+// The headline: the workspace's RAG, trend and people, the progress against the time that's gone,
+// and the latest weekly update, side by side.
+function dashSummary(p, items, rg) {
   const [cur] = updatesFor(p.id);
   const stale = isStale(cur);
   const meta = [['Owner', p.owner], ['Lead', p.lead], ['Dates', p.start || p.end ? `${p.start ? fmtShort(p.start) : '…'} – ${p.end ? fmtNice(p.end) : '…'}` : '']]
     .filter(([, v]) => v).map(([k, v]) => `<div><dt>${k}</dt><dd>${escAttr(v)}</dd></div>`).join('');
-  const update = cur
-    ? `<div class="dash-update${stale ? ' stale' : ''}">
-        <div class="dash-update-head">${statusPill(cur.status, rg.map)} <span>w/e ${fmtShort(cur.week_ending)}${cur.author ? ` · ${escAttr(cur.author)}` : ''}</span>
-          ${stale ? '<em class="dash-stale">No update this week</em>' : ''}</div>
-        ${cur.summary ? `<div class="md dash-md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No summary</span>'}</div>`
-    : `<div class="dash-update stale"><em class="dash-stale">No weekly update yet</em></div>`;
-  return dashCard('glance', escAttr(p.name), p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : '', `
-    <div class="dash-glance-top">${statusPill(p.status, rg.map)} ${trendBadge(p.trend)}${p.description ? `<p class="dash-desc">${escAttr(p.description)}</p>` : ''}</div>
-    ${meta ? `<dl class="dash-meta">${meta}</dl>` : ''}
-    <div class="dash-update-label">Latest weekly update</div>${update}`,
-  { span: 7, actions: dashBtn('btn btn-sm', { k: 'update' }, null, 'Weekly update') });
-}
+  const who = `<div class="dash-sum-col">
+      <div class="dash-glance-top">${statusPill(p.status, rg.map)} ${trendBadge(p.trend)}</div>
+      ${p.description ? `<p class="dash-desc">${escAttr(p.description)}</p>` : ''}
+      ${meta ? `<dl class="dash-meta">${meta}</dl>` : ''}</div>`;
 
-// The one number the page leads with: how much of the work is done, against how much of the time has gone.
-function dashHero(items) {
   const g = dashProgress(items);
+  let progress;
   if (g.pct == null) {
-    return dashCard('hero', 'Progress', '', dashEmpty(g.tasks ? `The ${T.tasks} have no dates yet, so there’s nothing to measure.` : `Progress is measured from ${T.tasks}; this workspace has none yet.`), { span: 5, cls: 'dash-hero' });
+    progress = `<div class="dash-sum-col dash-hero"><div class="dash-sum-label">Progress</div>${dashEmpty(g.tasks ? `The ${T.tasks} have no dates yet, so there’s nothing to measure.` : `Progress is measured from ${T.tasks}; this workspace has none yet.`)}</div>`;
+  } else {
+    const diff = g.elapsed == null ? null : g.pct - g.elapsed;
+    const verdict = diff == null ? '' : diff >= 5 ? `<b class="ok">Ahead of the plan</b> by ${diff} points` : diff <= -5 ? `<b class="ra">Behind the plan</b> by ${-diff} points` : `<b>On pace</b> with the plan`;
+    progress = `<div class="dash-sum-col dash-hero">
+      <div class="dash-sum-label">Progress <span>${count(g.tasks, T.task, T.tasks)}</span></div>
+      <div class="dash-hero-row"><span class="dash-hero-n">${g.pct}%</span><span class="dash-hero-of">of the work complete<br><small>${g.doneDays} of ${g.totalDays} ${T.task}-days</small></span></div>
+      ${verdict ? `<div class="dash-verdict">${verdict}</div>` : ''}
+      <div class="dv-meter" role="img" aria-label="${escAttr(`${g.pct}% complete; ${g.elapsed ?? 0}% of the time has gone`)}">
+        <i class="dv-meter-fill" style="width:${g.pct}%"></i>${g.elapsed != null ? `<i class="dv-meter-mark" style="left:${g.elapsed}%" title="Today: ${g.elapsed}% of the plan’s time has gone"></i>` : ''}
+      </div>
+      ${g.elapsed != null ? `<div class="dash-hero-foot"><span><b>${g.elapsed}%</b> of the time has passed <span class="muted">· ${fmtShort(g.first)} – ${fmtNice(g.last)}</span></span></div>` : ''}</div>`;
   }
-  const diff = g.elapsed == null ? null : g.pct - g.elapsed;
-  const why = `${g.pct}% of the work is done and ${g.elapsed}% of the plan’s time has passed`;
-  const verdict = diff == null ? '' : diff >= 5 ? `<b class="ok" title="${escAttr(why)}">Ahead of the plan</b> by ${diff} points` : diff <= -5 ? `<b class="ra" title="${escAttr(why)}">Behind the plan</b> by ${-diff} points` : `<b title="${escAttr(why)}">On pace</b> with the plan`;
-  return dashCard('hero', 'Progress', `${count(g.tasks, T.task, T.tasks)}`, `
-    <div class="dash-hero-row"><span class="dash-hero-n">${g.pct}%</span><span class="dash-hero-of">of the work complete<br><small>${g.doneDays} of ${g.totalDays} ${T.task}-days</small></span></div>
-    <div class="dv-meter" role="img" aria-label="${escAttr(`${g.pct}% complete; ${g.elapsed ?? 0}% of the time has gone`)}">
-      <i class="dv-meter-fill" style="width:${g.pct}%"></i>${g.elapsed != null ? `<i class="dv-meter-mark" style="left:${g.elapsed}%" title="Today: ${g.elapsed}% of the plan’s time has gone"></i>` : ''}
-    </div>
-    <div class="dash-hero-foot">${g.elapsed != null ? `<span><b>${g.elapsed}%</b> of the plan’s time has passed <span class="muted">· ${fmtShort(g.first)} – ${fmtNice(g.last)}</span></span>` : ''}<span>${verdict}</span></div>`,
-  { span: 5, cls: 'dash-hero' });
+
+  const update = cur
+    ? `<div class="dash-update">
+        <div class="dash-update-head">${statusPill(cur.status, rg.map)} <span>w/e ${fmtShort(cur.week_ending)}${cur.author ? ` · ${escAttr(cur.author)}` : ''}</span></div>
+        ${cur.summary ? `<div class="md dash-md">${mdToHtml(cur.summary)}</div>` : '<span class="muted">No summary</span>'}</div>`
+    : `<p class="dash-empty">No weekly update yet.</p>`;
+  const latest = `<div class="dash-sum-col"><div class="dash-sum-label">Latest weekly update${stale && cur ? ' <em class="dash-stale">not this week’s</em>' : ''}</div>${update}</div>`;
+
+  return dashCard('summary', escAttr(p.name), p.code ? `<span class="prog-code">${escAttr(p.code)}</span>` : '',
+    `<div class="dash-sum">${who}${progress}${latest}</div>`,
+    { span: 12, cls: 'dash-summary', actions: dashBtn('btn btn-sm', { k: 'update' }, null, 'Weekly update') });
 }
 
-// Headline counts, each a way in.
-function dashTiles(p, items) {
+// What needs someone's attention, worst first: one row per kind of trouble, with the first few
+// examples, each a way in. Only what's actually wrong is listed.
+function dashAttention(p, items) {
+  const open = items.filter(m => !isDoneStatus(m.status));
+  const late = open.filter(isLate).sort((a, b) => a.end.localeCompare(b.end) || cmpRef(a, b)), lateStart = open.filter(isLateStart);
+  const raid = raidOf().filter(r => !isClosed(r));
+  const high = raid.filter(r => r.kind !== 'dependency' && raidRating(r).level === 'High');
+  const deps = raid.filter(r => r.kind === 'dependency');
+  const blocked = deps.filter(r => r.status === 'Blocked'), atRisk = deps.filter(r => r.status === 'At risk');
+  const lateActs = actionsOf().filter(a => !isActionDone(a) && actionOverdue(a)).sort(actionOrder);
+  const due = reportsOff() ? [] : reportsDue();
+  const [cur] = updatesFor(p.id);
+  const names = (list, label, more = '') => {
+    const shown = list.slice(0, 3).map(label);
+    return escAttr(shown.join(' · ')) + (list.length > shown.length ? ` <span class="muted">+${list.length - shown.length} more</span>` : '') + more;
+  };
+  const itemLabel = (m) => m.ref || m.title;
+  const rows = [
+    late.length && { tone: 'bad', n: late.length, what: `${late.length === 1 ? T.item : T.items} past ${late.length === 1 ? 'its' : 'their'} end date`, go: { k: 'gantt', late: true },
+      detail: names(late, m => `${itemLabel(m)} (${daysWord(daysBetween(m.end, todayISO()))})`, lateStart.length ? ` <span class="muted">· and ${count(lateStart.length, 'late start', 'late starts')}</span>` : '') },
+    !late.length && lateStart.length && { tone: 'warn', n: lateStart.length, what: `${lateStart.length === 1 ? T.task : T.tasks} not started on time`, go: { k: 'gantt', late: true }, detail: names(lateStart, itemLabel) },
+    blocked.length && { tone: 'bad', n: blocked.length, what: blocked.length === 1 ? 'dependency blocked' : 'dependencies blocked', go: { k: 'raid', kind: 'dependency' }, detail: names(blocked, r => r.ref ? `${r.ref} ${r.title}` : r.title) },
+    high.length && { tone: 'bad', n: high.length, what: `${high.length === 1 ? 'risk or issue' : 'risks and issues'} rated High`, go: { k: 'raid' }, detail: names(high, r => r.ref ? `${r.ref} ${r.title}` : r.title) },
+    lateActs.length && { tone: 'bad', n: lateActs.length, what: `meeting ${lateActs.length === 1 ? 'action' : 'actions'} overdue`, go: { k: 'meetings', tab: 'actions' }, detail: names(lateActs, a => a.ref ? `${a.ref} ${a.text}` : a.text) },
+    atRisk.length && { tone: 'warn', n: atRisk.length, what: atRisk.length === 1 ? 'dependency at risk' : 'dependencies at risk', go: { k: 'raid', kind: 'dependency' }, detail: names(atRisk, r => r.ref ? `${r.ref} ${r.title}` : r.title) },
+    due.length && { tone: 'warn', n: due.length, what: `${due.length === 1 ? 'report' : 'reports'} due for this period`, go: { k: 'reports', mode: 'due' }, detail: names(due, d => itemLabel(d.m)) },
+    isStale(cur) && { tone: 'warn', n: '!', what: cur ? 'No weekly update this week' : 'No weekly update yet', go: { k: 'update' }, detail: cur ? `The last was for w/e ${fmtShort(cur.week_ending)}` : 'Record one with <b>Weekly update</b>' },
+  ].filter(Boolean);
+  const body = rows.length ? `<ul class="dash-att">${rows.map(r => `<li>${dashBtn(`dash-att-row tone-${r.tone}`, r.go, null,
+      `<span class="dash-att-n">${r.n}</span><span class="dash-att-t"><b>${r.what}</b><small>${r.detail}</small></span><span class="dash-att-go" aria-hidden="true">›</span>`)}</li>`).join('')}</ul>`
+    : `<p class="dash-all-clear">Nothing needs attention: nothing overdue, blocked or rated High.</p>`;
+  return dashCard('attention', 'Needs attention', rows.length ? count(rows.length, 'thing', 'things') : '', body, { span: 7 });
+}
+
+// The quieter counts, each a way in.
+function dashCounts(p, items) {
   const open = items.filter(m => !isDoneStatus(m.status));
   const ms = items.filter(m => !isTask(m));
   const closed = ms.filter(m => isDoneStatus(m.status)).length;
   const doneNames = STATUSES.filter(st => isDoneStatus(st));
-  const late = open.filter(isLate), lateStart = open.filter(isLateStart);
   const horizon = addDays(todayISO(), dashHorizon);
   const soon = open.filter(m => m.end >= todayISO() && m.end <= horizon);
   const raid = raidOf().filter(r => !isClosed(r));
-  const ri = raid.filter(r => r.kind !== 'dependency'), deps = raid.filter(r => r.kind === 'dependency');
-  const high = ri.filter(r => raidRating(r).level === 'High').length;
-  const blocked = deps.filter(r => r.status === 'Blocked').length, atRisk = deps.filter(r => r.status === 'At risk').length;
-  const due = reportsOff() ? null : reportsDue().length;
-  const openActs = actionsOf().filter(a => !isActionDone(a)), lateActs = openActs.filter(actionOverdue).length;
-  const tile = (key, label, value, sub, go, tone = '', extra = '') => dashBtn(`dash-tile${tone ? ` tone-${tone}` : ''}`, go, null,
-    `<span class="dash-tile-l">${label}</span><span class="dash-tile-v">${value}</span>${sub ? `<span class="dash-tile-s">${sub}</span>` : ''}${extra}`, `id="dash-tile-${key}"`);
-  const tiles = [
-    tile('closed', `${T.Milestones} closed`, `${closed}<small>/${ms.length}</small>`, ms.length ? `${pct(closed, ms.length)}% of them` : `No ${T.milestones} yet`,
-      { k: 'gantt', type: 'milestone', rag: doneNames }, '', `<span class="dv-meter dv-meter-sm"><i class="dv-meter-fill" style="width:${pct(closed, ms.length)}%"></i></span>`),
-    tile('late', 'Overdue', late.length, lateStart.length ? `+ ${count(lateStart.length, 'late start', 'late starts')}` : late.length ? 'past their end date' : 'Nothing overdue',
-      { k: 'gantt', late: true }, late.length ? 'bad' : 'good'),
-    tile('soon', `Due in ${dashHorizon} days`, soon.length, soon.length ? `${count(soon.filter(m => !isTask(m)).length, T.milestone, T.milestones)}, ${count(soon.filter(isTask).length, T.task, T.tasks)}` : 'Nothing falls due', { k: 'scroll', card: 'coming' }),
-    due == null ? '' : tile('due', 'Reports due', due, due ? 'for this period' : 'All reported', { k: 'reports', mode: 'due' }, due ? 'warn' : 'good'),
-    tile('raid', 'Open risks & issues', ri.length, high ? `${count(high, 'rated High', 'rated High')}` : ri.length ? 'none rated High' : 'Register is clear', { k: 'raid' }, high ? 'bad' : ''),
-    tile('deps', 'Open dependencies', deps.length, blocked || atRisk ? [blocked && `${blocked} blocked`, atRisk && `${atRisk} at risk`].filter(Boolean).join(' · ') : deps.length ? 'none blocked' : 'None open',
-      { k: 'raid', kind: 'dependency' }, blocked ? 'bad' : atRisk ? 'warn' : ''),
-    tile('actions', 'Open actions', openActs.length, lateActs ? count(lateActs, 'overdue', 'overdue') : openActs.length ? 'none overdue' : state.meetings.some(m => m.workspace_id === p.id) ? 'All done' : 'No meetings yet',
-      { k: 'meetings', tab: 'actions' }, lateActs ? 'bad' : ''),
-    tile('dates', 'Date changes', '<span class="dash-tile-wait">…</span>', 'in the last 30 days', { k: 'view', view: 'dates' }),
-  ];
-  return `<div class="dash-tiles" style="--span:12">${tiles.join('')}</div>`;
+  const ri = raid.filter(r => r.kind !== 'dependency').length, deps = raid.filter(r => r.kind === 'dependency').length;
+  const openActs = actionsOf().filter(a => !isActionDone(a)).length;
+  const row = (key, label, value, sub, go, extra = '') => `<li>${dashBtn('dash-count', go, null,
+    `<span class="dash-count-l">${label}${sub ? `<small>${sub}</small>` : ''}</span>${extra}<span class="dash-count-v">${value}</span>`, `id="dash-count-${key}"`)}</li>`;
+  const body = `<ul class="dash-counts">
+    ${row('closed', `${T.Milestones} closed`, `${closed}<small>/${ms.length}</small>`, ms.length ? `${pct(closed, ms.length)}%` : '', { k: 'gantt', type: 'milestone', rag: doneNames },
+      ms.length ? `<span class="dv-meter dv-meter-sm"><i class="dv-meter-fill" style="width:${pct(closed, ms.length)}%"></i></span>` : '')}
+    ${row('soon', `Due in ${dashHorizon} days`, soon.length, soon.length ? `${count(soon.filter(m => !isTask(m)).length, T.milestone, T.milestones)}, ${count(soon.filter(isTask).length, T.task, T.tasks)}` : '', { k: 'scroll', card: 'coming' })}
+    ${row('raid', 'Open risks & issues', ri, '', { k: 'raid' })}
+    ${row('deps', 'Open dependencies', deps, '', { k: 'raid', kind: 'dependency' })}
+    ${row('actions', 'Open actions', openActs, '', { k: 'meetings', tab: 'actions' })}
+    ${row('dates', 'Date changes', '<span class="dash-tile-wait">…</span>', 'last 30 days', { k: 'view', view: 'dates' })}
+  </ul>`;
+  return dashCard('counts', 'In numbers', '', body, { span: 5 });
+}
+
+// The charts share one card: a tab for each way of slicing the plan. A tab with nothing to show
+// isn't offered; what's missing is noted under the chart instead.
+const DASH_TABS = [['stand', 'By RAG'], ['streams', 'By stream'], ['owners', 'By owner'], ['months', 'By month'], ['weekly', 'Weekly RAG'], ['slip', 'Baseline']];
+let dashTab = loadAppPrefs().dashTab || 'stand';
+
+function dashCharts(p, items, rg) {
+  const charts = { stand: dashStand(items, rg), streams: dashStreams(p, items, rg), owners: dashOwners(items), months: dashMonths(items, rg), weekly: dashWeekly(p, rg), slip: dashSlip(items) };
+  const tabs = DASH_TABS.filter(([k]) => charts[k]);
+  const tab = charts[dashTab] ? dashTab : tabs[0][0];
+  const c = charts[tab];
+  const lead = `<div class="dash-tabs" role="tablist" aria-label="Chart">${tabs.map(([k, label]) =>
+    `<button type="button" role="tab" class="dash-tab${k === tab ? ' on' : ''}" data-dash-tab="${k}" aria-selected="${k === tab}">${label}</button>`).join('')}</div>`;
+  const missing = [!charts.slip && `No baseline yet: set one on the plan to see how far ${T.items} have moved.`, !charts.weekly && 'No weekly updates yet.'].filter(Boolean);
+  return dashCard('charts', '', c.sub, c.body + (missing.length ? `<p class="dash-more dash-missing">${missing.join(' ')}</p>` : ''), { span: 8, table: c.table, lead });
 }
 
 // Where the items stand: a stacked bar per kind of item, by RAG.
@@ -7716,8 +7761,8 @@ function dashStand(items, rg) {
   }).filter(r => r.total);
   const max = Math.max(...rows.map(r => r.total));
   const totals = rg.names.map(st => [st, rg.map[st].base, items.filter(m => m.status === st).length]).filter(([, , n]) => n);
-  return dashCard('stand', 'Where things stand', `by RAG`, dvStacked(rows, max) + dvLegend(totals),
-    { table: dvTable(['', ...rg.names, 'Total'], rows.map(r => [escAttr(r.label), ...r.segs.map(s => s.n), r.total])) });
+  return { sub: `${count(items.length, T.item, T.items)} by kind and RAG`, body: dvStacked(rows, max) + dvLegend(totals),
+    table: dvTable(['', ...rg.names, 'Total'], rows.map(r => [escAttr(r.label), ...r.segs.map(s => s.n), r.total])) };
 }
 
 // Each stream's items by RAG, with the stream's latest weekly RAG beside its name.
@@ -7730,10 +7775,10 @@ function dashStreams(p, items, rg) {
       labelHtml: `${dashBtn('dv-name', { k: 'gantt', stream: id }, null, escAttr(name))}${cur ? `<span class="dv-weekly" title="Latest weekly update: ${escAttr(cur.status)}, w/e ${fmtShort(cur.week_ending)}">${statusPill(cur.status, rg.map)}</span>` : ''}`,
       segs: rg.names.map(st => ({ name: st, n: list.filter(m => m.status === st).length, color: rg.map[st].base, go: { k: 'gantt', stream: id, rag: [st] } })) };
   }).filter(r => r.total);
-  if (!rows.length) return dashCard('streams', 'By stream', '', dashEmpty('No streams yet.'));
+  if (!rows.some(r => r.key)) return null;
   const max = Math.max(...rows.map(r => r.total));
-  return dashCard('streams', 'By stream', `${count(rows.length, 'stream', 'streams')} · pill = latest weekly RAG`, dvStacked(rows, max),
-    { table: dvTable(['Stream', ...rg.names, 'Total'], rows.map(r => [escAttr(r.label), ...r.segs.map(s => s.n), r.total])) });
+  return { sub: `${count(rows.length, 'stream', 'streams')} · pill = latest weekly RAG`, body: dvStacked(rows, max) + dvLegend(rg.names.map(st => [st, rg.map[st].base])),
+    table: dvTable(['Stream', ...rg.names, 'Total'], rows.map(r => [escAttr(r.label), ...r.segs.map(s => s.n), r.total])) };
 }
 
 // The weekly RAG record: a cell per week for the program and each stream that has updates.
@@ -7743,7 +7788,7 @@ function dashWeekly(p, rg) {
   const subjects = [{ id: '', name: p.code || 'Program', sub: programSubject(p) },
     ...streamsInOrder().filter(id => id && updatesFor(p.id, id).length).map(id => ({ id, name: streamName(id), sub: streamSubject(p, id) }))];
   const ups = subjects.map(s => ({ ...s, byWeek: new Map(updatesFor(p.id, s.id).map(u => [u.week_ending, u])) }));
-  if (!ups.some(s => s.byWeek.size)) return dashCard('weekly', 'Weekly RAG', 'last 12 weeks', dashEmpty('No weekly updates yet. <b>Weekly update</b> above records this week’s; they’re listed under <b>Reports → Weekly updates</b>.'), { span: 7 });
+  if (!ups.some(s => s.byWeek.size)) return null;
   const body = `<div class="dv-weeks" style="--n:${weeks.length}">
     <div class="dv-weeks-row dv-weeks-head"><span></span>${weeks.map((w, i) => `<span class="dv-week${w === end ? ' now' : ''}">${i % 2 || w === end ? fmtShort(w).replace(/ .*/, '') : ''}<br><small>${w === end ? 'this wk' : i % 2 ? fmtShort(w).replace(/^\S+ /, '') : ''}</small></span>`).join('')}</div>
     ${ups.map(s => `<div class="dv-weeks-row"><span class="dv-weeks-name">${dashBtn('dv-name', { k: 'update', stream: s.id }, null, escAttr(s.name))}</span>
@@ -7752,13 +7797,13 @@ function dashWeekly(p, rg) {
         : `<i class="dv-cell none" title="${escAttr(`${s.name} · w/e ${fmtShort(w)} · no update`)}"></i>`; }).join('')}</div>`).join('')}
   </div>${dvLegend(rg.names.map(st => [st, rg.map[st].base]))}`;
   const table = dvTable(['', ...weeks.map(w => fmtShort(w))], ups.map(s => [escAttr(s.name), ...weeks.map(w => s.byWeek.get(w) ? escAttr(s.byWeek.get(w).status) : '—')]));
-  return dashCard('weekly', 'Weekly RAG', 'last 12 weeks', body, { span: 7, table });
+  return { sub: 'last 12 weeks', body, table };
 }
 
 // Movement against the baseline: how far each baselined item's end has moved, late to the right.
 function dashSlip(items) {
   const rows = items.filter(m => m.baseline_end).map(m => ({ m, d: daysBetween(m.baseline_end, m.end) })).sort((a, b) => b.d - a.d || cmpRef(a.m, b.m));
-  if (!rows.length) return dashCard('slip', 'Against the baseline', '', dashEmpty(`No baseline dates yet. Set a baseline on the plan to see how far each ${T.item} has moved from it.`), { span: 5 });
+  if (!rows.length) return null;
   const late = rows.filter(r => r.d > 0), early = rows.filter(r => r.d < 0);
   const max = Math.max(1, ...rows.map(r => Math.abs(r.d)));
   const shown = rows.filter(r => r.d).slice(0, 10);
@@ -7773,14 +7818,14 @@ function dashSlip(items) {
     ${rows.filter(r => r.d).length > shown.length ? `<p class="dash-more">${rows.filter(r => r.d).length - shown.length} more have moved — see the table.</p>` : ''}`
     : dashEmpty(`Every baselined ${T.item} is still on its baseline end date.`);
   const sum = late.reduce((a, r) => a + r.d, 0);
-  return dashCard('slip', 'Against the baseline', `${late.length} of ${rows.length} later${sum ? `, ${daysWord(sum)} in all` : ''}`, body,
-    { span: 5, table: dvTable([T.Item, 'Baseline end', 'End now', 'Moved'], rows.map(({ m, d }) => [escAttr(fullLabel(m)), fmtShort(m.baseline_end), fmtShort(m.end), d ? `${d > 0 ? '+' : '−'}${Math.abs(d)}d` : '0'])) });
+  return { sub: `against the baseline · ${late.length} of ${rows.length} later${sum ? `, ${daysWord(sum)} in all` : ''}`, body,
+    table: dvTable([T.Item, 'Baseline end', 'End now', 'Moved'], rows.map(({ m, d }) => [escAttr(fullLabel(m)), fmtShort(m.baseline_end), fmtShort(m.end), d ? `${d > 0 ? '+' : '−'}${Math.abs(d)}d` : '0'])) };
 }
 
 // The milestones month by month, by where they stand, around today.
 function dashMonths(items, rg) {
   const ms = items.filter(m => !isTask(m) && m.end);
-  if (!ms.length) return dashCard('months', `${T.Milestones} by month`, '', dashEmpty(`No ${T.milestones} with dates yet.`));
+  if (!ms.length) return null;
   const monthOf = (iso) => iso.slice(0, 7);
   const months = [...new Set(ms.map(m => monthOf(m.end)))].sort();
   const now = monthOf(todayISO());
@@ -7806,14 +7851,14 @@ function dashMonths(items, rg) {
         <span class="dv-col-x">${label(d.ym)}${d.ym.endsWith('-01') || d.ym === cols[0] ? `<small>${d.ym.slice(0, 4)}</small>` : ''}</span></div>`).join('')}</div>
   </div>${dvLegend(buckets.map(k => [MS_BUCKETS.find(([b]) => b === k)[1], DASH_BUCKET_COLORS[k], ms.filter(m => msBucket(m.status, state.workspaceId, rg) === k).length]))}
   ${outside ? `<p class="dash-more">${outside} fall outside these months.</p>` : ''}`;
-  return dashCard('months', `${T.Milestones} by month`, `${count(ms.length, T.milestone, T.milestones)} by end date`, body,
-    { table: dvTable(['Month', ...buckets.map(k => MS_BUCKETS.find(([b]) => b === k)[1]), 'Total'], data.map(d => [`${label(d.ym)} ${d.ym.slice(0, 4)}`, ...buckets.map(k => d.b[k]), d.total])) });
+  return { sub: `${count(ms.length, T.milestone, T.milestones)} by end month`, body,
+    table: dvTable(['Month', ...buckets.map(k => MS_BUCKETS.find(([b]) => b === k)[1]), 'Total'], data.map(d => [`${label(d.ym)} ${d.ym.slice(0, 4)}`, ...buckets.map(k => d.b[k]), d.total])) };
 }
 
 // Who holds the open items, and how many of theirs are overdue.
 function dashOwners(items) {
   const open = items.filter(m => !isDoneStatus(m.status));
-  if (!open.length) return dashCard('owners', 'Open items by owner', '', dashEmpty(`Everything is complete.`));
+  if (!open.length) return null;
   const by = new Map();
   for (const m of open) { const k = m.owner || ''; if (!by.has(k)) by.set(k, { owner: k, n: 0, late: 0 }); const o = by.get(k); o.n++; if (isLate(m)) o.late++; }
   const rows = [...by.values()].sort((a, b) => b.n - a.n || a.owner.localeCompare(b.owner)).slice(0, 10);
@@ -7825,29 +7870,28 @@ function dashOwners(items) {
       <div class="dv-total">${r.n}</div></div>`).join('')}</div>
     ${dvLegend([['Open', 'var(--dv-early)', open.length - open.filter(isLate).length], ['Overdue', 'var(--dv-late)', open.filter(isLate).length]])}
     ${by.size > rows.length ? `<p class="dash-more">${by.size - rows.length} more owners — see the table.</p>` : ''}`;
-  return dashCard('owners', `Open ${T.items} by owner`, `${count(open.length, T.item, T.items)} not complete`, body,
-    { table: dvTable(['Owner', 'Open', 'Overdue'], [...by.values()].sort((a, b) => b.n - a.n).map(r => [r.owner ? escAttr(r.owner) : '(no owner)', r.n, r.late])) });
+  return { sub: `${count(open.length, T.item, T.items)} not complete, by owner`, body,
+    table: dvTable(['Owner', 'Open', 'Overdue'], [...by.values()].sort((a, b) => b.n - a.n).map(r => [r.owner ? escAttr(r.owner) : '(no owner)', r.n, r.late])) };
 }
 
-// What's overdue and what falls due within the horizon, soonest first.
+// What falls due within the horizon, soonest first. What's already overdue is under Needs attention.
 function dashComing(items) {
   const today = todayISO(), horizon = addDays(today, dashHorizon);
-  const list = items.filter(m => !isDoneStatus(m.status) && m.end && m.end <= horizon).sort((a, b) => a.end.localeCompare(b.end) || cmpRef(a, b));
-  const shown = list.slice(0, 14);
+  const list = items.filter(m => !isDoneStatus(m.status) && m.end && m.end >= today && m.end <= horizon).sort((a, b) => a.end.localeCompare(b.end) || cmpRef(a, b));
+  const shown = list.slice(0, 8);
   const when = (m) => { const d = daysBetween(today, m.end); return d < 0 ? `<em class="dv-when late">Overdue ${daysWord(-d)}</em>` : d === 0 ? '<em class="dv-when today">Due today</em>' : `<em class="dv-when">in ${daysWord(d)}</em>`; };
   const body = shown.length ? `<ul class="dash-list">${shown.map(m => `<li>${dashBtn('dash-item', { k: 'item', id: m.id }, null,
       `${statusPill(m.status)}<span class="dash-item-t">${m.ref ? `<b>${escAttr(m.ref)}</b> ` : ''}${escAttr(m.title)}</span>${when(m)}
        <small>${escAttr(typeName(m))} · ${fmtShort(m.end)}${m.owner ? ` · ${escAttr(m.owner)}` : ''}${streamName(m.stream_id) ? ` · ${escAttr(streamName(m.stream_id))}` : ''}</small>`)}</li>`).join('')}</ul>
     ${list.length > shown.length ? `<p class="dash-more">${list.length - shown.length} more within ${dashHorizon} days.</p>` : ''}`
-    : dashEmpty(`Nothing is overdue or due in the next ${dashHorizon} days.`);
-  const late = list.filter(m => m.end < today).length;
-  return dashCard('coming', 'Coming up', `${late ? `${late} overdue · ` : ''}${list.length - late} due in ${dashHorizon} days`, body, { span: 4 });
+    : dashEmpty(`Nothing falls due in the next ${dashHorizon} days.`);
+  return dashCard('coming', 'Coming up', `${list.length} due in ${dashHorizon} days`, body, { span: 4 });
 }
 
 // The open risks, issues and dependencies that matter most: by rating, then by due date.
 function dashRisks(p) {
   const open = raidOf().filter(r => !isClosed(r));
-  const rows = [...open].sort((a, b) => raidRating(b).score - raidRating(a).score || (!a.due) - (!b.due) || a.due.localeCompare(b.due)).slice(0, 8);
+  const rows = [...open].sort((a, b) => raidRating(b).score - raidRating(a).score || (!a.due) - (!b.due) || a.due.localeCompare(b.due)).slice(0, 6);
   const body = rows.length ? `<ul class="dash-list">${rows.map(r => `<li>${dashBtn('dash-item', { k: 'raid', id: r.id }, null,
       `<span class="dash-kind dash-kind-${r.kind}" title="${RAID_KINDS[r.kind].one}">${RAID_KINDS[r.kind].prefix}</span><span class="dash-item-t">${r.ref ? `<b>${escAttr(r.ref)}</b> ` : ''}${escAttr(r.title)}</span>${ratingPill(raidRating(r))}
        <small>${raidStatusBadge(r)}${r.owner ? ` · ${escAttr(r.owner)}` : ''}${r.due ? ` · <span class="${raidOverdue(r) ? 'dv-late-text' : ''}">due ${fmtShort(r.due)}</span>` : ''}</small>`)}</li>`).join('')}</ul>`
@@ -7859,7 +7903,7 @@ function dashRisks(p) {
 // Open actions from meetings, soonest due first.
 function dashActions() {
   const open = actionsOf().filter(a => !isActionDone(a));
-  const rows = [...open].sort(actionOrder).slice(0, 8);
+  const rows = [...open].sort(actionOrder).slice(0, 6);
   const body = rows.length ? `<ul class="dash-list">${rows.map(a => `<li>${dashBtn('dash-item', { k: 'action', id: a.id }, null,
       `<span class="dash-item-t">${a.ref ? `<b>${escAttr(a.ref)}</b> ` : ''}${escAttr(a.text)}</span>
        <small>${escAttr([a.owner, meetingById(a.meeting_id)?.title].filter(Boolean).join(' · ')) || 'No owner'}${a.due ? ` · <span class="${actionOverdue(a) ? 'dv-late-text' : ''}">due ${fmtShort(a.due)}</span>` : ''}</small>`)}</li>`).join('')}</ul>`
@@ -7870,29 +7914,28 @@ function dashActions() {
 
 // The reports written most recently.
 function dashReports() {
-  const rows = [...state.reports].sort((a, b) => (b.updated || b.created).localeCompare(a.updated || a.created)).slice(0, 8);
+  const rows = [...state.reports].sort((a, b) => (b.updated || b.created).localeCompare(a.updated || a.created)).slice(0, 4);
   const body = rows.length ? `<ul class="dash-list">${rows.map(r => `<li>${dashBtn('dash-item', { k: 'report', id: r.id, item: r.item_id }, null,
       `${statusPill(r.status)}<span class="dash-item-t">${escAttr(itemName(r.item_id))}</span>
-       <small>${r.cadence} · period ending ${fmtShort(r.period_end)}${r.author ? ` · ${escAttr(r.author)}` : ''}</small>
-       ${r.exec_summary ? `<span class="dash-item-x">${escAttr(mdToText(r.exec_summary).slice(0, 150))}</span>` : ''}`)}</li>`).join('')}</ul>`
+       <small>${r.cadence} · period ending ${fmtShort(r.period_end)}${r.author ? ` · ${escAttr(r.author)}` : ''}</small>`)}</li>`).join('')}</ul>`
     : dashEmpty('No reports yet.');
   return dashCard('reports', 'Latest reports', count(state.reports.length, 'report', 'reports'), body,
     { span: 4, actions: dashBtn('btn btn-sm', { k: 'view', view: 'reports' }, null, 'All reports') });
 }
 
-// The Dates moved tile fills in once the date log has loaded (it's fetched, not held in memory).
+// The Date changes count fills in once the date log has loaded (it's fetched, not held in memory).
 function dashDateChanges() {
   loadDateLog().then(() => {
-    const el = document.querySelector('#dash-tile-dates .dash-tile-v');
+    const el = document.querySelector('#dash-count-dates .dash-count-v');
     if (!el || !isShown('dash')) return;
     const since = addDays(todayISO(), -30);
     const rows = dlRows.filter(r => r.workspace_id === state.workspaceId && r.at.slice(0, 10) >= since && ['Changed', 'Knock-on'].includes(r.action));
     const saves = new Set(rows.map(r => `${r.at}|${r.item_id}`)), items = new Set(rows.map(r => r.item_id));
     const knock = new Set(rows.filter(r => r.action === 'Knock-on').map(r => `${r.at}|${r.item_id}`)).size;
     el.textContent = saves.size;
-    el.nextElementSibling.textContent = saves.size ? `in 30 days, on ${count(items.size, T.item, T.items)}${knock ? ` (${knock} knock-on)` : ''}` : 'in the last 30 days';
+    el.parentElement.querySelector('.dash-count-l small').textContent = saves.size ? `last 30 days, on ${count(items.size, T.item, T.items)}${knock ? ` (${knock} knock-on)` : ''}` : 'last 30 days';
   }).catch(() => {
-    const el = document.querySelector('#dash-tile-dates .dash-tile-v');
+    const el = document.querySelector('#dash-count-dates .dash-count-v');
     if (el) el.textContent = '—';
   });
 }
@@ -7962,6 +8005,12 @@ function wireDash() {
       card.querySelector('.dash-chart').hidden = on;
       card.querySelector('.dash-tbl').hidden = !on;
       return;
+    }
+    const tab = e.target.closest('[data-dash-tab]');
+    if (tab) {
+      dashTab = tab.dataset.dashTab;
+      saveAppPrefs({ dashTab });
+      return renderDash();
     }
     const go = e.target.closest('[data-dash-go]');
     if (go) { hideTip(); dashGo(JSON.parse(go.dataset.dashGo)); }
