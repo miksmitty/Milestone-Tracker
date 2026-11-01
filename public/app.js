@@ -7689,8 +7689,8 @@ function dashSummary(p, items, rg) {
     { span: 12, cls: 'dash-summary' });
 }
 
-// What needs someone's attention, worst first: one row per kind of trouble, with the first few
-// examples, each a way in. Only what's actually wrong is listed.
+// What would benefit from someone's attention, most pressing first: one row per kind, with the
+// first few examples, each a way in. Only what needs a look is listed.
 function dashAttention(p, items) {
   const open = items.filter(m => !isDoneStatus(m.status));
   const late = open.filter(isLate).sort((a, b) => a.end.localeCompare(b.end) || cmpRef(a, b)), lateStart = open.filter(isLateStart);
@@ -7719,7 +7719,7 @@ function dashAttention(p, items) {
   ].filter(Boolean);
   const body = rows.length ? `<ul class="dash-att">${rows.map(r => `<li>${dashBtn(`dash-att-row tone-${r.tone}`, r.go, null,
       `<span class="dash-att-n">${r.n}</span><span class="dash-att-t"><b>${r.what}</b><small>${r.detail}</small></span><span class="dash-att-go" aria-hidden="true">›</span>`)}</li>`).join('')}</ul>`
-    : `<p class="dash-all-clear">Nothing needs attention: nothing overdue, blocked or rated High.</p>`;
+    : `<p class="dash-all-clear">All clear: no dates passed, nothing blocked and no risks rated High.</p>`;
   return dashCard('attention', 'Needs attention', rows.length ? count(rows.length, 'thing', 'things') : '', body, { span: 5 });
 }
 
