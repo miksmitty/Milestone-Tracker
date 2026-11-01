@@ -6,3 +6,6 @@ id,workspace_id,raid_id,at,by,text
 9,1,1,2026-10-30T19:26:31.415Z,,Happened — became issue I1.
 10,1,4,2026-10-30T19:26:31.415Z,,"Raised from risk R1, rated High (likelihood High, impact Medium).
 Mitigation was: Weekly check-ins with supplier; fallback extract script prepared"
+31,1,1,2026-11-01T18:46:14.440Z,,Happened — became issue I2.
+32,1,29,2026-11-01T18:46:14.440Z,,"Raised from risk R1, rated High (likelihood High, impact Medium).
+Mitigation was: Weekly check-ins with supplier; fallback extract script prepared"

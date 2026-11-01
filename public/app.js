@@ -3548,7 +3548,7 @@ const GRID_COLS = [
 // Quick update mode: just what changes week to week — RAG (one click) and dates, in this order.
 const QUICK_COLS = {
   sel: {}, ref: { w: 70 }, title: { w: 180 }, status: { w: 205, wkey: 'status.compact' }, start: { w: 130 }, end: { w: 130 },
-  type: { w: 160 }, owner: { w: 130 }, actions: { w: 90, wkey: 'actions.quick' },
+  type: { w: 160 }, owner: { w: 130 }, actions: { w: 100, wkey: 'actions.quick' },
 };
 
 const grid = makeTable({
@@ -4893,7 +4893,6 @@ let rpEditing = null;  // report being edited; null for a new one
 let rpOpened = null;   // its values when the dialog opened
 let rpItemId = '';
 let rpDateTouched = false; // stop re-defaulting the period once the user picks a date
-let rpPrevIdx = 0;         // which earlier report the side panel shows (0 = the one just before)
 
 function openReportDialog({ report = null, itemId = '' } = {}) {
   hideTip();
@@ -4902,7 +4901,7 @@ function openReportDialog({ report = null, itemId = '' } = {}) {
   rpOpened = report && { ...report };
   rpItemId = report ? report.item_id : itemId;
   rpDateTouched = !!report;
-  rpPrevIdx = 0;
+  document.getElementById('rp-prev')._idx = 0;
   const f = document.getElementById('report-form').elements;
 
   document.getElementById('rp-item-pick').hidden = !!rpItemId;
@@ -4986,7 +4985,9 @@ function refreshReportForm() {
   sync.hidden = !(m && latest && st !== m.status);
   if (m) sync.querySelector('span').innerHTML = `Also change ${escAttr(itemLabel(m))}’s RAG on the chart from <b>${m.status}</b> to <b>${st}</b>`;
 
-  renderPrevReport(others.filter(r => r.period_end < end).sort(byPeriodDesc));
+  const prevEl = document.getElementById('rp-prev');
+  renderPrevReport(prevEl, others.filter(r => r.period_end < end).sort(byPeriodDesc), document.getElementById('report-form'), offTrack);
+  document.getElementById('report-dialog').classList.toggle('has-prev', !prevEl.hidden);
 
   const clash = end && reportClash({ period_end: end }, rpItemId, rpEditing);
   document.getElementById('rp-error').innerHTML = clash
@@ -5014,12 +5015,14 @@ function onReportFormInput(e) {
   } else if (t.name === 'period_end') {
     rpDateTouched = true;
   } else if (t.name !== 'status') return;
-  if (t.name !== 'status') rpPrevIdx = 0;
+  if (t.name !== 'status') document.getElementById('rp-prev')._idx = 0;
   refreshReportForm();
 }
 
 // Side panel with an earlier report on the same item, so the new one can be written against
 // what was said last time. Sections can be copied into the matching field of the new report.
+// The report dialog and the Reports pane's edit form each have one; the panel keeps which
+// earlier report it shows (_idx, 0 = the one just before) and the form it copies into.
 const PREV_SECTIONS = [
   { key: 'exec_summary', label: 'Exec summary', to: 'exec_summary', btn: 'Copy to exec summary' },
   { key: 'achievements', label: 'Achievements' },
@@ -5027,14 +5030,12 @@ const PREV_SECTIONS = [
   { key: 'get_to_green', label: 'Get to green plan', to: 'get_to_green', btn: 'Carry forward' },
 ];
 
-function renderPrevReport(earlier) {
-  const el = document.getElementById('rp-prev');
-  rpPrevIdx = Math.min(rpPrevIdx, Math.max(0, earlier.length - 1));
-  const prev = earlier[rpPrevIdx];
+function renderPrevReport(el, earlier, form, gtgShown) {
+  const idx = el._idx = Math.min(el._idx || 0, Math.max(0, earlier.length - 1));
+  const prev = earlier[idx];
+  Object.assign(el, { _earlier: earlier, _form: form, _gtg: gtgShown });
   el.hidden = !prev;
-  document.getElementById('report-dialog').classList.toggle('has-prev', !!prev);
   if (!prev) return;
-  const gtgShown = !document.getElementById('rp-gtg').hidden;
   const sections = PREV_SECTIONS.map(s => {
     const text = prev[s.key];
     const copy = s.to && text && (s.to !== 'get_to_green' || gtgShown)
@@ -5044,29 +5045,29 @@ function renderPrevReport(earlier) {
   }).join('');
   el.innerHTML = `
     <div class="rp-prev-head">
-      <span class="rp-prev-title">${rpPrevIdx ? 'Earlier report' : 'Previous report'}</span>
+      <span class="rp-prev-title">${idx ? 'Earlier report' : 'Previous report'}</span>
       <span class="rp-prev-nav">
-        <button type="button" data-prev-step="1" ${rpPrevIdx < earlier.length - 1 ? '' : 'disabled'} title="Older report">‹</button>
-        <span>${rpPrevIdx + 1} of ${earlier.length}</span>
-        <button type="button" data-prev-step="-1" ${rpPrevIdx > 0 ? '' : 'disabled'} title="Newer report">›</button>
+        <button type="button" data-prev-step="1" ${idx < earlier.length - 1 ? '' : 'disabled'} title="Older report">‹</button>
+        <span>${idx + 1} of ${earlier.length}</span>
+        <button type="button" data-prev-step="-1" ${idx > 0 ? '' : 'disabled'} title="Newer report">›</button>
       </span>
     </div>
     <div class="rp-prev-when">${statusPill(prev.status)} Period ending <b>${fmtNice(prev.period_end)}</b></div>
     <div class="rp-prev-sub">${prev.cadence}${prev.author ? ` · ${escAttr(prev.author)}` : ''}</div>
     ${sections}`;
-  el._earlier = earlier;
 }
 
 function onPrevPanelClick(e) {
+  const el = e.target.closest('.rp-prev');
   const step = e.target.closest('[data-prev-step]');
   if (step) {
-    rpPrevIdx += +step.dataset.prevStep;
-    return renderPrevReport(document.getElementById('rp-prev')._earlier);
+    el._idx += +step.dataset.prevStep;
+    return renderPrevReport(el, el._earlier, el._form, el._gtg);
   }
   const copy = e.target.closest('[data-copy]');
   if (!copy) return;
-  const prev = document.getElementById('rp-prev')._earlier[rpPrevIdx];
-  const field = document.getElementById('report-form').elements[copy.dataset.to];
+  const prev = el._earlier[el._idx];
+  const field = el._form.elements[copy.dataset.to];
   const text = prev[copy.dataset.copy];
   if (!field.value.includes(text)) field.value = field.value.trim() ? `${field.value.trimEnd()}\n\n${text}` : text;
   edLoad(field);
@@ -5800,6 +5801,7 @@ function renderPane(focusKey) {
           <label>Reported by<input name="author" list="owner-list" /></label>
           <div class="ps-row ps-stamp"><span class="ps-k">Submitted</span>${fmtStamp(r.created)}${edited}</div>
         </aside>
+        <aside class="rp-prev pane-prev" hidden></aside>
       </div>
     </div></form>`;
   const f = paneForm().elements;
@@ -5826,6 +5828,11 @@ function refreshPaneForm() {
     ? `Covers ${fmtShort(periodStart(end, f.cadence.value))} – ${fmtNice(end)}` : '';
   const gtg = form.querySelector('[data-sec="get_to_green"]');
   gtg.hidden = !OFF_TRACK.includes(st);
+  // The report before this one, beside the form; back to the one just before when the period moves.
+  const prev = form.querySelector('.pane-prev');
+  if (prev._end !== end) Object.assign(prev, { _idx: 0, _end: end });
+  renderPrevReport(prev, state.reports.filter(x => x.item_id === r.item_id && x !== r && x.period_end < end).sort(byPeriodDesc), form, !gtg.hidden);
+  form.querySelector('.pane-cols').classList.toggle('has-prev', !prev.hidden);
   const sync = document.getElementById('pane-sync');
   sync.hidden = !(m && isLatestReport(r.item_id, end, r) && st !== m.status);
   if (m) sync.querySelector('span').innerHTML = `Also change ${escAttr(itemLabel(m))}’s RAG on the chart from <b>${m.status}</b> to <b>${st}</b>`;
@@ -5961,6 +5968,7 @@ const tabbables = (root) => [...root.querySelectorAll('a[href], button, input, s
 const isTyping = (el) => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 function onPaneClick(e) {
+  if (e.target.closest('.rp-prev')) return onPrevPanelClick(e);
   const step = e.target.closest('[data-step]');
   if (step) return stepReport(+step.dataset.step);
   const cm = e.target.closest('[data-cm]');
@@ -10524,13 +10532,28 @@ const ACT_COLS = [
 ];
 const actionSource = (a) => meetingById(a.meeting_id)?.title || (a.meeting_id ? '(Deleted meeting)' : '(Added by hand)');
 const actTable = makeTable({ table: 'actions-table', store: 'milestone-tracker.actions-grid', cols: () => ACT_COLS, rows: () => actionsOf(), onChange: () => renderMeetings() });
+// An owner's initials on a disc whose colour comes from the name, so the same person reads the same everywhere.
+function ownerChip(name) {
+  if (!name) return cellOr('');
+  const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+  const ini = name.split(/[\s.-]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+  return `<span class="act-owner"><span class="act-ini" style="--h:${hue}">${escAttr(ini)}</span>${escAttr(name)}</span>`;
+}
+// Under the due date: how late an open action is, or how soon it's due within the week.
+function actionDueNote(a) {
+  if (isActionDone(a) || !a.due) return '';
+  const d = daysBetween(todayISO(), a.due);
+  if (d < 0) return `<small class="late">${daysText(-d)} late</small>`;
+  if (d === 0) return '<small class="soon">Due today</small>';
+  return d <= 7 ? `<small class="soon">In ${daysText(d)}</small>` : '';
+}
 const ACT_CELLS = {
   ref: (a) => `<td class="act-ref">${a.ref ? escAttr(a.ref) : dash}</td>`,
   text: (a) => `<td class="act-text">${escAttr(a.text)}${a.links.length ? `<div class="act-links">${a.links.map(l => linkChip(l)).join('')}</div>` : ''}</td>`,
-  owner: (a) => `<td>${cellOr(a.owner)}</td>`,
-  due: (a) => `<td class="act-due">${a.due ? `<span class="${actionOverdue(a) ? 'late' : ''}" ${actionOverdue(a) ? 'title="Overdue"' : ''}>${fmtShort(a.due)}</span>` : dash}</td>`,
+  owner: (a) => `<td>${ownerChip(a.owner)}</td>`,
+  due: (a) => `<td class="act-due">${a.due ? `<span class="${actionOverdue(a) ? 'late' : ''}" ${actionOverdue(a) ? 'title="Overdue"' : ''}>${fmtShort(a.due)}</span>${actionDueNote(a)}` : dash}</td>`,
   meeting_id: (a) => { const m = meetingById(a.meeting_id); return `<td class="act-from">${m ? `<button type="button" class="link-btn" data-mt-open="${m.id}" title="Read the minutes">${escAttr(m.title) || '(untitled)'}</button>${m.date ? `<small>${fmtShort(m.date)}</small>` : ''}` : `<span class="muted">${a.meeting_id ? 'A deleted meeting' : 'Added by hand'}</span>`}</td>`; },
-  status: (a) => `<td class="act-done"><label class="mt-act-tick" title="${isActionDone(a) ? 'Done — untick to reopen' : 'Tick when done'}"><input type="checkbox" data-act-done="${a.id}" ${isActionDone(a) ? 'checked' : ''} /> <span>${a.status}</span></label></td>`,
+  status: (a) => `<td class="act-done"><label class="mt-act-tick" title="${isActionDone(a) ? 'Done — untick to reopen' : 'Tick when done'}"><input type="checkbox" data-act-done="${a.id}" ${isActionDone(a) ? 'checked' : ''} /> <span class="act-status ${isActionDone(a) ? 'done' : actionOverdue(a) ? 'late' : 'open'}">${actionOverdue(a) ? 'Overdue' : a.status}</span></label></td>`,
   done_at: (a) => `<td class="act-due">${a.done_at ? fmtShort(a.done_at.slice(0, 10)) : dash}</td>`,
 };
 function actionMatches(a, words) {
@@ -10545,7 +10568,7 @@ function renderActions() {
   const valueOf = (a, key) => { const c = ACT_COLS.find(x => x.key === key); return c.sort ? c.sort(a) : a[key]; };
   actRows = sortRows(actTable, all.filter(a => passesFilters(actTable, a) && actionMatches(a, words)), valueOf, actionOrder);
   const cols = actTable.cols();
-  document.getElementById('act-body').innerHTML = actRows.map(a => `<tr data-act="${a.id}" class="act-row${isActionDone(a) ? ' done' : ''}">${cols.map(c => ACT_CELLS[c.key](a)).join('')}</tr>`).join('')
+  document.getElementById('act-body').innerHTML = actRows.map(a => `<tr data-act="${a.id}" class="act-row${isActionDone(a) ? ' done' : actionOverdue(a) ? ' late' : ''}">${cols.map(c => ACT_CELLS[c.key](a)).join('')}</tr>`).join('')
     || `<tr><td colspan="${cols.length}" class="grid-empty">${all.length ? 'No actions match the filters.' : 'No actions yet. They come from a meeting’s minutes (<b>Extract actions</b> on the Minutes tab) or <b>+ Add action</b>.'}</td></tr>`;
   const filtered = Object.keys(actTable.filters).length > 0 || !!words.length;
   const late = actRows.filter(actionOverdue).length;
