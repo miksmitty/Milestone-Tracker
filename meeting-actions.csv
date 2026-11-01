@@ -1,7 +1,7 @@
 id,workspace_id,meeting_id,ref,text,owner,due,status,links,done_at,created,updated
 1,1,1,A1,Chase the supplier for a revised extract date,Tom Reed,2026-11-06,Open,,,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z
 2,1,1,A2,Prepare the escalation paper for the programme board,Helen Carter,2026-11-10,Open,,,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z
-3,1,1,A3,Update the RAID log with the new issue,Priya Shah,2026-10-20,Open,item:19,,2026-11-01T07:06:59.482Z,2026-11-01T07:09:35.980Z
+3,1,1,A3,Update the RAID log with the new issue,Priya Shah,2026-11-28,Open,item:19,,2026-11-01T07:06:59.482Z,2026-11-01T12:07:19.678Z
 4,1,1,A4,Circulate the fallback script to the team,Sarah Patel,,Done,,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z
 5,1,1,A5,Book a room for the design review,Priya Shah,2026-11-20,Open,,,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z
 6,1,1,A6,Agree the test data approach,Tom,2026-11-30,Open,,,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z
@@ -9,7 +9,7 @@ id,workspace_id,meeting_id,ref,text,owner,due,status,links,done_at,created,updat
 8,1,1,A8,Send the updated plan to the steering group,Sarah,,Open,,,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z
 9,1,1,A9,Review the migration runbook,Helen Carter,2026-11-18,Open,,,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z
 10,1,1,A10,Draft the comms for the pilot users,Priya,2026-11-04,Done,,2026-11-01T07:08:52.096Z,2026-11-01T07:06:59.482Z,2026-11-01T07:08:52.096Z
-11,1,1,A11,Read the architecture paper,Everyone,2026-11-05,Open,,,2026-11-01T07:06:59.482Z,2026-11-01T07:06:59.482Z
+11,1,1,A11,Read the architecture paper,Everyone,2026-11-05,Done,,2026-11-01T12:07:24.356Z,2026-11-01T07:06:59.482Z,2026-11-01T12:07:24.356Z
 28,1,2,A12,Obtain written permission for the garden location,Jamie Ellis,2026-11-04,Done,,2026-11-01T07:59:41.382Z,2026-11-01T07:59:04.429Z,2026-11-01T07:59:41.382Z
 29,1,2,A13,Obtain two itemised supplier quotes,Sam Patel,2026-11-06,Done,,2026-11-01T07:59:45.014Z,2026-11-01T07:59:04.429Z,2026-11-01T07:59:45.014Z
 30,1,2,A14,Check community grant eligibility,Priya Shah,2026-11-09,Open,,,2026-11-01T07:59:04.429Z,2026-11-01T07:59:04.429Z

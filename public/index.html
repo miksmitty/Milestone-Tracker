@@ -274,6 +274,11 @@
           <label title="Every action taken from the minutes, across meetings"><input type="radio" name="mt-mode" value="actions" /><span>Actions <b id="mt-open-count" class="seg-count" hidden></b></span></label>
         </div>
         <input id="mt-q" type="search" placeholder="Search the minutes…" aria-label="Search the minutes and actions" />
+        <select id="act-status" class="tb-select" aria-label="Which actions" title="Open actions, done ones, or all of them (the Status heading’s filter does the same)" hidden>
+          <option value="Open">Open</option>
+          <option value="Done">Done</option>
+          <option value="">All actions</option>
+        </select>
         <select id="mt-series" class="tb-select" aria-label="Meeting series" hidden></select>
         <button type="button" id="btn-mt-series" class="btn btn-ghost" title="The workspace’s regular meetings: set one up, see what’s next and what’s due minutes">Series…</button>
         <button type="button" id="act-clear" class="btn btn-ghost" hidden>Clear filters</button>

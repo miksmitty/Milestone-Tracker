@@ -10425,6 +10425,7 @@ function renderMeetings() {
   document.getElementById('mt-actions').hidden = !actions;
   document.getElementById('mt-series').hidden = actions || !seriesOf().length;
   document.getElementById('btn-mt-series').hidden = actions;
+  document.getElementById('act-status').hidden = !actions;
   if (!actions) document.getElementById('act-clear').hidden = true;
   document.getElementById('btn-mt-add').hidden = actions;
   document.getElementById('btn-act-add').hidden = !actions;
@@ -10635,6 +10636,9 @@ function actionMatches(a, words) {
 function renderActions() {
   const all = actionsOf();
   updateHeadState(actTable);
+  // The Open / Done / All switch reads the Status column's filter, whichever way it was set.
+  const st = actTable.filters.status;
+  document.getElementById('act-status').value = st?.length === 1 && ACTION_STATUSES.includes(st[0]) ? st[0] : '';
   const words = searchWords(mtFilter.q);
   const valueOf = (a, key) => { const c = ACT_COLS.find(x => x.key === key); return c.sort ? c.sort(a) : a[key]; };
   actRows = sortRows(actTable, all.filter(a => passesFilters(actTable, a) && actionMatches(a, words)), valueOf, actionOrder);
@@ -10967,7 +10971,11 @@ function wireMeetings() {
   document.querySelectorAll('[name="mt-mode"]').forEach(r => r.addEventListener('change', () => { setMeetingsMode(r.value); renderMeetings(); writeHash(); }));
   document.getElementById('mt-q').oninput = (e) => { mtFilter.q = e.target.value; renderMeetings(); };
   document.getElementById('mt-series').onchange = (e) => { mtFilter.series = e.target.value; renderMeetings(); };
-  actTable.filters = { status: ['Open'] }; // what's still to do, until the Status filter says otherwise
+  actTable.filters = { status: ['Open'] }; // what's still to do, until the switch or the Status filter says otherwise
+  document.getElementById('act-status').onchange = (e) => {
+    if (e.target.value) actTable.filters.status = [e.target.value]; else delete actTable.filters.status;
+    renderMeetings();
+  };
   renderTableHead(actTable);
   wireTable(actTable);
   document.getElementById('act-clear').onclick = () => { clearTableFilters(actTable); mtFilter.q = ''; document.getElementById('mt-q').value = ''; renderMeetings(); };
