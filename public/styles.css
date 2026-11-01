@@ -1634,6 +1634,9 @@ button.raid-link:hover:not(:disabled) { border-color: var(--accent); color: var(
 .dash-verdict b.ok { color: var(--ok); }
 .dash-verdict b.ra { color: var(--ra); }
 .dash-summary .dash-hero .dv-meter { margin: 2px 0 12px; }
+.dash-summary .dash-head { align-items: center; margin-bottom: 2px; }
+.dash-summary .dash-head h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.2; }
+.dash-summary .dash-head .prog-code { font-size: 12px; }
 
 /* needs attention */
 .dash-att { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
