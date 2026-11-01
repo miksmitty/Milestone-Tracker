@@ -149,20 +149,20 @@ body.nav-hidden .sidebar { display: none; }
   display: flex; align-items: center; gap: 16px; padding: 14px 20px 0; flex: none;
 }
 /* "PLT Platform Replacement / Dashboard": the workspace and the page, one line, at title size */
-.page-titles { display: flex; align-items: center; min-width: 0; }
-.page-workspace { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.015em; color: var(--text); white-space: nowrap; }
+.page-titles { display: flex; align-items: baseline; min-width: 0; }
+.page-workspace { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 30px; font-weight: 750; letter-spacing: -0.025em; line-height: 1.15; color: var(--text); white-space: nowrap; }
 .page-workspace[hidden] { display: none; }
 .page-workspace span { overflow: hidden; text-overflow: ellipsis; }
-.page-workspace b { flex: none; font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--accent); background: var(--tint); padding: 2px 7px; border-radius: 5px; }
-.page-workspace:not([hidden])::after { content: "/"; flex: none; margin: 0 10px 0 2px; font-weight: 400; color: var(--faint-2); }
+.page-workspace b { flex: none; align-self: center; font-size: 14px; font-weight: 700; letter-spacing: .05em; color: var(--accent); background: var(--tint); padding: 2px 7px; border-radius: 5px; }
+.page-workspace:not([hidden])::after { content: "/"; flex: none; margin: 0 12px 0 4px; font-weight: 400; color: var(--faint-2); }
 .page-title-row { flex: none; }
 .page-head h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.015em; }
-.page-workspace:not([hidden]) + .page-title-row h1 { font-weight: 500; color: var(--text-2); }
+.page-workspace:not([hidden]) + .page-title-row h1 { font-size: 22px; font-weight: 500; color: var(--text-2); }
 @media (max-width: 700px) {
   .page-titles { flex-direction: column; align-items: flex-start; gap: 1px; }
-  .page-workspace { max-width: 100%; font-size: 18px; }
+  .page-workspace { max-width: 100%; font-size: 24px; }
   .page-workspace:not([hidden])::after { content: none; }
-  .page-workspace:not([hidden]) + .page-title-row h1 { font-size: 16px; }
+  .page-workspace:not([hidden]) + .page-title-row h1 { font-size: 17px; }
 }
 .dash-sum-label .btn { white-space: nowrap; }
 .save-status { margin-left: auto; font-size: 12.5px; color: var(--muted); text-align: right; }
