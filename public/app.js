@@ -713,6 +713,7 @@ function listenForChanges() {
   if (window.EventSource) {
     const es = new EventSource('api/events');
     es.addEventListener('versions', onVersions);
+    es.addEventListener('history-cleared', dropHistory);
     es.addEventListener('change', (e) => {
       try { const { file, version } = JSON.parse(e.data); if (synced[file] && version !== synced[file].version) pullChanges({ ...versionsNow(), [file]: version }); } catch { /* ignore */ }
     });
@@ -7232,29 +7233,40 @@ async function submitWorkspaceDialog(e) {
   await Promise.all(saves);
 }
 
-// Start a workspace's Date history and What changed afresh (see clearHistory in server.js).
-async function clearWorkspaceHistory() {
+// Start the Date log and What changed afresh, for one workspace or for every one (see clearHistory
+// in server.js). Clearing every workspace is for after a move to a new platform, so it asks for
+// the word CLEAR rather than an OK.
+async function clearWorkspaceHistory(all = false) {
   const p = pgEditing;
-  if (!p) return;
-  if (!confirm(`Clear the history of ${p.name}?\n\nIts Date log is emptied and starts again from its ${T.items}’ dates now, and What changed will compare from today. Nothing else changes, and other workspaces keep their history.\n\nThis can’t be undone.`)) return;
+  if (!p && !all) return;
+  if (all) {
+    const typed = prompt(`Clear the history of every workspace?\n\nThe whole Date log is emptied and starts again from every ${T.item}’s dates now, and What changed will compare from today, for all ${count(state.workspaces.length, 'workspace', 'workspaces')}. Nothing else changes. The files as they were are kept in backups/ on the server.\n\nType CLEAR to go ahead.`);
+    if ((typed || '').trim().toUpperCase() !== 'CLEAR') return;
+  } else if (!confirm(`Clear the history of ${p.name}?\n\nIts Date log is emptied and starts again from its ${T.items}’ dates now, and What changed will compare from today. Nothing else changes, and other workspaces keep their history.\n\nThe files as they were are kept in backups/ on the server.`)) return;
   flushSave();
   await saveQueue; // so what's on screen is what the history starts from
   let out;
   try {
-    const res = await fetch(`api/clear-history?workspace=${encodeURIComponent(p.id)}`, { method: 'POST' });
+    const res = await fetch(`api/clear-history?workspace=${all ? 'all' : encodeURIComponent(p.id)}`, { method: 'POST' });
     out = await res.json();
     if (!out.ok) throw new Error(out.error || `the server returned ${res.status}`);
   } catch (err) {
     return (document.getElementById('pg-error').textContent = `Couldn’t clear the history (${err.message}). Restart node server.js if the app was updated.`);
   }
+  dropHistory();
+  document.getElementById('workspace-dialog').close();
+  showToast(`History cleared for ${all ? 'every workspace' : p.name}: ${count(out.removed, 'date log row', 'date log rows')} removed, ${count(out.copies, 'daily copy', 'daily copies')} reset`);
+}
+
+// Forget the date log and the daily copies loaded so far, and show the page again: after a clear,
+// here or (history-cleared, from the server) in someone else's browser.
+function dropHistory() {
   chHistory = null;
   chCache.clear();
   dlRows = [];
   dlItem = '';
-  document.getElementById('workspace-dialog').close();
   rerenderCurrentView();
   if (isShown('dates')) renderDates();
-  showToast(`History cleared for ${p.name}: ${count(out.removed, 'date log row', 'date log rows')} removed, ${count(out.copies, 'daily copy', 'daily copies')} reset`);
 }
 
 // Deleting a workspace takes everything in it: say what that is and ask first. Resolves true to go ahead.
@@ -7374,7 +7386,8 @@ function wireWorkspaces() {
   document.getElementById('pg-cancel').onclick = () => dlg.close();
   document.getElementById('pg-close').onclick = () => dlg.close();
   document.getElementById('pg-delete').onclick = deleteWorkspace;
-  document.getElementById('pg-clear-history').onclick = clearWorkspaceHistory;
+  document.getElementById('pg-clear-history').onclick = () => clearWorkspaceHistory(false);
+  document.getElementById('pg-clear-all-history').onclick = () => clearWorkspaceHistory(true);
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 

@@ -40,7 +40,7 @@ The app runs on Azure App Service as it is: plain Node 18+, nothing to install.
 1. Create a **Linux** App Service with a Node 18 or later runtime. Set the startup command to `node server.js`. App Service sets `PORT` itself.
 2. Under **Configuration → Application settings**, set `DATA_DIR` to `/home/data`. `/home` is kept across restarts and redeployments; the app's own folder is replaced on each deploy (and is read-only when run from a package).
 3. Keep the instance count at **1** (scale up, not out). Turn on **Always On** so the server isn't stopped when it's idle.
-4. Deploy the repository (zip deploy, GitHub Actions or local Git). To start with existing data, copy the CSVs (and `date-changes.csv`) into `/home/data` once, e.g. through the Kudu console or the SSH session, then restart.
+4. Deploy the repository (zip deploy, GitHub Actions or local Git). To start with existing data, copy the CSVs (and `date-changes.csv`) into `/home/data` once, e.g. through the Kudu console or the SSH session, then restart. If the history that came with them shouldn't carry over (test changes, or data from before the move), clear it before anyone uses the app: in the SSH session, `cd` to the app and run `DATA_DIR=/home/data node server.js --clear-history all`, then restart. Or, with the app running, use **Workspace settings → Every workspace…** (see **Date log**).
 5. `config.json` and the logo are read from the app's own folder, so they travel with the code. On a test instance, add the application setting `APP_ENVIRONMENT` = `Test` so its pages carry a Test band across the top (see **Title, logo and environment**); `APP_VERSION` can carry the build number.
 
 To put it behind a corporate sign-in, turn on App Service **Authentication**. The signed-in user's login ID then arrives on every request (the `X-MS-CLIENT-PRINCIPAL-NAME` header), and `changedBy()` in server.js can return it for the date log.
@@ -159,7 +159,7 @@ Every change to an item's dates is logged: its start and end, and its baseline. 
 
 Search by item, person or note, pick a person (once logins are recorded), and tick **Baseline** or **Starting dates** to include those. **Date log** in an item's quick update panel or edit dialog shows just that item. **Export → Download CSV** saves the changes shown.
 
-The log is kept by the server, not the browser: each time milestones.csv is saved it's compared with the file it replaces, so no way of changing a date can skip the log. Edits made to milestones.csv outside the app (in a spreadsheet, say) are noticed and logged, without a name, the next time the app reads or saves the file, or when the server starts. The log lives in [date-changes.csv](date-changes.csv), one row per date field changed, and is only ever added to — the one exception is **Clear history** (below), which empties one workspace's part of it:
+The log is kept by the server, not the browser: each time milestones.csv is saved it's compared with the file it replaces, so no way of changing a date can skip the log. Edits made to milestones.csv outside the app (in a spreadsheet, say) are noticed and logged, without a name, the next time the app reads or saves the file, or when the server starts. The log lives in [date-changes.csv](date-changes.csv), one row per date field changed, and is only ever added to. The one exception is **Clear history** (below), which empties one workspace's part of it, or all of it:
 
 ```
 id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
@@ -167,7 +167,12 @@ id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 
 #### Starting the history afresh
 
-Deleting items (demo or test data, say) leaves them in the history on purpose: the Date log keeps their changes and deletion, and What changed lists them as removed. To start a workspace's history again, use **Workspace settings → Clear history…** (it asks first, and can't be undone). It's the one thing that rewrites the log: the workspace's rows are taken out of date-changes.csv, which then starts again from its items' dates now (*Logging started*, via *History cleared*), and in every daily copy in `backups/` the workspace's items, reports and updates are replaced with today's, so What changed shows no change before today. Other workspaces keep their history. Log ids carry on from where they were, so none is reused.
+Deleting items (demo or test data, say) leaves them in the history on purpose: the Date log keeps their changes and deletion, and What changed lists them as removed. To start the history again, use **Workspace settings → Start the history afresh**:
+
+- **Clear this workspace…** (it asks first) is for after deleting demo or test data. Other workspaces keep their history.
+- **Every workspace…** (type CLEAR to confirm) is for after moving the data to a new platform, when everything in the log came from before the move. The same can be done with the app stopped: `node server.js --clear-history all`, or `--clear-history <workspace id>` for one workspace. It clears, prints what it did and exits.
+
+Either way, nothing stale is left behind. The log loses the workspace's rows, and also any row for one of its items that carries another workspace or none, as rows from an older copy of the data can. Clearing every workspace empties it. It then starts again from the items' dates now (*Logging started*, via *History cleared*). In every daily copy in `backups/`, the workspace's items, reports and updates are replaced with today's, so What changed shows no change before today; a copy from before workspaces, which can't say whose rows are whose, is replaced with today's file outright. The server's memory of the items' dates is rebuilt from the cleared log, so the next save isn't compared with anything that was cleared. Pages other people have open drop what they'd loaded and show the cleared history straight away. The files as they were are kept in `backups/cleared-<date and time>/`, so a clear made by mistake can be put back by hand (stop the server, copy them back, start it). Log ids carry on from where they were, so none is reused.
 
 ### Risks, issues & dependencies
 

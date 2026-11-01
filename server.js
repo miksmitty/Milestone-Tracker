@@ -162,8 +162,8 @@ function serveHistory(pathname, res) {
 // Every change to an item's dates is appended to date-changes.csv, the audit log. The server
 // compares each save of milestones.csv with the file it replaces, so no way of changing a date in
 // the app can skip it, and it compares the file with what it last saw, so edits made to the CSV
-// outside the app are logged too. The log is only ever appended to, except when a workspace's
-// history is cleared (see clearHistory).
+// outside the app are logged too. The log is only ever appended to, except when history is
+// cleared (see clearHistory).
 const AUDIT_FILE = path.join(DATA_DIR, 'date-changes.csv');
 const AUDIT_COLUMNS = ['id', 'at', 'by', 'workspace_id', 'item_id', 'ref', 'title', 'field', 'from', 'to', 'days', 'action', 'via', 'note'];
 const DATE_FIELDS = ['start', 'end', 'baseline_start', 'baseline_end'];
@@ -251,9 +251,18 @@ function startAudit() {
     auditKnown = now;
     return;
   }
+  replayAudit(log);
+  checkOutsideEdits(now);
+}
+
+// The items' dates as the log has them: each row's `to`, oldest first. Ids carry on from the
+// highest seen, so none is reused, even after the log is cleared.
+function replayAudit(log) {
+  if (log === undefined) { try { log = decodeCSV(fs.readFileSync(AUDIT_FILE)); } catch (err) { if (err.code !== 'ENOENT') throw err; log = ''; } }
+  auditKnown = new Map();
+  if (!log) return;
   const [header, ...rows] = parseCSV(log);
   const col = Object.fromEntries(header.map((h, i) => [h, i]));
-  auditKnown = new Map();
   for (const r of rows) {
     const id = r[col.item_id];
     auditNextId = Math.max(auditNextId, +r[col.id] + 1 || 0);
@@ -261,7 +270,6 @@ function startAudit() {
     if (!auditKnown.has(id)) auditKnown.set(id, { start: '', end: '', baseline_start: '', baseline_end: '' });
     Object.assign(auditKnown.get(id), { workspace_id: r[col.workspace_id], ref: r[col.ref], title: r[col.title], [r[col.field]]: r[col.to] });
   }
-  checkOutsideEdits(now);
 }
 
 function checkOutsideEdits(now) {
@@ -290,35 +298,53 @@ function auditSave(req, oldText, newText) {
   auditKnown = after;
 }
 
-// Clearing a workspace's history — the one time the log is rewritten. For a workspace that's
-// starting afresh (its demo or test data deleted), so what's gone stops showing in Date history
-// and What changed. Its rows leave the date log, which then starts again from its items' dates
-// now (as "Logging started"), and in every daily copy of the items, reports and updates its rows
-// are replaced with today's, so comparing with an earlier day shows no change before today.
-// Other workspaces are untouched. It runs in the items file's save queue, so no save can
-// interleave with it.
+// Clearing history — the one time the log is rewritten. For a workspace that's starting afresh
+// (its demo or test data deleted), or for every workspace after a move to a new platform, so what
+// went before stops showing in the Date log and What changed. It has to leave nothing stale behind:
+//  - the date log loses the workspace's rows, and also any row for one of its items that carries
+//    another workspace (or none), as rows from an older copy of the data can; clearing every
+//    workspace empties it. It then starts again from the items' dates now ("Logging started").
+//  - in every daily copy of the items, reports and updates, the workspace's rows are replaced with
+//    today's, so comparing with an earlier day shows no change before today. A copy with no
+//    workspace column (from before workspaces) can't say whose rows are whose, so it's replaced
+//    with today's file outright.
+//  - what the server remembers of the items' dates is rebuilt from the log as rewritten, so the
+//    next save is compared with the items as they are, not with anything cleared.
+// The files as they were are put in backups/cleared-<when>/ first, so a clear made by mistake can
+// be put back by hand. Open pages are told (history-cleared) and drop what they'd loaded. It runs
+// in the items file's save queue, so no save can interleave with it.
 const wsCol = (header) => header.findIndex(h => ['workspace_id', 'program_id', 'programme_id'].includes(h.trim().toLowerCase()));
 function clearHistory(workspaceId, req) {
+  const all = workspaceId === 'all';
   const ds = DATASETS['/api/milestones'];
   const nowText = decodeCSV(readDataset(ds) || Buffer.from(ds.header));
+  const nowItems = itemsFrom(nowText);
+  const mine = new Map([...nowItems].filter(([, m]) => all || m.workspace_id === workspaceId));
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
+  let archive = path.join(BACKUP_DIR, `cleared-${stamp}`);
+  for (let n = 2; fs.existsSync(archive); n++) archive = path.join(BACKUP_DIR, `cleared-${stamp}-${n}`);
+  const keepOriginal = (file) => { fs.mkdirSync(archive, { recursive: true }); fs.copyFileSync(file, path.join(archive, path.basename(file))); };
+  const rewrite = (file, rows) => { fs.writeFileSync(file + '.tmp', serialize(rows), 'utf8'); fs.renameSync(file + '.tmp', file); };
+
   // 1. the date log
   let removed = 0;
   let log = '';
   try { log = decodeCSV(fs.readFileSync(AUDIT_FILE)); } catch (err) { if (err.code !== 'ENOENT') throw err; }
   if (log) {
     const [header, ...rows] = parseCSV(log);
-    const col = header.indexOf('workspace_id');
-    const keep = rows.filter(r => r[col] !== workspaceId);
+    const col = header.indexOf('workspace_id'), itemCol = header.indexOf('item_id');
+    const keep = all ? [] : rows.filter(r => r[col] !== workspaceId && !mine.has(r[itemCol]));
     removed = rows.length - keep.length;
-    fs.writeFileSync(AUDIT_FILE + '.tmp', serialize([header, ...keep]), 'utf8');
-    fs.renameSync(AUDIT_FILE + '.tmp', AUDIT_FILE);
+    if (removed) { keepOriginal(AUDIT_FILE); rewrite(AUDIT_FILE, [header, ...keep]); }
   }
-  const mine = new Map([...itemsFrom(nowText)].filter(([, m]) => m.workspace_id === workspaceId));
+  replayAudit();
   appendAudit(dateChanges(new Map(), mine, {
     added: ACTIONS.started, changed: ACTIONS.started,
-    meta: { by: changedBy(req), via: 'History cleared', note: 'The dates each item had when the workspace’s history was cleared' },
+    meta: { by: changedBy(req), via: 'History cleared', note: all ? 'The dates each item had when every workspace’s history was cleared' : 'The dates each item had when the workspace’s history was cleared' },
   }));
   for (const [id, m] of mine) auditKnown.set(id, m);
+  for (const id of [...auditKnown.keys()]) if (!nowItems.has(id)) auditKnown.delete(id); // nothing remembered for items that aren't there
+
   // 2. the daily copies
   let copies = 0;
   let names = [];
@@ -327,26 +353,26 @@ function clearHistory(workspaceId, req) {
     const cur = parseCSV(decodeCSV(readDataset(DATASETS['/api/' + file]) || Buffer.from('')));
     const [curHeader = [], ...curRows] = cur;
     const curCol = wsCol(curHeader);
-    const today = curCol < 0 ? [] : curRows.filter(r => r[curCol] === workspaceId);
     for (const n of names.filter(n => new RegExp(`^${file}\\.\\d{4}-\\d{2}-\\d{2}\\.csv$`).test(n))) {
       const target = path.join(BACKUP_DIR, n);
       const [header = [], ...rows] = parseCSV(decodeCSV(fs.readFileSync(target)));
       const col = wsCol(header);
-      if (col < 0) continue;
+      keepOriginal(target);
+      if (all || col < 0) { rewrite(target, cur); copies++; continue; }
       // today's rows, in this copy's columns (an older copy may have fewer, or older names)
+      const today = curCol < 0 ? [] : curRows.filter(r => r[curCol] === workspaceId);
       const map = header.map(h => curHeader.findIndex(c => c.trim().toLowerCase() === h.trim().toLowerCase()));
       const fresh = today.map(r => map.map((i, j) => (j === col ? workspaceId : i < 0 ? '' : r[i] ?? '')));
-      const next = [header, ...rows.filter(r => r[col] !== workspaceId), ...fresh];
-      fs.writeFileSync(target + '.tmp', serialize(next), 'utf8');
-      fs.renameSync(target + '.tmp', target);
+      rewrite(target, [header, ...rows.filter(r => r[col] !== workspaceId), ...fresh]);
       copies++;
     }
   }
-  return { removed, copies };
+  broadcast('history-cleared', { workspace: workspaceId });
+  return { removed, copies, archive: fs.existsSync(archive) ? path.relative(DATA_DIR, archive) : '' };
 }
 function serveClearHistory(req, res) {
   const workspaceId = new URL(req.url, 'http://x').searchParams.get('workspace') || '';
-  if (!/^\d+$/.test(workspaceId)) return sendJSON(res, 400, { ok: false, error: 'which workspace?' });
+  if (!/^(\d+|all)$/.test(workspaceId)) return sendJSON(res, 400, { ok: false, error: 'which workspace?' });
   const ds = DATASETS['/api/milestones'];
   ds.queue = (ds.queue || Promise.resolve()).then(() => new Promise((next) => {
     ds.busy = true;
@@ -715,6 +741,16 @@ function sendJSON(res, status, out) {
 
 migrateStreams();
 startAudit();
+// node server.js --clear-history [<workspace id>|all]: clear history without the app running,
+// e.g. after copying the data to a new platform (see the README). It clears and exits.
+const clearArg = process.argv.indexOf('--clear-history');
+if (clearArg > 0) {
+  const which = process.argv[clearArg + 1] || 'all';
+  if (!/^(\d+|all)$/.test(which)) { console.error('Usage: node server.js --clear-history [<workspace id>|all]'); process.exit(1); }
+  const out = clearHistory(which, null);
+  console.log(`History cleared for ${which === 'all' ? 'every workspace' : `workspace ${which}`}: ${out.removed} date log rows removed, ${out.copies} daily copies reset${out.archive ? `; the files as they were are in ${out.archive}` : ''}.`);
+  process.exit(0);
+}
 checkFiles();
 server.listen(PORT, () => {
   console.log(`${readConfig().title || 'Tracker'} running at http://localhost:${PORT}`);
