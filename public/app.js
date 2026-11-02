@@ -1007,7 +1007,6 @@ function parseTypedDate(text, final) {
   return mo && dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d ? fmtISO(dt) : null;
 }
 function upgradeDateInput(el) {
-  if (el._proxy) return;
   if (!el._date) {
     el._date = { iso: isoOrBlank(nativeValue.get.call(el) || el.getAttribute('value')) };
     Object.defineProperty(el, 'value', {
@@ -1038,30 +1037,79 @@ function settleDateField(el) {
   nativeValue.set.call(el, showISO(el._date.iso));
   if (el._date.iso !== el._date.atFocus) { el._date.atFocus = el._date.iso; el.dispatchEvent(new Event('change', { bubbles: true })); }
 }
-// The calendar is a native date input's picker, opened over the box; it isn't seen otherwise.
-let datePickerProxy = null;
+// The calendar: a month of days under the box (above it when there's no room below). It's drawn
+// here rather than left to the browser's own picker, which lands in the wrong place in a dialog.
+let dateCal = null; // { el, pop, month (yyyy-mm-01), hi (the highlighted day) }
 function openDatePicker(el) {
-  if (!datePickerProxy) {
-    datePickerProxy = Object.assign(document.createElement('input'), { type: 'date', tabIndex: -1, _proxy: true, className: 'date-proxy' });
-    datePickerProxy.setAttribute('aria-hidden', 'true');
-    datePickerProxy.addEventListener('change', () => {
-      const f = datePickerProxy._for;
-      if (!f || !datePickerProxy.value) return;
-      f.focus();
-      setDateField(f, datePickerProxy.value);
-      nativeValue.set.call(f, showISO(f._date.iso));
-      settleDateField(f);
-    });
-  }
-  const r = el.getBoundingClientRect();
-  (el.closest('dialog') || document.body).appendChild(datePickerProxy); // a modal dialog leaves the rest of the page inert
-  Object.assign(datePickerProxy.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
-  datePickerProxy._for = el;
-  datePickerProxy.value = el._date.iso;
-  if (el.min) datePickerProxy.min = el.min; else datePickerProxy.removeAttribute('min');
-  if (el.max) datePickerProxy.max = el.max; else datePickerProxy.removeAttribute('max');
-  try { datePickerProxy.showPicker(); } catch { /* no picker here: typing still works */ }
+  if (dateCal?.el === el) return closeDatePicker();
+  closeDatePicker();
+  const pop = document.createElement('div');
+  pop.className = 'date-cal';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Choose a date');
+  (el.closest('dialog') || document.body).appendChild(pop); // a modal dialog leaves the rest of the page inert
+  const hi = el._date.iso || todayISO();
+  dateCal = { el, pop, month: hi.slice(0, 8) + '01', hi };
+  pop.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); }); // the box keeps the focus, and a menu it's in stays open
+  pop.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    if (b.dataset.step) { dateCal.month = shiftMonth(dateCal.month, +b.dataset.step); return drawDateCal(); }
+    pickCalDate(b.dataset.day ?? (b.dataset.today ? todayISO() : ''));
+  });
+  drawDateCal();
 }
+function closeDatePicker() {
+  dateCal?.pop.remove();
+  dateCal = null;
+}
+const shiftMonth = (iso, n) => { const d = parseDate(iso); return fmtISO(new Date(d.getFullYear(), d.getMonth() + n, 1)); };
+function pickCalDate(iso) {
+  const el = dateCal.el;
+  closeDatePicker();
+  el.focus();
+  setDateField(el, iso);
+  nativeValue.set.call(el, showISO(iso));
+  settleDateField(el);
+}
+function drawDateCal() {
+  const { el, pop, month, hi } = dateCal;
+  const first = parseDate(month), today = todayISO();
+  const start = addDays(month, -((first.getDay() + 6) % 7)); // weeks start on Monday
+  const allowed = (iso) => (!el.min || iso >= el.min) && (!el.max || iso <= el.max);
+  const days = Array.from({ length: 42 }, (_, i) => addDays(start, i));
+  pop.innerHTML = `<div class="dc-head"><button type="button" data-step="-1" title="Previous month" aria-label="Previous month">‹</button>
+      <b>${first.toLocaleString('en-GB', { month: 'long', year: 'numeric' })}</b>
+      <button type="button" data-step="1" title="Next month" aria-label="Next month">›</button></div>
+    <div class="dc-grid">${['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(d => `<span class="dc-wd">${d}</span>`).join('')}
+      ${days.map(d => `<button type="button" data-day="${d}" class="${[d.slice(0, 7) !== month.slice(0, 7) && 'dc-out', d === today && 'dc-today', d === el._date.iso && 'dc-sel', d === hi && 'dc-hi'].filter(Boolean).join(' ')}"
+        ${allowed(d) ? '' : 'disabled'} aria-label="${fmtNice(d)}">${+d.slice(8)}</button>`).join('')}</div>
+    <div class="dc-foot"><button type="button" data-day="" class="link-btn">Clear</button><button type="button" data-today="1" class="link-btn" ${allowed(today) ? '' : 'disabled'}>Today</button></div>`;
+  // under the box, or above it, kept inside the window
+  const r = el.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+  const top = r.bottom + 4 + h > innerHeight - 8 && r.top - 4 - h > 8 ? r.top - 4 - h : r.bottom + 4;
+  Object.assign(pop.style, { left: `${Math.max(8, Math.min(r.right - w, innerWidth - w - 8))}px`, top: `${Math.max(8, Math.min(top, innerHeight - h - 8))}px` });
+}
+// Arrow keys move round the open calendar, Page Up / Down a month, Enter takes the day, Esc closes it.
+function dateCalKey(e) {
+  const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+  if (e.key === 'Escape') closeDatePicker();
+  else if (e.key === 'Enter') pickCalDate(dateCal.hi);
+  else if (step || e.key === 'PageUp' || e.key === 'PageDown') {
+    const to = shiftMonth(dateCal.hi, e.key === 'PageUp' ? -1 : 1), last = +addDays(shiftMonth(to, 1), -1).slice(8); // the same day of that month, or its last
+    const hi = step ? addDays(dateCal.hi, step) : to.slice(0, 8) + String(Math.min(+dateCal.hi.slice(8), last)).padStart(2, '0');
+    dateCal.hi = hi;
+    dateCal.month = hi.slice(0, 8) + '01';
+    drawDateCal();
+  } else return false;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  return true;
+}
+document.addEventListener('pointerdown', (e) => { if (dateCal && !dateCal.pop.contains(e.target) && e.target !== dateCal.el) closeDatePicker(); }, true);
+window.addEventListener('resize', closeDatePicker);
+document.addEventListener('scroll', (e) => { if (dateCal && !dateCal.pop.contains(e.target)) closeDatePicker(); }, true);
+document.addEventListener('close', closeDatePicker, true); // its dialog closing
 // The browser's own events from the box are held back; setDateField / settleDateField send the real ones.
 window.addEventListener('input', (e) => {
   const el = e.target;
@@ -1076,12 +1124,14 @@ window.addEventListener('focusout', (e) => { if (e.target._date) settleDateField
 window.addEventListener('keydown', (e) => {
   const el = e.target;
   if (!el._date) return;
+  if (dateCal?.el === el && dateCalKey(e)) return;
   if (e.key === 'Enter') settleDateField(el);
   else if (e.key === 'ArrowDown' && e.altKey) { e.preventDefault(); openDatePicker(el); }
 }, true);
 window.addEventListener('click', (e) => {
   const el = e.target;
   if (el._date && !el.disabled && !el.readOnly && e.clientX > el.getBoundingClientRect().right - 28) openDatePicker(el);
+  else if (el._date && dateCal?.el === el) closeDatePicker(); // typing in the box instead
 }, true);
 // A form reset puts the boxes back to their starting dates.
 window.addEventListener('reset', (e) => {
@@ -4947,7 +4997,8 @@ const ED_TOOLS = [
   { cmd: 'link', label: '<svg viewBox="0 0 20 20"><path d="M8.5 11.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5L10 5M11.5 8.5a3.5 3.5 0 0 0-5 0L4 11a3.5 3.5 0 0 0 5 5l1-1"/></svg>', title: 'Link (⌘K)' },
 ];
 
-function mdEditor(t) {
+// `opts.paste(clipboardData)` may turn a paste into Markdown first (null: paste the plain text).
+function mdEditor(t, opts = {}) {
   if (t._ed) return t._ed;
   const wrap = document.createElement('div');
   wrap.className = 'wys';
@@ -4972,6 +5023,8 @@ function mdEditor(t) {
   body.addEventListener('keydown', (e) => edKeydown(ed, e));
   body.addEventListener('paste', (e) => {
     e.preventDefault();
+    const md = opts.paste?.(e.clipboardData);
+    if (md) return document.execCommand('insertHTML', false, mdToHtml(md));
     const text = e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
     if (!text) return;
     document.execCommand('insertHTML', false, /\n/.test(text.trim()) ? mdToHtml(text) : mdInline(escAttr(text)));
@@ -5168,9 +5221,13 @@ function htmlToMd(root) {
         walk(n, inner);
         if (!inner.length) { const t = paragraph(inline(n)); if (t.trim()) inner.push(t); }
         if (inner.length) out.push(inner.join('\n').split('\n').map(l => `> ${l}`).join('\n'));
+      } else if (n.nodeName === 'TABLE') {
+        flushLoose();
+        const rows = [...n.querySelectorAll('tr')].filter(r => r.closest('table') === n).map(r => [...r.children].map(c => inline(c).replace(/\s*\n\s*/g, ' ').trim()));
+        if (rows.length) out.push(mdTableOf(rows));
       } else if (n.nodeType === 1 && (n.nodeName === 'P' || n.nodeName === 'DIV')) {
         flushLoose();
-        if (n.querySelector('ul, ol, p, div, blockquote')) walk(n, out); // a wrapper, not a paragraph
+        if (n.querySelector('ul, ol, p, div, blockquote, table')) walk(n, out); // a wrapper, not a paragraph
         else { const t = paragraph(inline(n)); if (t.trim()) out.push(t); }
       } else if (parent === root) loose += n.nodeType === 3 ? esc(n.nodeValue.replace(/\u00a0/g, ' ')) : n.nodeName === 'BR' ? '\n' : inline({ childNodes: [n] });
     }
@@ -10583,6 +10640,7 @@ function rowsToMeetings(rows) {
 // levels; they (and letters) only count when a tab follows, as Word writes them.
 const GLYPH_BULLET = /^([ \t]*)(?:([·•●○◦▪■□▫‣⁃∙➢➤►▶✓✔\uf0b7\uf0a7\uf076\uf0d8\uf0fc\uf0a8–—])[ \t]+|([o§]|[a-z][.)]|[ivx]+[.)])\t+)(.*)$/;
 function tidyMinutes(s) {
+  if (/^\s*\{\\rtf/.test(s ?? '')) return rtfToMinutes(s); // RTF pasted (or imported) as its code
   const lines = String(s ?? '').replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n').replace(/[\u200b\u200e\u200f\ufeff]/g, '').replace(/\u00a0/g, ' ').split('\n');
   return lines.map(line => {
     let m = line.match(/^([ \t]*)([☐☑☒✅⬜])\s*(.*)$/);
@@ -10594,10 +10652,12 @@ function tidyMinutes(s) {
     if ((m = line.match(/^([ \t]*)(\d+[.)])\t+(.*)$/))) return `${m[1].replace(/\t/g, '  ')}${m[2]} ${m[3].trim()}`;
     // "Action items" / "Next steps" on a line of its own is a heading, whatever it was formatted as
     const t = line.trim();
-    if (t.length <= 40 && !/[.,;]$|:./.test(t) && t.split(/\s+/).length <= 5 && ACTION_HEAD.test(t.replace(/:$/, '')) && !/^(#|\*\*|__|[-*+] |\d+[.)] |\|)/.test(t)) return `### ${t.replace(/:$/, '')}`;
+    if (t.length <= 40 && !/\t/.test(line) && !/[.,;]$|:./.test(t) && t.split(/\s+/).length <= 5 && ACTION_HEAD.test(t.replace(/:$/, '')) && !/^(#|\*\*|__|[-*+] |\d+[.)] |\|)/.test(t)) return `### ${t.replace(/:$/, '')}`;
     return line;
-  }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }).join('\n').replace(/\n{3,}/g, '\n\n').replace(TAB_TABLE, (rows) => '\n' + mdTableOf(rows.trim().split('\n').map(r => r.split('\t').map(c => c.trim()))) + '\n').trim();
 }
+// Two or more lines in a row of cells separated by tabs: a table copied as plain text (Word, Copilot, Excel).
+const TAB_TABLE = /(?:^|\n)(?:[^\t\n]*\t[^\n]*(?:\n|$)){2,}/g;
 
 // Markdown round a run of text, inside any spaces at its ends: **  bold ** would not read as bold.
 const wrapMd = (s, mark) => s.split('\n').map(l => { const x = l.match(/^(\s*)(.*?)(\s*)$/); return x[2] ? `${x[1]}${mark}${x[2]}${mark}${x[3]}` : l; }).join('\n');
@@ -10662,7 +10722,11 @@ function htmlToMinutes(html) {
   const flush = () => { if (loose) push(lineOf(loose)); loose = null; };
   function walk(parent) {
     for (const n of parent.childNodes) {
-      if (!isBlock(n)) { if (n.nodeType === 1 || n.nodeType === 3) loose = (loose || '') + inline({ childNodes: [n] }); continue; }
+      if (!isBlock(n)) {
+        if (n.nodeType === 1 && [...n.querySelectorAll('*')].some(isBlock)) { flush(); walk(n); continue; } // a span or <b> round whole paragraphs
+        if (n.nodeType === 1 || n.nodeType === 3) loose = (loose || '') + inline({ childNodes: [n] });
+        continue;
+      }
       flush();
       const tag = n.nodeName, st = styleOf(n), cls = n.getAttribute('class') || '';
       const level = /^H[1-6]$/.test(tag) ? +tag[1] : n.getAttribute('role') === 'heading' ? +n.getAttribute('aria-level') || 2 : /MsoTitle/.test(cls) ? 1 : 0;
@@ -10777,19 +10841,33 @@ const minutesFrom = (text, kind = '') => (kind === 'rtf' || /^\s*\{\\rtf/.test(t
 const looksLikeMd = (s) => /^(#{1,6}\s|\s*\|.*\|\s*$|\s*[-*+]\s|\s*\d+[.)]\s)|\*\*\S/m.test(s);
 
 function insertMinutes(t, text) {
+  const ed = t._ed;
+  if (ed && !ed.wrap.classList.contains('source')) { // the formatted editor
+    if (!ed.body.contains(document.activeElement) && document.activeElement !== ed.body) focusText(t);
+    document.execCommand('insertHTML', false, mdToHtml(text));
+    return edCommit(ed);
+  }
   t.focus();
   if (!document.execCommand('insertText', false, text)) t.setRangeText(text, t.selectionStart, t.selectionEnd, 'end'); // execCommand keeps undo working
   t.dispatchEvent(new Event('input', { bubbles: true }));
 }
+// The clipboard as minutes, or null to let it paste as it is. Rich text (headings, lists, tables)
+// wins over the plain copy, unless the plain copy is Markdown already and the rich one has no
+// structure; a conversion that loses the lines (all on one) gives way to the plain text.
+function clipboardMinutes(cd) {
+  const plain = cd.getData('text/plain'), html = cd.getData('text/html'), rtf = cd.getData('text/rtf');
+  if (/^\s*\{\\rtf/.test(plain)) return rtfToMinutes(plain);
+  if (!/\n|\u2028|\u2029|\v/.test(plain.trim()) && !/<(table|ul|ol|h[1-6])\b/i.test(html)) return null; // a word or a line
+  const structured = /<(h[1-6]|ul|ol|li|table)\b|class="?Mso/i.test(html);
+  if (looksLikeMd(plain) && !structured) return tidyMinutes(plain);
+  let md = html && (structured || /<(p|div|br|b|strong)\b/i.test(html)) ? htmlToMinutes(html) : rtf ? rtfToMinutes(rtf) : '';
+  const lines = (x) => x.split('\n').filter(l => l.trim()).length;
+  const fallback = tidyMinutes(plain);
+  if (!md || lines(md) < lines(fallback) / 2) md = fallback;
+  return md || null;
+}
 function pasteMinutes(e) {
-  const cd = e.clipboardData, plain = cd.getData('text/plain'), html = cd.getData('text/html'), rtf = cd.getData('text/rtf');
-  if (!/\n|\u2028|\u2029|\v/.test(plain.trim()) && !/^\s*\{\\rtf/.test(plain)) return; // a word or a line: the browser pastes it
-  let md;
-  if (/^\s*\{\\rtf/.test(plain)) md = rtfToMinutes(plain);
-  else if (looksLikeMd(plain)) md = tidyMinutes(plain);
-  else if (html && /<(p|h[1-6]|ul|ol|li|table|br|div)\b/i.test(html)) md = htmlToMinutes(html);
-  else if (rtf) md = rtfToMinutes(rtf);
-  else md = tidyMinutes(plain);
+  const md = clipboardMinutes(e.clipboardData);
   if (!md) return;
   e.preventDefault();
   insertMinutes(e.target, md);
@@ -10848,14 +10926,14 @@ const ACTION_MARK = /^\**\s*(action|ap|todo|to\s*do|action\s*(item|point))\s*\**
 const CHECKBOX = /^\[([ xX])\]\s*/;
 
 function actionCandidates(minutes, meetingDate, people = []) {
-  const lines = tidyMinutes(minutes).split('\n');
+  const lines = tidyMinutes(minutes).replace(/\\([\\`*_~[\]#>+\-.)•|])/g, '$1').split('\n'); // the editor's escapes: \[ \] is a checkbox all the same
   const found = [];
   let section = 0;  // the level of the actions heading we're under (a bold or "Actions:" line counts as 7); 0 outside one
   let table = null; // the columns of the table being read: { text, owner, due }
   let groupOwner = ''; // a name on a bullet of its own, owning the bullets indented under it
   for (const raw of lines) {
     const line = raw.trim();
-    if (!line) { table = null; continue; }
+    if (!line) { if (table && section) section = 0; table = null; continue; }
     const h = line.match(/^(#{1,6})\s+(.*?)\s*#*$/) || line.match(/^(?:\*\*|__)(.+?)(?:\*\*|__):?$/) || line.match(/^([A-Za-z][\w &/-]{1,40}):$/);
     if (h) {
       const level = h[2] !== undefined ? h[1].length : 7, text = (h[2] !== undefined ? h[2] : h[1]).replace(/[*_`]/g, '').trim();
@@ -10881,6 +10959,7 @@ function actionCandidates(minutes, meetingDate, people = []) {
       if (cell(table.text)) found.push({ raw: cell(table.text), owner: cell(table.owner), dueText: cell(table.due) });
       continue;
     }
+    if (table && section) section = 0; // an actions table is the section: what follows it is something else
     table = null;
     const bullet = line.match(/^(?:[-*+•]|\d+[.)])\s+(.*)$/);
     const body = bullet ? bullet[1] : line;
@@ -11331,6 +11410,7 @@ function openMeetingDialog(m, preset = {}) {
   const v = m || { title: '', date: todayISO(), series_id: preset.series_id || '', attendees: '', link: '', minutes: '' };
   fillSeriesSelect(f.series_id, v.series_id);
   for (const k of MT_FIELDS) if (k !== 'series_id') f[k].value = v[k] ?? '';
+  edLoad(f.minutes);
   if (!m && v.series_id) takeSeries(f, seriesById(v.series_id));
   document.getElementById('mt-delete').hidden = !m;
   document.getElementById('mt-error').textContent = '';
@@ -11540,11 +11620,13 @@ function openActionDialog(a, preset = {}) {
   adOpened = a && structuredClone(a);
   const f = document.getElementById('action-form').elements;
   const v = a || { ref: nextActionRef(), text: '', description: '', owner: '', due: '', status: 'Open', meeting_id: preset.meeting_id || '', links: [] };
-  f.meeting_id.innerHTML = '<option value="">— none: added by hand</option>'
-    + meetingsOf().map(m => `<option value="${m.id}" ${m.id === v.meeting_id ? 'selected' : ''}>${escAttr(`${m.date ? `${fmtShort(m.date)} · ` : ''}${m.title}`)}</option>`).join('')
-    + (v.meeting_id && !meetingById(v.meeting_id) ? `<option value="${escAttr(v.meeting_id)}" selected>(a deleted meeting)</option>` : '');
+  // Where the action came from is fixed: a link back to that meeting's minutes, not a choice.
+  const from = meetingById(v.meeting_id);
+  document.getElementById('ad-from').innerHTML = from
+    ? `<button type="button" class="link-btn" data-mt-open="${from.id}" title="Read the minutes of this meeting">${escAttr(from.title) || '(untitled)'}</button>${from.date ? ` <small>${fmtNice(from.date)}</small>` : ''}`
+    : `<span class="muted">${v.meeting_id ? 'A deleted meeting' : 'Added by hand'}</span>`;
   f.status.innerHTML = optionList(ACTION_STATUSES, v.status);
-  for (const k of AD_FIELDS) if (k !== 'meeting_id' && k !== 'status') f[k].value = v[k] ?? '';
+  for (const k of AD_FIELDS) if (k !== 'status') f[k].value = v[k] ?? '';
   adLinks = [...v.links];
   document.getElementById('ad-delete').hidden = !a;
   document.getElementById('ad-error').textContent = '';
@@ -12201,9 +12283,12 @@ function wireMeetings() {
   const backdrop = (id) => { const d = document.getElementById(id); d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); };
   document.getElementById('meeting-form').addEventListener('submit', submitMeeting);
   const mins = document.getElementById('meeting-form').elements.minutes;
-  mins.addEventListener('paste', pasteMinutes);
-  mins.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
-  mins.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) { e.preventDefault(); readMinutesFile(mins, e.dataTransfer.files[0]); } });
+  mdEditor(mins, { paste: clipboardMinutes }); // edited as formatted text, kept as Markdown
+  mins.addEventListener('paste', pasteMinutes); // the Markdown view
+  for (const box of [mins, mins._ed.body]) {
+    box.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
+    box.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) { e.preventDefault(); readMinutesFile(mins, e.dataTransfer.files[0]); } });
+  }
   document.getElementById('mt-file').addEventListener('change', (e) => { if (e.target.files[0]) readMinutesFile(mins, e.target.files[0]); e.target.value = ''; });
   document.getElementById('mt-file-btn').onclick = () => document.getElementById('mt-file').click();
   document.getElementById('meeting-form').elements.series_id.addEventListener('change', (e) => {
@@ -12260,6 +12345,7 @@ function wireMeetings() {
   backdrop('extract-dialog');
 
   document.getElementById('action-form').addEventListener('submit', submitAction);
+  document.getElementById('ad-from').addEventListener('click', (e) => { const b = e.target.closest('[data-mt-open]'); if (b) showMeeting(b.dataset.mtOpen); });
   document.getElementById('ad-cancel').onclick = close('action-dialog');
   document.getElementById('ad-close').onclick = close('action-dialog');
   document.getElementById('ad-delete').onclick = deleteAction;

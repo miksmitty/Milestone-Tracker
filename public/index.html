@@ -981,7 +981,7 @@
         <label>Series<select name="series_id" title="The regular meeting this is one of, or a one-off"></select></label>
         <label class="span2">Attendees<input name="attendees" placeholder="Who was there — separate names with commas" /></label>
         <label class="span3">Link<input name="link" placeholder="Where the recording, transcript or original notes live (optional)" /></label>
-        <label class="span3">Minutes <span class="md-hint">— paste them in as written, from Copilot, Teams, Word or an LLM: headings, lists, tables and bold are kept. Or <button type="button" id="mt-file-btn" class="link-btn">open a file</button> (RTF, text, Markdown or HTML).</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here, or drop an RTF file on this box"></textarea></label>
+        <label class="span3">Minutes <span class="md-hint">— paste them in as written, from Copilot, Teams, Word or an LLM: headings, lists, tables and bold are kept. Or <button type="button" id="mt-file-btn" class="link-btn">open a file</button> (RTF, text, Markdown or HTML).</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here, or drop an RTF file here"></textarea></label>
         <input type="file" id="mt-file" accept=".rtf,.txt,.md,.markdown,.html,.htm,text/rtf,application/rtf,text/plain,text/markdown,text/html" hidden />
       </div>
       <p id="mt-error" class="dlg-error"></p>
@@ -1107,7 +1107,7 @@
         <label class="span3">Title<input name="text" placeholder="What is to be done, in a line" /></label>
         <label class="span3">Description<textarea name="description" rows="4" placeholder="More detail: background, what done looks like, who else is involved"></textarea></label>
         <label>Owner<input name="owner" list="people-list" placeholder="Who" /></label>
-        <label class="span2">From meeting<select name="meeting_id"></select></label>
+        <div class="span2 field"><span class="field-label">From meeting</span><input type="hidden" name="meeting_id" /><div id="ad-from" class="ad-from"></div></div>
         <div class="span3 field"><span class="field-label">Linked to <small>— <span data-term="items">items</span> or streams it concerns</small></span><div id="ad-links" class="deps"></div></div>
       </div>
       <p id="ad-error" class="dlg-error"></p>
