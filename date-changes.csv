@@ -75,3 +75,7 @@ id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 770,2026-11-01T19:38:09.480Z,,2,37,4.3,Office Open,end,,2026-12-14,,Logging started,History cleared,The dates each item had when every workspace’s history was cleared
 771,2026-11-01T19:38:09.480Z,,3,39,,Decom,start,,2027-12-31,,Logging started,History cleared,The dates each item had when every workspace’s history was cleared
 772,2026-11-01T19:38:09.480Z,,3,39,,Decom,end,,2027-12-31,,Logging started,History cleared,The dates each item had when every workspace’s history was cleared
+773,2026-11-02T10:45:12.836Z,,1,90,,Requirements Gathering (copy),start,,2026-01-13,,Added,New item dialog,
+774,2026-11-02T10:45:12.836Z,,1,90,,Requirements Gathering (copy),end,,2026-02-05,,Added,New item dialog,
+775,2026-11-02T10:45:13.643Z,,1,90,,Requirements Gathering (copy),start,2026-01-13,,,Deleted,Undo,Undone: Added Requirements Gathering (copy)
+776,2026-11-02T10:45:13.643Z,,1,90,,Requirements Gathering (copy),end,2026-02-05,,,Deleted,Undo,Undone: Added Requirements Gathering (copy)

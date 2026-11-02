@@ -2796,14 +2796,15 @@ const reportsOff = (wsId) => hiddenFields(wsId).includes('reports');
 const itemLinks = (m) => Object.entries({ GitLab: 'gitlab_url', 'Use case': 'use_case_url' })
   .filter(([, k]) => m[k] && !linkHidden(k, m.workspace_id || undefined)).map(([l, k]) => [l, m[k]]);
 
-function openEditDialog(m) {
+// With `copy` (and no m), a new item starts as a copy of that one: Duplicate on the chart.
+function openEditDialog(m, copy) {
   hideTip();
   editing = m;
   editOpened = m && structuredClone(m);
   const f = document.getElementById('edit-form').elements;
   const last = state.items.at(-1);
   const today = fmtISO(new Date());
-  const v = m || {
+  const v = m || (copy && { ...copy, ref: '', title: `${copy.title} (copy)`, deps: [...copy.deps] }) || {
     ref: '', title: '', description: '', stream_id: last?.stream_id || workspaceStreams()[0]?.id || '', substream: '', owner: '', gitlab_url: '', use_case_url: '',
     type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, parent: '', deps: [],
   };
@@ -2821,7 +2822,7 @@ function openEditDialog(m) {
   if (!v.stream_id) { pickEdStream(f.stream_id, true); f.newstream.value = m ? '' : 'General'; } // no streams yet: name the first
   edDeps = [...v.deps];
 
-  document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : `New ${T.item}`;
+  document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : copy ? `Duplicate ${itemLabel(copy)}` : `New ${T.item}`;
   document.getElementById('ed-delete').hidden = !m;
   document.getElementById('ed-report').hidden = !m || reportsOff();
   const n = m ? reportsFor(m.id).length : 0;
@@ -2840,6 +2841,7 @@ function openEditDialog(m) {
   updateEdType();
   document.getElementById('edit-dialog').showModal();
   f.title.focus();
+  if (copy) f.title.select();
 }
 
 // The workspace's streams (A–Z) by id, plus a way to start a new one.
@@ -4411,6 +4413,7 @@ function renderQuick() {
       ${reportsOff() ? '' : `<button type="button" class="btn" data-act="report">New report…</button>
       <button type="button" class="btn" data-act="history" ${n ? '' : 'disabled'}>Reports (${n})</button>`}
       <button type="button" class="btn" data-act="dates">Date log</button>
+      <button type="button" class="btn" data-act="duplicate" title="A new ${escAttr(T.item)} with the same details, to adjust before saving">Duplicate…</button>
       <button type="button" class="btn" data-act="edit">Edit details…</button>
     </div>
     </form>`;
@@ -4466,6 +4469,7 @@ function onQuickClick(e) {
   hideQuick();
   if (act === 'report') openReportDialog({ itemId: m.id });
   else if (act === 'edit') openEditDialog(m);
+  else if (act === 'duplicate') openEditDialog(null, m);
   else if (act === 'history') showReportsFor(m.id);
   else if (act === 'dates') showDatesFor(m.id);
 }
