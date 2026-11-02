@@ -2873,8 +2873,86 @@ function renderEdDeps() {
   const opts = state.items.filter(p => p !== editing && !edDeps.includes(p.id)).sort(cmpRef);
   document.getElementById('ed-deps').innerHTML =
     edDeps.map(d => `<span class="chip" title="${escAttr(byId.get(d)?.title)}">${escAttr(itemLabel(byId.get(d)))}<button type="button" data-edrm="${d}" title="Remove dependency">×</button></span>`).join('') +
-    `<select id="ed-adddep" class="add-dep"><option value="">+ add dependency</option>${opts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select>`;
+    `<input id="ed-adddep" class="add-dep" placeholder="+ add dependency…" autocomplete="off" />`;
 }
+
+/* A dependency is picked from a searchable list rather than a plain dropdown: type to narrow it by
+   ref, title, stream or sub-stream, and each entry shows where it sits (stream › sub-stream).
+   The box fires a `deppick` event carrying the chosen item's id. */
+function depCandidates(input) {
+  if (input.id === 'ed-adddep') return state.items.filter(p => p !== editing && !edDeps.includes(p.id));
+  const m = state.items[+input.dataset.adddep];
+  return m ? state.items.filter(p => p.id !== m.id && !m.deps.includes(p.id)) : [];
+}
+let depPop = null; // {input, el, list, active}
+function openDepPicker(input) {
+  if (depPop?.input !== input) closeDepPicker();
+  if (!depPop) {
+    const el = document.createElement('div');
+    el.className = 'dep-pop';
+    el.setAttribute('role', 'listbox');
+    // Inside a modal dialog the list has to live in the dialog too, or it sits behind it.
+    (input.closest('dialog') || document.body).appendChild(el);
+    el.addEventListener('mousedown', (e) => e.preventDefault()); // keep the focus in the box
+    el.addEventListener('click', (e) => { const o = e.target.closest('[data-pick]'); if (o) pickDep(o.dataset.pick); });
+    depPop = { input, el, list: [], active: 0 };
+  }
+  const q = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const where = (p) => [streamName(p.stream_id), p.substream].filter(Boolean).join(' › ');
+  depPop.list = depCandidates(input).sort(cmpRef)
+    .filter(p => { const hay = [p.ref, p.title, where(p)].join(' ').toLowerCase(); return q.every(w => hay.includes(w)); });
+  depPop.active = Math.min(depPop.active, Math.max(0, depPop.list.length - 1));
+  depPop.el.innerHTML = depPop.list.length
+    ? depPop.list.map((p, i) => `<div class="dep-opt${i === depPop.active ? ' active' : ''}" role="option" data-pick="${p.id}">
+        <span class="dep-opt-title">${p.ref ? `<b>${escAttr(p.ref)}</b> ` : ''}${escAttr(p.title)}</span>
+        <span class="dep-opt-where">${escAttr(where(p) || 'No stream')}</span></div>`).join('')
+    : '<div class="dep-none">Nothing matches</div>';
+  placeDepPicker();
+}
+function placeDepPicker() {
+  const r = depPop.input.getBoundingClientRect();
+  const w = Math.max(r.width, 320);
+  const below = window.innerHeight - r.bottom;
+  Object.assign(depPop.el.style, {
+    left: `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`, width: `${w}px`,
+    ...(below < 220 && r.top > below
+      ? { top: '', bottom: `${window.innerHeight - r.top + 4}px`, maxHeight: `${Math.min(320, r.top - 12)}px` }
+      : { bottom: '', top: `${r.bottom + 4}px`, maxHeight: `${Math.min(320, below - 12)}px` }),
+  });
+}
+function closeDepPicker() {
+  depPop?.el.remove();
+  depPop = null;
+}
+function pickDep(id) {
+  const input = depPop.input;
+  closeDepPicker();
+  input.value = '';
+  input.dispatchEvent(new CustomEvent('deppick', { bubbles: true, detail: id }));
+}
+document.addEventListener('focusin', (e) => { if (e.target.matches?.('input.add-dep')) { if (depPop) depPop.active = 0; openDepPicker(e.target); } });
+document.addEventListener('input', (e) => { if (e.target.matches?.('input.add-dep')) { if (depPop) depPop.active = 0; openDepPicker(e.target); } });
+document.addEventListener('focusout', (e) => { if (depPop?.input === e.target) closeDepPicker(); });
+// A box redrawn away while its list is open never reports losing the focus, so a click elsewhere closes it too.
+document.addEventListener('mousedown', (e) => { if (depPop && !depPop.el.contains(e.target) && e.target !== depPop.input) closeDepPicker(); }, true);
+document.addEventListener('keydown', (e) => {
+  if (!depPop || e.target !== depPop.input) return;
+  const n = depPop.list.length;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (n) depPop.active = (depPop.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+    depPop.el.querySelectorAll('.dep-opt').forEach((o, i) => o.classList.toggle('active', i === depPop.active));
+    depPop.el.querySelector('.dep-opt.active')?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    if (n) pickDep(depPop.list[depPop.active].id);
+  } else if (e.key === 'Escape') {
+    depPop.input.value = '';
+    closeDepPicker();
+  } else return;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
+window.addEventListener('resize', closeDepPicker);
+document.addEventListener('scroll', (e) => { if (depPop && !depPop.el.contains(e.target)) placeDepPicker(); }, true);
 
 // A milestone shows one date; a task shows start and end.
 function updateEdType() {
@@ -3677,7 +3755,6 @@ function renderEditor(highlight = [], keepOrder = false) {
 
     const parentOpts = milestones.filter(p => p.id !== m.id);
     if (m.parent && !parentOpts.some(p => p.id === m.parent)) parentOpts.push(byId.get(m.parent));
-    const depOpts = state.items.filter(p => p.id !== m.id && !m.deps.includes(p.id)).sort(cmpRef);
     const chips = m.deps.map(d => `
       <span class="chip" title="${escAttr(byId.get(d)?.title)}">${escAttr(itemLabel(byId.get(d)))}<button data-rmdep="${i}" data-dep="${d}" title="Remove dependency">×</button></span>`).join('');
     const dup = refCount.get(m.ref) > 1;
@@ -3705,7 +3782,7 @@ function renderEditor(highlight = [], keepOrder = false) {
       status: quick ? `<div class="rag-pick sm compact">${ragButtons(m.status, `data-i="${i}"`)}</div>`
         : `<select data-i="${i}" data-k="status" class="status-sel" style="color:${pal(m.status).dark}">${statusOptions(m.status)}</select>`,
       parent: `<select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select>`,
-      deps: `<div class="deps">${chips}<select data-adddep="${i}" class="add-dep"><option value="">+ add</option>${depOpts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select></div>`,
+      deps: `<div class="deps">${chips}<input data-adddep="${i}" class="add-dep" placeholder="+ add" autocomplete="off" /></div>`,
       actions: quick ? (reportsOff() ? '' : `<button class="btn btn-sm" data-report="${m.id}" title="Write a report on this ${escAttr(T.item)}">New report</button>`)
         : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
     };
@@ -3768,15 +3845,17 @@ async function applyTableChange(m, changes, msg) {
   scheduleSave([msg, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
 }
 
+function onEditorDepPick(e) {
+  const t = e.target;
+  syncEditorToState();
+  const m = state.items[+t.dataset.adddep];
+  return applyTableChange(m, { deps: [...m.deps, e.detail] }).then(() => refocusGrid(`[data-adddep="${t.dataset.adddep}"]`));
+}
+
 function onEditorChange(e) {
   const t = e.target;
 
-  if (t.dataset.adddep != null) {
-    syncEditorToState();
-    const m = state.items[+t.dataset.adddep];
-    if (!t.value) return;
-    return applyTableChange(m, { deps: [...m.deps, t.value] }).then(() => refocusGrid(`[data-adddep="${t.dataset.adddep}"]`));
-  }
+  if (t.dataset.adddep != null) return; // typed search text, not a pick (see onEditorDepPick)
 
   const k = t.dataset.k;
   if (!k) return;
@@ -12211,8 +12290,8 @@ function wireEvents() {
     const rm = e.target.closest('[data-edrm]');
     if (rm) { edDeps = edDeps.filter(d => d !== rm.dataset.edrm); renderEdDeps(); document.getElementById('ed-adddep').focus(); }
   });
-  document.getElementById('ed-deps').addEventListener('change', (e) => {
-    if (e.target.id === 'ed-adddep' && e.target.value) { edDeps.push(e.target.value); renderEdDeps(); document.getElementById('ed-adddep').focus(); }
+  document.getElementById('ed-deps').addEventListener('deppick', (e) => {
+    edDeps.push(e.detail); renderEdDeps(); document.getElementById('ed-adddep').focus();
   });
 
   // editor table
@@ -12236,6 +12315,7 @@ function wireEvents() {
   };
 
   document.getElementById('editor-body').addEventListener('change', onEditorChange);
+  document.getElementById('editor-body').addEventListener('deppick', onEditorDepPick);
   document.getElementById('editor-body').addEventListener('click', onEditorClick);
   document.getElementById('editor-body').addEventListener('focusout', (e) => { if (pendingDates.has(e.target)) applyDateEdit(e.target); });
   document.getElementById('editor-body').addEventListener('keydown', (e) => { if (e.key === 'Enter' && pendingDates.has(e.target)) applyDateEdit(e.target); });
