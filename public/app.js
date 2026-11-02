@@ -10094,7 +10094,8 @@ function downloadPNG() {
 const SERIES_COLUMNS = ['id', 'workspace_id', 'name', 'cadence', 'start', 'attendees', 'notes', 'created', 'updated'];
 const MEETING_CADENCES = ['Weekly', 'Fortnightly', 'Monthly'];
 const MEETING_COLUMNS = ['id', 'workspace_id', 'title', 'date', 'series_id', 'attendees', 'link', 'minutes', 'created', 'updated'];
-const ACTION_COLUMNS = ['id', 'workspace_id', 'meeting_id', 'ref', 'text', 'owner', 'due', 'status', 'links', 'done_at', 'created', 'updated'];
+// An action's `text` is its title (the column keeps its first name, so older files still load).
+const ACTION_COLUMNS = ['id', 'workspace_id', 'meeting_id', 'ref', 'text', 'description', 'owner', 'due', 'status', 'links', 'done_at', 'created', 'updated'];
 const ACTION_STATUSES = ['Open', 'Done'];
 
 // Rows as records, by column name; ids that aren't positive integers, or repeat, are replaced.
@@ -10180,7 +10181,7 @@ const DONE_WORDS = /^(done|complete|completed|closed|finished|yes|y|x|✓)$/i;
 function rowsToActions(rows) {
   const ids = new Set(state.workspaces.map(p => p.id));
   return readRecords(rows, ACTION_COLUMNS).map(a => ({
-    ...a, due: fileDate(a.due), status: DONE_WORDS.test(a.status) ? 'Done' : 'Open',
+    ...a, due: fileDate(a.due), status: DONE_WORDS.test(a.status) ? 'Done' : 'Open', description: a.description.replace(/\r\n?/g, '\n'),
     links: [...new Set(a.links.split(';').map(raidLink).filter(Boolean))],
   })).filter(a => ids.has(a.workspace_id) && a.text);
 }
@@ -10410,7 +10411,7 @@ function setMeetingsMode(mode) {
   saveAppPrefs({ meetingsMode: mtMode });
 }
 const searchWords = (q) => q.toLowerCase().split(/\s+/).filter(Boolean);
-const meetingHay = (m) => [m.title, seriesName(m.series_id), m.attendees, m.date, m.date && fmtNice(m.date), m.link, mdToText(m.minutes), ...actionsFor(m.id).flatMap(a => [a.ref, a.text, a.owner])].join(' ').toLowerCase();
+const meetingHay = (m) => [m.title, seriesName(m.series_id), m.attendees, m.date, m.date && fmtNice(m.date), m.link, mdToText(m.minutes), ...actionsFor(m.id).flatMap(a => [a.ref, a.text, a.description, a.owner])].join(' ').toLowerCase();
 function meetingMatches(m, words) {
   if (mtFilter.series && m.series_id !== mtFilter.series) return false;
   if (!words.length) return true;
@@ -10512,7 +10513,7 @@ function renderMeetingList() {
 
 const actionLine = (a) => `<li class="mt-act${isActionDone(a) ? ' done' : ''}${actionOverdue(a) ? ' late' : ''}">
     <label class="mt-act-tick" title="${isActionDone(a) ? 'Done — untick to reopen' : 'Tick when done'}"><input type="checkbox" data-act-done="${a.id}" ${isActionDone(a) ? 'checked' : ''} /></label>
-    <button type="button" class="mt-act-text" data-act-edit="${a.id}" title="Edit this action">${a.ref ? `<b>${escAttr(a.ref)}</b> ` : ''}${escAttr(a.text)}</button>
+    <button type="button" class="mt-act-text" data-act-edit="${a.id}" title="Edit this action">${a.ref ? `<b>${escAttr(a.ref)}</b> ` : ''}${escAttr(a.text)}${a.description ? `<span class="mt-act-desc">${escAttr(a.description)}</span>` : ''}</button>
     <span class="mt-act-meta">${escAttr(a.owner) || '<i>no owner</i>'}${a.due ? ` · <span class="mt-due">${actionOverdue(a) ? 'overdue' : 'due'} ${fmtShort(a.due)}</span>` : ''}</span></li>`;
 
 function renderMeetingPane(words = []) {
@@ -10595,7 +10596,7 @@ function updateMeetingsBadge() {
 // columns from their headings (see makeTable). It starts filtered to open actions.
 const ACT_COLS = [
   { key: 'ref', label: 'Ref', w: 84 },
-  { key: 'text', label: 'Action', w: 380 },
+  { key: 'text', label: 'Title', w: 380 },
   { key: 'owner', label: 'Owner', w: 140, blank: '(No owner)' },
   { key: 'due', label: 'Due', w: 110, kind: 'date', show: fmtNice, blank: '(No date)' },
   { key: 'meeting_id', label: 'From', w: 210, vals: (a) => actionSource(a), sort: (a) => meetingById(a.meeting_id)?.date || '', title: 'The meeting the action was taken from' },
@@ -10621,7 +10622,7 @@ function actionDueNote(a) {
 }
 const ACT_CELLS = {
   ref: (a) => `<td class="act-ref">${a.ref ? escAttr(a.ref) : dash}</td>`,
-  text: (a) => `<td class="act-text">${escAttr(a.text)}${a.links.length ? `<div class="act-links">${a.links.map(l => linkChip(l)).join('')}</div>` : ''}</td>`,
+  text: (a) => `<td class="act-text">${escAttr(a.text)}${a.description ? `<div class="act-desc">${escAttr(a.description)}</div>` : ''}${a.links.length ? `<div class="act-links">${a.links.map(l => linkChip(l)).join('')}</div>` : ''}</td>`,
   owner: (a) => `<td>${ownerChip(a.owner)}</td>`,
   due: (a) => `<td class="act-due">${a.due ? `<span class="${actionOverdue(a) ? 'late' : ''}" ${actionOverdue(a) ? 'title="Overdue"' : ''}>${fmtShort(a.due)}</span>${actionDueNote(a)}` : dash}</td>`,
   meeting_id: (a) => { const m = meetingById(a.meeting_id); return `<td class="act-from">${m ? `<button type="button" class="link-btn" data-mt-open="${m.id}" title="Read the minutes">${escAttr(m.title) || '(untitled)'}</button>${m.date ? `<small>${fmtShort(m.date)}</small>` : ''}` : `<span class="muted">${a.meeting_id ? 'A deleted meeting' : 'Added by hand'}</span>`}</td>`; },
@@ -10630,7 +10631,7 @@ const ACT_CELLS = {
 };
 function actionMatches(a, words) {
   if (!words.length) return true;
-  const hay = [a.ref, a.text, a.owner, a.status, a.due, actionSource(a), ...a.links.map(l => linkInfo(l).label)].join(' ').toLowerCase();
+  const hay = [a.ref, a.text, a.description, a.owner, a.status, a.due, actionSource(a), ...a.links.map(l => linkInfo(l).label)].join(' ').toLowerCase();
   return words.every(w => hay.includes(w));
 }
 function renderActions() {
@@ -10666,8 +10667,8 @@ function downloadMeetingsCSV() {
   const slug = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
   let head, lines, name;
   if (mtMode === 'actions') {
-    head = ['Ref', 'Action', 'Owner', 'Due', 'Status', 'Done on', 'Meeting', 'Meeting date', 'Linked to'];
-    lines = actRows.map(a => [a.ref, a.text, a.owner, a.due, a.status, a.done_at.slice(0, 10), meetingById(a.meeting_id)?.title || '', meetingById(a.meeting_id)?.date || '', a.links.map(l => linkInfo(l).title).join('; ')]);
+    head = ['Ref', 'Title', 'Description', 'Owner', 'Due', 'Status', 'Done on', 'Meeting', 'Meeting date', 'Linked to'];
+    lines = actRows.map(a => [a.ref, a.text, a.description, a.owner, a.due, a.status, a.done_at.slice(0, 10), meetingById(a.meeting_id)?.title || '', meetingById(a.meeting_id)?.date || '', a.links.map(l => linkInfo(l).title).join('; ')]);
     name = 'meeting-actions';
   } else {
     head = ['Date', 'Title', 'Series', 'Attendees', 'Link', 'Minutes', 'Open actions', 'Actions'];
@@ -10885,7 +10886,7 @@ async function submitExtract(e) {
   for (const r of rows) {
     const ref = nextActionRef(m.workspace_id, taken);
     taken.push(ref);
-    state.actions.push({ id: nextActionId(), workspace_id: m.workspace_id, meeting_id: m.id, ref, text: r.text.trim(), owner: r.owner.trim(), due: r.due, status: r.done ? 'Done' : 'Open', links: [], done_at: r.done ? now : '', created: now, updated: now });
+    state.actions.push({ id: nextActionId(), workspace_id: m.workspace_id, meeting_id: m.id, ref, text: r.text.trim(), description: '', owner: r.owner.trim(), due: r.due, status: r.done ? 'Done' : 'Open', links: [], done_at: r.done ? now : '', created: now, updated: now });
   }
   document.getElementById('extract-dialog').close();
   rerenderCurrentView();
@@ -10895,7 +10896,7 @@ async function submitExtract(e) {
 
 /* ---- the action dialog ---- */
 let adEditing = null, adOpened = null, adLinks = [];
-const AD_FIELDS = ['ref', 'text', 'owner', 'due', 'status', 'meeting_id'];
+const AD_FIELDS = ['ref', 'text', 'description', 'owner', 'due', 'status', 'meeting_id'];
 
 function openActionDialog(a, preset = {}) {
   hideQuick();
@@ -10903,7 +10904,7 @@ function openActionDialog(a, preset = {}) {
   adEditing = a;
   adOpened = a && structuredClone(a);
   const f = document.getElementById('action-form').elements;
-  const v = a || { ref: nextActionRef(), text: '', owner: '', due: '', status: 'Open', meeting_id: preset.meeting_id || '', links: [] };
+  const v = a || { ref: nextActionRef(), text: '', description: '', owner: '', due: '', status: 'Open', meeting_id: preset.meeting_id || '', links: [] };
   f.meeting_id.innerHTML = '<option value="">— none: added by hand</option>'
     + meetingsOf().map(m => `<option value="${m.id}" ${m.id === v.meeting_id ? 'selected' : ''}>${escAttr(`${m.date ? `${fmtShort(m.date)} · ` : ''}${m.title}`)}</option>`).join('')
     + (v.meeting_id && !meetingById(v.meeting_id) ? `<option value="${escAttr(v.meeting_id)}" selected>(a deleted meeting)</option>` : '');
@@ -10940,7 +10941,7 @@ async function submitAction(e) {
   const err = document.getElementById('ad-error');
   const v = Object.fromEntries(AD_FIELDS.map(k => [k, f[k].value.trim()]));
   v.links = [...adLinks];
-  if (!v.text) return (err.textContent = 'Say what is to be done.');
+  if (!v.text) return (err.textContent = 'Give the action a title: what is to be done.');
   if (v.due && !parseDate(v.due)) return (err.textContent = 'The due date isn’t a date.');
   if (v.ref && actionsOf().some(a => a !== adEditing && a.ref.toLowerCase() === v.ref.toLowerCase())) return (err.textContent = `${v.ref} is already used in this workspace.`);
   if (adEditing && !state.actions.includes(adEditing)) return (err.textContent = 'Someone else has just deleted this action.');
@@ -10974,14 +10975,14 @@ async function deleteAction() {
 
 const MI_FIELDS = {
   meetings: ['title', 'date', 'series', 'attendees', 'link', 'minutes', 'actions'],
-  actions: ['ref', 'text', 'owner', 'due', 'status', 'done_at', 'meeting', 'meeting_date', 'links'],
+  actions: ['ref', 'text', 'description', 'owner', 'due', 'status', 'done_at', 'meeting', 'meeting_date', 'links'],
 };
 // Several columns can go into these: their text is put together.
-const MI_MULTI = ['attendees', 'minutes', 'actions', 'links'];
+const MI_MULTI = ['attendees', 'minutes', 'actions', 'description', 'links'];
 const MI_DATES = ['date', 'due', 'done_at', 'meeting_date'];
 const miFieldLabel = (k) => ({
   title: 'Title', date: 'Date', series: 'Series (found or added by name)', attendees: 'Attendees', link: 'Link (recording or notes)',
-  minutes: 'Minutes', actions: 'Actions (one per line)', ref: 'Ref', text: 'Action', owner: 'Owner', due: 'Due date', status: 'Status (open or done)',
+  minutes: 'Minutes', actions: 'Actions (one per line)', ref: 'Ref', text: 'Title', description: 'Description', owner: 'Owner', due: 'Due date', status: 'Status (open or done)',
   done_at: 'Done on', meeting: 'Meeting (by title)', meeting_date: 'Meeting date', links: `Linked ${T.items} or streams`,
 }[k]);
 // Headings are compared with everything but letters and digits removed; earlier names win.
@@ -10997,8 +10998,10 @@ const MI_ALIASES = {
   },
   actions: {
     ref: ['ref', 'actionref', 'reference', 'actionid', 'actionno', 'actionnumber', 'no', 'number', 'key', 'id'],
-    text: ['action', 'actiontext', 'actionitem', 'actionrequired', 'actions', 'description', 'task', 'item', 'title', 'what', 'summary', 'details',
-      'nextstep', 'text'],
+    text: ['title', 'actiontitle', 'action', 'actiontext', 'actionitem', 'actionrequired', 'actions', 'task', 'item', 'what', 'summary', 'nextstep',
+      'subject', 'name', 'text'],
+    description: ['description', 'actiondescription', 'details', 'detail', 'fulldescription', 'longdescription', 'notes', 'comments', 'background',
+      'context', 'more'],
     owner: ['owner', 'actionowner', 'assignedto', 'assignee', 'who', 'bywhom', 'responsible', 'ownedby', 'lead', 'person'],
     due: ['due', 'duedate', 'datedue', 'bywhen', 'dueby', 'deadline', 'targetdate', 'target', 'completeby'],
     status: ['status', 'actionstatus', 'state', 'progress', 'done', 'complete'],
@@ -11065,7 +11068,8 @@ function guessMeetingImportMap(header) {
     else if (/meeting.*date|raised|opened/.test(h)) take(i, 'meeting_date');
     else if (/meeting/.test(h)) take(i, 'meeting');
     else if (/milestone|linked|related/.test(h)) take(i, 'links');
-    else if (/action|task|descri/.test(h)) take(i, 'text');
+    else if (/descri|detail|note|comment/.test(h)) take(i, 'description');
+    else if (/action|task|title/.test(h)) take(i, 'text');
   });
   return map;
 }
@@ -11194,6 +11198,9 @@ function planActionRows(data, cell, cols, order) {
     if (!t && !text) { row.action = 'skip'; row.warn.push('No action'); return; }
     if (text) f.text = text;
     if (ref && !t) f.ref = ref;
+    // Several description columns: each under its heading, when more than one has something.
+    const desc = cols('description').map(c => [mimp.rows[mimp.headerRow][c], riClean(r[c])]).filter(([, v]) => v);
+    if (desc.length) f.description = desc.length > 1 ? desc.map(([h, v]) => `${h}: ${v}`).join('\n\n') : desc[0][1];
     if (cell(r, 'owner')) f.owner = cell(r, 'owner');
     const due = readDate(cell(r, 'due'), order);
     if (due) f.due = due;
@@ -11260,7 +11267,7 @@ async function applyMeetingImport() {
   const newAction = (meetingId, a) => {
     const ref = nextActionRef(ws, taken);
     taken.push(ref);
-    state.actions.push({ id: nextActionId(), workspace_id: ws, meeting_id: meetingId, ref, text: a.text, owner: a.owner, due: a.due, status: a.done ? 'Done' : 'Open', links: [], done_at: a.done ? now : '', created: now, updated: now });
+    state.actions.push({ id: nextActionId(), workspace_id: ws, meeting_id: meetingId, ref, text: a.text, description: '', owner: a.owner, due: a.due, status: a.done ? 'Done' : 'Open', links: [], done_at: a.done ? now : '', created: now, updated: now });
     acts++;
   };
   for (const row of plan.rows) {
@@ -11288,7 +11295,7 @@ async function applyMeetingImport() {
       let a = row.target;
       if (a && !state.actions.includes(a)) continue;
       if (!a) {
-        state.actions.push(a = { id: nextActionId(), workspace_id: ws, meeting_id: '', ref: '', text: '', owner: '', due: '', status: 'Open', links: [], done_at: '', created: now, updated: now });
+        state.actions.push(a = { id: nextActionId(), workspace_id: ws, meeting_id: '', ref: '', text: '', description: '', owner: '', due: '', status: 'Open', links: [], done_at: '', created: now, updated: now });
         added++;
       } else { updated++; a.updated = now; }
       Object.assign(a, row.fields);
@@ -11397,12 +11404,12 @@ function renderMeetingImport() {
         <td class="im-notes">${escAttr(row.warn.join('. '))}</td></tr>`;
     }).join('');
   } else {
-    document.getElementById('mi-preview-head').innerHTML = '<tr><th>Row</th><th></th><th>Ref</th><th>Action</th><th>Owner</th><th>Due</th><th>Status</th><th>Meeting</th><th>Links</th><th>Check</th></tr>';
+    document.getElementById('mi-preview-head').innerHTML = '<tr><th>Row</th><th></th><th>Ref</th><th>Title</th><th>Owner</th><th>Due</th><th>Status</th><th>Meeting</th><th>Links</th><th>Check</th></tr>';
     rowsHtml = plan.rows.map(row => {
       const t = row.target, v = { ...(t || {}), ...row.fields }, c = cellOf(row);
       const m = meetingById(v.meeting_id);
       const links = [...(t?.links || []), ...row.links].map(l => linkInfo(l).label);
-      return `<tr class="${row.action}">${head(row)}${c('ref', escAttr(v.ref || row.ref || ''))}${c('text', escAttr(v.text || ''), 'im-title')}
+      return `<tr class="${row.action}">${head(row)}${c('ref', escAttr(v.ref || row.ref || ''))}${c('text', `${escAttr(v.text || '')}${v.description ? `<div class="im-desc" title="${escAttr(v.description)}">${escAttr(short(v.description.replace(/\s+/g, ' '), 90))}</div>` : ''}`, 'im-title')}
         ${c('owner', escAttr(v.owner || ''))}${c('due', v.due ? fmtNice(v.due) : '')}${c('status', escAttr(v.status || ''))}
         ${c('meeting_id', m ? escAttr(`${m.title}${m.date ? `, ${fmtNice(m.date)}` : ''}`) : '')}
         <td class="${row.links.length && t ? 'changed' : ''}" title="${escAttr(links.join('\n'))}">${escAttr(links.length > 2 ? `${links.slice(0, 2).join(', ')} +${links.length - 2}` : links.join(', '))}</td>
@@ -11679,7 +11686,7 @@ function palSearch(q) {
   }
   for (const a of state.actions) {
     const p = workspaceById(a.workspace_id);
-    const s = score(a.ref, a.text, [a.ref, a.text, a.owner, a.status, meetingById(a.meeting_id)?.title, p?.code, p?.name].join(' ').toLowerCase());
+    const s = score(a.ref, a.text, [a.ref, a.text, a.description, a.owner, a.status, meetingById(a.meeting_id)?.title, p?.code, p?.name].join(' ').toLowerCase());
     if (s >= 0) hits.push({ kind: 'action', a, p, s: s + 0.3 });
   }
   return hits.sort((a, b) => a.s - b.s || (a.kind === 'item' && b.kind === 'item' ? (a.p.id === state.workspaceId ? -1 : 0) - (b.p.id === state.workspaceId ? -1 : 0) || cmpRef(a.m, b.m) : 0)).slice(0, 40);

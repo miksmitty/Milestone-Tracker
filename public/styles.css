@@ -1832,6 +1832,7 @@ mark { background: var(--flash); color: inherit; border-radius: 2px; padding: 0 
 .mt-act-text { flex: 1 1 260px; min-width: 0; border: 0; background: none; padding: 0; font: inherit; color: var(--text); text-align: left; cursor: pointer; line-height: 1.4; }
 .mt-act-text b { color: var(--accent); font-weight: 700; margin-right: 2px; }
 .mt-act-text:hover { color: var(--accent); }
+.mt-act-desc { margin-top: 2px; font-size: 12.5px; color: var(--muted); white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .mt-act-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .mt-act-meta i { font-style: italic; color: var(--faint-2); }
 .mt-act.late .mt-due { color: var(--accent); font-weight: 600; }
@@ -1874,6 +1875,7 @@ mark { background: var(--flash); color: inherit; border-radius: 2px; padding: 0 
 .act-table .act-due small.late { color: var(--accent); }
 .act-table .act-due small.soon { color: var(--warn); }
 .act-table td.act-text { font-weight: 500; white-space: normal; }
+.act-table .act-desc { margin-top: 3px; font-size: 12.5px; font-weight: 400; color: var(--muted); white-space: pre-line; }
 .act-table .act-links { margin-top: 4px; }
 .act-table .act-links .chip { margin: 0 4px 2px 0; }
 .act-table .act-due { white-space: nowrap; }
@@ -1933,3 +1935,5 @@ mark { background: var(--flash); color: inherit; border-radius: 2px; padding: 0 
   .mt-split .rp-list { max-height: 40vh; }
   .mt-foot-hint { display: none; }
 }
+
+.im-preview .im-desc { font-size: 11.5px; color: var(--muted); font-weight: 400; }

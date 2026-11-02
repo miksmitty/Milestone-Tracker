@@ -97,8 +97,8 @@ const DATASETS = {
     file: path.join(DATA_DIR, 'meeting-actions.csv'),
     // An action taken from a meeting's minutes (or added by hand): `meeting_id` where it came
     // from (blank for one added without a meeting), `status` Open or Done, `links` the items or
-    // streams it concerns (item:<id>;stream:<id>, as in raid.csv).
-    header: 'id,workspace_id,meeting_id,ref,text,owner,due,status,links,done_at,created,updated\n',
+    // streams it concerns (item:<id>;stream:<id>, as in raid.csv). `text` is its title.
+    header: 'id,workspace_id,meeting_id,ref,text,description,owner,due,status,links,done_at,created,updated\n',
   },
   '/api/report-comments': {
     file: path.join(DATA_DIR, 'report-comments.csv'),
