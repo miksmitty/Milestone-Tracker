@@ -315,7 +315,7 @@
         <tbody id="act-body"></tbody>
       </table>
     </div>
-    <div class="help" hidden><p><b>Minutes</b> lists the workspace’s meetings newest first; select one to read its minutes beside the list (<b>↑</b> <b>↓</b> move through them). Paste minutes in as they were written — by an LLM or a person — and any Markdown formatting is kept. The search box reads the whole of every meeting: title, series, attendees, the minutes and their actions, and marks the matches.</p>
+    <div class="help" hidden><p><b>Minutes</b> lists the workspace’s meetings newest first; select one to read its minutes beside the list (<b>↑</b> <b>↓</b> move through them). Paste minutes in as they were written — by Copilot, Teams, Word, an LLM or a person: rich text is turned into Markdown, so headings, bullets, tables and bold are kept, and an RTF file can be opened or dropped on the box. The search box reads the whole of every meeting: title, series, attendees, the minutes and their actions, and marks the matches.</p>
       <p><b>Series…</b> is where the workspace’s regular meetings are set up — a name, how often, the date of the first meeting and the usual attendees. A meeting recorded against a series takes its name, attendees and the date due; when a meeting has come round without minutes, the top of the list says so.</p>
       <p><b>Extract actions</b> reads the minutes for actions — an <i>Actions</i>, <i>Action items</i> or <i>Next steps</i> section, a table of actions, lines starting <i>Action:</i>, checkboxes — and works out the owner and due date where it can (<i>by Friday</i>, <i>12 Nov</i>). Nothing is added until you’ve looked them over. Saving new minutes offers this straight away.</p>
       <p><b>Actions</b> tracks every action across meetings: tick one off when it’s done, click it to change the wording, owner or due date, or link it to <span data-term="items">items</span> on the plan. A due date in red has passed. Headings work like a spreadsheet’s: <b>▾</b> sorts or filters (open actions are shown until the Status filter says otherwise), drag a heading to move the column or its edge to resize it (double-click to fit), right-click for autofit. The dashboard and the menu show how many are open.</p></div>
@@ -981,7 +981,8 @@
         <label>Series<select name="series_id" title="The regular meeting this is one of, or a one-off"></select></label>
         <label class="span2">Attendees<input name="attendees" placeholder="Who was there — separate names with commas" /></label>
         <label class="span3">Link<input name="link" placeholder="Where the recording, transcript or original notes live (optional)" /></label>
-        <label class="span3">Minutes <span class="md-hint">— paste them in as written; Markdown headings, lists and bold are kept</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here"></textarea></label>
+        <label class="span3">Minutes <span class="md-hint">— paste them in as written, from Copilot, Teams, Word or an LLM: headings, lists, tables and bold are kept. Or <button type="button" id="mt-file-btn" class="link-btn">open a file</button> (RTF, text, Markdown or HTML).</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here, or drop an RTF file on this box"></textarea></label>
+        <input type="file" id="mt-file" accept=".rtf,.txt,.md,.markdown,.html,.htm,text/rtf,application/rtf,text/plain,text/markdown,text/html" hidden />
       </div>
       <p id="mt-error" class="dlg-error"></p>
       <footer class="dlg-foot">

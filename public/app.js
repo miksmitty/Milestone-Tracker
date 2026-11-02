@@ -10568,8 +10568,240 @@ function seriesFromNames() {
 
 function rowsToMeetings(rows) {
   const ids = new Set(state.workspaces.map(p => p.id));
-  return readRecords(rows, [...MEETING_COLUMNS, 'series']).map(({ series, ...m }) => ({ ...m, date: fileDate(m.date), minutes: m.minutes.replace(/\r\n?/g, '\n'), ...(series && !m.series_id ? { _series: series } : {}) }))
+  return readRecords(rows, [...MEETING_COLUMNS, 'series']).map(({ series, ...m }) => ({ ...m, date: fileDate(m.date), minutes: tidyMinutes(m.minutes), ...(series && !m.series_id ? { _series: series } : {}) }))
     .filter(m => ids.has(m.workspace_id));
+}
+
+/* ---- minutes from Copilot, Teams, Word and Outlook ---- */
+// Minutes are kept as Markdown, but as often as not they come from somewhere that writes rich
+// text. Pasted, the browser offers that as HTML (and sometimes RTF); as plain text, Word and
+// Copilot separate lines with U+2028 / U+2029 or vertical tabs and mark bullets with Symbol-font
+// glyphs and a tab, none of which read as lines or lists. All of it is turned into Markdown here,
+// so the minutes show formatted and Extract actions can find the Actions section and its table.
+
+// Bullet glyphs Word, Outlook and Copilot write in plain text. o and § are Word's second and third
+// levels; they (and letters) only count when a tab follows, as Word writes them.
+const GLYPH_BULLET = /^([ \t]*)(?:([·•●○◦▪■□▫‣⁃∙➢➤►▶✓✔\uf0b7\uf0a7\uf076\uf0d8\uf0fc\uf0a8–—])[ \t]+|([o§]|[a-z][.)]|[ivx]+[.)])\t+)(.*)$/;
+function tidyMinutes(s) {
+  const lines = String(s ?? '').replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n').replace(/[\u200b\u200e\u200f\ufeff]/g, '').replace(/\u00a0/g, ' ').split('\n');
+  return lines.map(line => {
+    let m = line.match(/^([ \t]*)([☐☑☒✅⬜])\s*(.*)$/);
+    if (m) return `${m[1].replace(/\t/g, '  ')}- [${m[2] === '☐' || m[2] === '⬜' ? ' ' : 'x'}] ${m[3]}`;
+    if ((m = line.match(GLYPH_BULLET))) {
+      const level = m[3] === 'o' ? 1 : m[3] === '§' ? 2 : 0;
+      return `${m[1].replace(/\t/g, '  ')}${'  '.repeat(level)}- ${m[4].trim()}`;
+    }
+    if ((m = line.match(/^([ \t]*)(\d+[.)])\t+(.*)$/))) return `${m[1].replace(/\t/g, '  ')}${m[2]} ${m[3].trim()}`;
+    // "Action items" / "Next steps" on a line of its own is a heading, whatever it was formatted as
+    const t = line.trim();
+    if (t.length <= 40 && !/[.,;]$|:./.test(t) && t.split(/\s+/).length <= 5 && ACTION_HEAD.test(t.replace(/:$/, '')) && !/^(#|\*\*|__|[-*+] |\d+[.)] |\|)/.test(t)) return `### ${t.replace(/:$/, '')}`;
+    return line;
+  }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// Markdown round a run of text, inside any spaces at its ends: **  bold ** would not read as bold.
+const wrapMd = (s, mark) => s.split('\n').map(l => { const x = l.match(/^(\s*)(.*?)(\s*)$/); return x[2] ? `${x[1]}${mark}${x[2]}${mark}${x[3]}` : l; }).join('\n');
+// Blocks of Markdown: list items run on one after another, anything else has a blank line between.
+const joinMdBlocks = (blocks) => blocks.reduce((out, b, i) => out + (i ? (b.list && blocks[i - 1].list ? '\n' : '\n\n') : '') + b.text, '');
+// One row of a Markdown table. A | in a cell would split it, so it becomes a /.
+const mdRow = (cells) => `| ${cells.map(c => c.replace(/\s*\n\s*/g, ' ').replace(/\|/g, '/').trim()).join(' | ')} |`;
+const mdTableOf = (rows) => {
+  const n = Math.max(...rows.map(r => r.length));
+  const pad = (r) => [...r, ...Array(n - r.length).fill('')];
+  return [mdRow(pad(rows[0])), mdRow(Array(n).fill('---')), ...rows.slice(1).map(r => mdRow(pad(r)))].join('\n');
+};
+
+// Rich text as the clipboard has it from Copilot, Teams, Word, Outlook or a web page.
+function htmlToMinutes(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('style, script, meta, title, link, xml, head, template').forEach(n => n.remove());
+  const BLOCK = /^(P|DIV|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|SECTION|ARTICLE|MAIN|HEADER|FOOTER|NAV|ASIDE|BODY|DL|DT|DD|PRE|FIGURE|HR)$/;
+  const isBlock = (n) => n.nodeType === 1 && (BLOCK.test(n.nodeName) || n.getAttribute('role') === 'heading');
+  const styleOf = (n) => n.getAttribute?.('style') || '';
+  const inline = (node) => {
+    let out = '';
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) { out += n.nodeValue.replace(/\s+/g, ' '); continue; }
+      if (n.nodeType !== 1) continue; // comments, such as Word's <!--[if !supportLists]-->
+      const tag = n.nodeName, st = styleOf(n);
+      if (/mso-list:\s*Ignore/i.test(st) || /^(UL|OL|TABLE)$/.test(tag)) continue; // Word's own bullet; lists and tables are blocks
+      if (tag === 'BR') { out += '\n'; continue; }
+      if (tag === 'INPUT') { if (n.type === 'checkbox') out += n.checked ? '[x] ' : '[ ] '; continue; }
+      let t = inline(n);
+      if (isBlock(n) && out.trim() && !/\s$/.test(out)) t = ' ' + t;
+      const href = tag === 'A' ? n.getAttribute('href') || '' : '';
+      if (href && MD_URL.test(href) && t.trim() && t.trim() !== href) t = `[${t.trim()}](${href.replace(/[()\s]/g, encodeURIComponent)})`;
+      const weight = st.match(/font-weight:\s*([\w]+)/i)?.[1]; // Google Docs wraps everything in <b style="font-weight:normal">
+      if (weight ? /bold|[6-9]00/.test(weight) : /^(B|STRONG)$/.test(tag)) t = wrapMd(t, '**');
+      const style = st.match(/font-style:\s*(\w+)/i)?.[1];
+      if (style ? style === 'italic' : /^(I|EM)$/.test(tag)) t = wrapMd(t, '*');
+      out += t;
+    }
+    return out.replace(/\*\*\*\*/g, '');
+  };
+  const lineOf = (s) => s.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+  const blocks = [];
+  const push = (text, list = false) => { if (text.trim()) blocks.push({ text, list }); };
+  const list = (node, depth) => {
+    let i = 0;
+    for (const c of node.children) {
+      if (c.nodeName === 'LI') {
+        const marker = node.nodeName === 'OL' ? `${(+node.getAttribute('start') || 1) + i++}.` : '-';
+        const box = c.getAttribute('data-checked') ?? c.getAttribute('aria-checked');
+        push(`${'  '.repeat(depth)}${marker} ${box === 'true' ? '[x] ' : box === 'false' ? '[ ] ' : ''}${inline(c).replace(/\s+/g, ' ').trim()}`, true);
+        for (const sub of c.querySelectorAll('ul, ol')) if (sub.parentElement.closest('li') === c) list(sub, depth + 1);
+      } else if (c.nodeName === 'UL' || c.nodeName === 'OL') list(c, depth + 1);
+    }
+  };
+  const table = (node) => {
+    const rows = [...node.querySelectorAll('tr')].filter(r => r.closest('table') === node).map(r => [...r.children].filter(c => /^T[DH]$/.test(c.nodeName)));
+    if (rows.every(r => r.length <= 1)) return rows.forEach(r => r[0] && walk(r[0])); // a layout table, not a table of anything
+    push(mdTableOf(rows.map(r => r.map(c => inline(c).replace(/\s+/g, ' ').trim()))));
+  };
+  let loose = null;
+  const flush = () => { if (loose) push(lineOf(loose)); loose = null; };
+  function walk(parent) {
+    for (const n of parent.childNodes) {
+      if (!isBlock(n)) { if (n.nodeType === 1 || n.nodeType === 3) loose = (loose || '') + inline({ childNodes: [n] }); continue; }
+      flush();
+      const tag = n.nodeName, st = styleOf(n), cls = n.getAttribute('class') || '';
+      const level = /^H[1-6]$/.test(tag) ? +tag[1] : n.getAttribute('role') === 'heading' ? +n.getAttribute('aria-level') || 2 : /MsoTitle/.test(cls) ? 1 : 0;
+      if (level) { const t = inline(n).replace(/\s+/g, ' ').trim(); if (t) push(`${'#'.repeat(Math.min(3, level))} ${t.replace(/^\*\*(.*)\*\*$/, '$1')}`); }
+      else if (tag === 'UL' || tag === 'OL') list(n, 0);
+      else if (tag === 'TABLE') table(n);
+      else if (tag === 'BLOCKQUOTE') { const t = htmlToMinutes(n.innerHTML); if (t) push(t.split('\n').map(l => `> ${l}`).join('\n')); }
+      else if (tag === 'PRE') push(n.textContent.replace(/\n+$/, ''));
+      else if (/mso-list/i.test(st) || /MsoListParagraph/.test(cls)) { // a Word list paragraph: the bullet is in a span of its own
+        const depth = Math.max(0, (+st.match(/level(\d+)/i)?.[1] || 1) - 1);
+        const mark = n.querySelector('[style*="mso-list"]')?.textContent.trim() || '';
+        push(`${'  '.repeat(depth)}${/^\(?\w{1,3}[.)]$/.test(mark) && /\d/.test(mark) ? '1.' : '-'} ${inline(n).replace(/\s+/g, ' ').trim()}`, true);
+      } else if ([...n.children].some(isBlock)) walk(n); // a wrapper round other blocks
+      else push(lineOf(inline(n)));
+    }
+    flush();
+  }
+  walk(doc.body);
+  return tidyMinutes(joinMdBlocks(blocks));
+}
+
+// An RTF document (a Copilot or Word export, or RTF on the clipboard): its paragraphs, bold and
+// italic, lists, tables and headings (by style name or outline level).
+function rtfToMinutes(rtf) {
+  const headingStyles = {};
+  for (const m of rtf.matchAll(/\\s(\d+)(?!\d)[^{}]*?\b(?:heading\s*(\d)|(title))\s*;/gi)) headingStyles[m[1]] = m[3] ? 1 : +m[2];
+  const SKIP = new Set(['fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'object', 'header', 'footer', 'headerl', 'headerr', 'footerl', 'footerr', 'listtable',
+    'listoverridetable', 'rsidtbl', 'generator', 'themedata', 'colorschememapping', 'latentstyles', 'datastore', 'xmlnstbl', 'mmathPr', 'fldinst', 'footnote',
+    'annotation', 'revtbl', 'filetbl', 'pgdsctbl', 'expandedcolortbl', 'shp', 'nonshppict', 'bkmkstart', 'bkmkend', 'protusertbl']);
+  const CHARS = { emdash: '—', endash: '–', bullet: '•', lquote: '‘', rquote: '’', ldblquote: '“', rdblquote: '”', tab: '\t', line: '\n', emspace: ' ', enspace: ' ' };
+  const cp1252 = new TextDecoder('windows-1252');
+  const blocks = [];
+  let g = { skip: false, marker: false, b: false, i: false, uc: 1 }; // the group's state
+  const stack = [];
+  let para = { style: 0, ilvl: 0, list: false, intbl: false, outline: -1 };
+  let runs = [], marker = '', cell = [], row = [], rows = [];
+  const add = (text) => {
+    if (g.skip) return;
+    if (g.marker) { marker += text; return; }
+    const last = runs.at(-1);
+    if (last && last.b === g.b && last.i === g.i) last.text += text; else runs.push({ text, b: g.b, i: g.i });
+  };
+  const runsText = () => runs.map(r => { let t = r.text; if (r.b) t = wrapMd(t, '**'); if (r.i) t = wrapMd(t, '*'); return t; }).join('');
+  const flushTable = () => { if (rows.length) blocks.push({ text: mdTableOf(rows) }); rows = []; };
+  const endPara = () => {
+    const text = runsText().replace(/[ \t]+$/gm, '');
+    runs = [];
+    if (para.intbl) { if (text.trim()) cell.push(text.trim()); marker = ''; return; }
+    flushTable();
+    const plain = text.trim(), level = headingStyles[para.style] || (para.outline >= 0 ? para.outline + 1 : 0);
+    if (plain && level) blocks.push({ text: `${'#'.repeat(Math.min(3, level))} ${plain.replace(/^\*\*(.*)\*\*$/, '$1')}` });
+    else if (plain && (para.list || marker.trim())) blocks.push({ text: `${'  '.repeat(para.ilvl)}${/\d/.test(marker) ? '1.' : '-'} ${plain.replace(/\n/g, ' ')}`, list: true });
+    else if (plain) blocks.push({ text: plain.split('\n').map(l => l.trim()).join('\n') });
+    marker = '';
+  };
+  let pendingSkip = 0; // characters still to pass over after a \u (its fallback for old readers)
+  const re = /\\([a-z]+)(-?\d+)? ?|\\'([0-9a-f]{2})|\\([^a-z])|([{}])|([\r\n]+)|([^\\{}\r\n]+)/gi;
+  let m, first = false; // first: the next control word is the group's first, and may name a destination
+  while ((m = re.exec(rtf))) {
+    const [, word, arg, hex, sym, brace, , text] = m;
+    if (brace === '{') { stack.push(g); g = { ...g }; first = true; continue; }
+    if (brace === '}') { g = stack.pop() || g; first = false; continue; }
+    const wasFirst = first;
+    first = false;
+    if (m[6]) continue; // line breaks in the file mean nothing
+    if (pendingSkip && (text || hex || sym)) {
+      if (text) { const n = Math.min(pendingSkip, text.length); pendingSkip -= n; if (text.length > n) add(text.slice(n)); } else pendingSkip--;
+      continue;
+    }
+    if (text) { add(text); continue; }
+    if (hex) { add(cp1252.decode(new Uint8Array([parseInt(hex, 16)]))); continue; }
+    if (sym) {
+      if (sym === '*') g.skip = true;
+      else if (sym === '~') add(' ');
+      else if (sym === '_') add('-');
+      else if (sym === '\n' || sym === '\r') endPara();
+      else if ('\\{}'.includes(sym)) add(sym);
+      continue;
+    }
+    const n = arg === undefined ? null : +arg;
+    if (g.marker && /^(pard|s|ls|ilvl|outlinelevel|intbl)$/.test(word)) continue; // Word repeats the paragraph's settings inside its bullet
+    if (SKIP.has(word)) { g.skip = true; continue; }
+    if (word === 'listtext' || word === 'pntext') { g.marker = true; para.list = true; continue; }
+    if (wasFirst && /^(pn|pnseclvl|pntxta|pntxtb)$/.test(word)) { g.skip = true; continue; }
+    switch (word) {
+      case 'par': case 'sect': case 'page': endPara(); break;
+      case 'pard': para = { style: 0, ilvl: 0, list: false, intbl: false, outline: -1 }; break;
+      case 's': para.style = n; break;
+      case 'ls': para.list = true; break;
+      case 'ilvl': para.ilvl = n || 0; break;
+      case 'outlinelevel': para.outline = n; break;
+      case 'intbl': para.intbl = true; break;
+      case 'cell': case 'nestcell': endPara(); row.push(cell.join(' ')); cell = []; break;
+      case 'row': case 'nestrow': if (row.length) rows.push(row); row = []; break;
+      case 'b': g.b = n !== 0; break;
+      case 'i': g.i = n !== 0; break;
+      case 'plain': g.b = g.i = false; break;
+      case 'uc': g.uc = n ?? 1; break;
+      case 'u': add(String.fromCharCode(n < 0 ? n + 65536 : n)); pendingSkip = g.uc; break;
+      default: if (CHARS[word]) add(CHARS[word]);
+    }
+  }
+  endPara();
+  flushTable();
+  return tidyMinutes(joinMdBlocks(blocks));
+}
+
+// Text from a file or the clipboard, as minutes: HTML and RTF converted, plain text tidied.
+const minutesFrom = (text, kind = '') => (kind === 'rtf' || /^\s*\{\\rtf/.test(text) ? rtfToMinutes(text)
+  : kind === 'html' ? htmlToMinutes(text) : tidyMinutes(text));
+// Plain text that is Markdown already (an LLM's, or copied from these minutes) is pasted as it is.
+const looksLikeMd = (s) => /^(#{1,6}\s|\s*\|.*\|\s*$|\s*[-*+]\s|\s*\d+[.)]\s)|\*\*\S/m.test(s);
+
+function insertMinutes(t, text) {
+  t.focus();
+  if (!document.execCommand('insertText', false, text)) t.setRangeText(text, t.selectionStart, t.selectionEnd, 'end'); // execCommand keeps undo working
+  t.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function pasteMinutes(e) {
+  const cd = e.clipboardData, plain = cd.getData('text/plain'), html = cd.getData('text/html'), rtf = cd.getData('text/rtf');
+  if (!/\n|\u2028|\u2029|\v/.test(plain.trim()) && !/^\s*\{\\rtf/.test(plain)) return; // a word or a line: the browser pastes it
+  let md;
+  if (/^\s*\{\\rtf/.test(plain)) md = rtfToMinutes(plain);
+  else if (looksLikeMd(plain)) md = tidyMinutes(plain);
+  else if (html && /<(p|h[1-6]|ul|ol|li|table|br|div)\b/i.test(html)) md = htmlToMinutes(html);
+  else if (rtf) md = rtfToMinutes(rtf);
+  else md = tidyMinutes(plain);
+  if (!md) return;
+  e.preventDefault();
+  insertMinutes(e.target, md);
+}
+async function readMinutesFile(t, file) {
+  const err = document.getElementById('mt-error');
+  err.textContent = '';
+  const ext = (file.name.match(/\.(\w+)$/)?.[1] || '').toLowerCase();
+  if (!['rtf', 'txt', 'md', 'markdown', 'html', 'htm'].includes(ext)) return (err.textContent = `${file.name} can't be read here. Open it, copy the minutes and paste them, or save it as RTF or plain text.`);
+  const md = minutesFrom(await file.text(), ext === 'rtf' ? 'rtf' : /^html?$/.test(ext) ? 'html' : '');
+  if (!md) return (err.textContent = `There's no text in ${file.name}.`);
+  insertMinutes(t, t.value.trim() && t.selectionStart !== t.selectionEnd ? md : (t.value.trim() ? '\n\n' : '') + md);
 }
 const meetingsToCSV = (list) => [MEETING_COLUMNS.join(','), ...list.map(m => MEETING_COLUMNS.map(k => csvEscape(m[k])).join(','))].join('\n') + '\n';
 const DONE_WORDS = /^(done|complete|completed|closed|finished|yes|y|x|✓)$/i;
@@ -10616,7 +10848,7 @@ const ACTION_MARK = /^\**\s*(action|ap|todo|to\s*do|action\s*(item|point))\s*\**
 const CHECKBOX = /^\[([ xX])\]\s*/;
 
 function actionCandidates(minutes, meetingDate, people = []) {
-  const lines = String(minutes ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const lines = tidyMinutes(minutes).split('\n');
   const found = [];
   let section = 0;  // the level of the actions heading we're under (a bold or "Actions:" line counts as 7); 0 outside one
   let table = null; // the columns of the table being read: { text, owner, due }
@@ -10664,7 +10896,7 @@ function actionCandidates(minutes, meetingDate, people = []) {
     // A bullet that is only a name, with the actions indented under it: "- Jane" / "  - Send the plan".
     if (bullet && !indented && !flagged) {
       const name = plainText(body).replace(/:$/, '').trim();
-      groupOwner = name.split(/\s+/).length <= 4 && !DATE_PHRASE.test(name) && plausibleName(name, people) || '';
+      groupOwner = name.split(/\s+/).length <= 4 && !/:/.test(name) && !DATE_PHRASE.test(name) && plausibleName(name, people) || '';
       if (groupOwner) continue;
     }
     found.push({ raw: body, open: true, owner: indented && groupOwner || '' });
@@ -10781,6 +11013,13 @@ function readActionLine(f, meetingDate, people) {
   let due = f.dueText ? readDatePhrase(f.dueText, base) || (f.dueText.match(DATE_PHRASE) && readDatePhrase(f.dueText.match(DATE_PHRASE)[1], base)) || fileDate(f.dueText) : '';
   if (!due) ({ text, due } = takeDue(text, base));
   let owner = f.owner ? plainText(f.owner).trim() : '';
+  // Copilot leads each task with a bold topic: "**Send plan:** Priya to send the plan by Friday".
+  // The owner is in what follows; only when nothing there names anyone is the bold word the owner.
+  const label = !owner && f.raw.trim().match(/^(?:\*\*|__)[^*_]{1,60}?(?:\*\*|__)?:\s*(?:\*\*|__)?\s+/);
+  if (label && text.startsWith(plainText(label[0]).trim())) {
+    const r = takeOwner(text.slice(plainText(label[0]).trim().length).trim(), people);
+    if (r.owner) ({ text, owner } = r);
+  }
   if (!owner) ({ text, owner } = takeOwner(text, people));
   text = text.replace(/\s+/g, ' ').replace(/\(\s*\)|\[\s*\]/g, '').replace(/^[\s\-–—:;,.]+|[\s\-–—:;,(]+$/g, '').trim();
   if (text && /^[a-z]/.test(text)) text = text[0].toUpperCase() + text.slice(1);
@@ -11106,6 +11345,7 @@ async function submitMeeting(e) {
   const f = document.getElementById('meeting-form').elements;
   const err = document.getElementById('mt-error');
   const v = Object.fromEntries(MT_FIELDS.map(k => [k, f[k].value.replace(/\r\n?/g, '\n').trim()]));
+  v.minutes = tidyMinutes(v.minutes);
   if (!v.title) return (err.textContent = 'Give the meeting a title.');
   if (v.date && !parseDate(v.date)) return (err.textContent = 'The date isn’t a date.');
   if (v.series_id === 'new') return (err.textContent = 'Set up the series first, or choose One-off.');
@@ -11530,9 +11770,9 @@ function planMeetingRows(data, header, cell, cols, order) {
     const att = cols('attendees').map(c => riClean(r[c])).filter(Boolean).join(', ');
     if (att) f.attendees = att.replace(/\s*\n\s*/g, ', ');
     if (cell(r, 'link')) f.link = cell(r, 'link');
-    // Minutes are Markdown, so their text is kept as it is, line breaks and all (rich text from
-    // SharePoint loses its tags).
-    const md = (v) => (/<[a-z!/][^>]*>/i.test(v) ? riClean(v) : String(v ?? '').replace(/\r\n?/g, '\n').trim());
+    // Minutes are Markdown, so their text is kept as it is, line breaks and all; rich text (from
+    // SharePoint, say) and RTF are turned into Markdown.
+    const md = (v) => (/<[a-z!/][^>]*>/i.test(v) ? htmlToMinutes(v) : minutesFrom(String(v ?? '')));
     const parts = cols('minutes').map(c => [header[c], md(r[c])]).filter(([, v]) => v);
     const minutes = parts.length > 1 ? parts.map(([h, v]) => `## ${h}\n\n${v}`).join('\n\n') : parts[0]?.[1] || '';
     if (minutes && minutes !== t?.minutes.trim()) f.minutes = minutes;
@@ -11960,6 +12200,12 @@ function wireMeetings() {
   const close = (id) => () => document.getElementById(id).close();
   const backdrop = (id) => { const d = document.getElementById(id); d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); };
   document.getElementById('meeting-form').addEventListener('submit', submitMeeting);
+  const mins = document.getElementById('meeting-form').elements.minutes;
+  mins.addEventListener('paste', pasteMinutes);
+  mins.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
+  mins.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) { e.preventDefault(); readMinutesFile(mins, e.dataTransfer.files[0]); } });
+  document.getElementById('mt-file').addEventListener('change', (e) => { if (e.target.files[0]) readMinutesFile(mins, e.target.files[0]); e.target.value = ''; });
+  document.getElementById('mt-file-btn').onclick = () => document.getElementById('mt-file').click();
   document.getElementById('meeting-form').elements.series_id.addEventListener('change', (e) => {
     const f = document.getElementById('meeting-form').elements;
     if (e.target.value !== 'new') return takeSeries(f, seriesById(e.target.value));
