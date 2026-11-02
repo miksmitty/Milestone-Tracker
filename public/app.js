@@ -3629,7 +3629,7 @@ const GRID_COLS = [
   { key: 'parent', label: 'Rolls up to', w: 170, show: itemShow, order: byItemRef, blank: '(None)' },
   { key: 'type', label: 'Type', w: 170, title: 'A single date (diamond; top level ones are under change control and ringed) or a date range (bar)', show: typeLabel },
   { key: 'deps', label: 'Depends on', w: 190, show: itemShow, order: byItemRef, blank: '(None)' },
-  { key: 'stream', label: 'Stream', w: 120 },
+  { key: 'stream', label: 'Stream', w: 120, vals: (m) => streamName(m.stream_id), blank: '(No stream)' },
   { key: 'owner', label: 'Owner', w: 120 },
   { key: 'gitlab_url', label: 'GitLab URL', w: 200 },
   { key: 'use_case_url', label: 'Use case URL', w: 200 },
@@ -3667,6 +3667,7 @@ function gridValue(m, key, byId) {
     case 'id': return +m.id;
     case 'parent': return m.parent ? fullLabel(byId.get(m.parent)) : '';
     case 'deps': return m.deps.map(d => fullLabel(byId.get(d))).join(' ');
+    case 'stream': return streamName(m.stream_id);
     default: return m[key] ?? '';
   }
 }
