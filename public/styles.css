@@ -1343,7 +1343,7 @@ button.cm-quote:hover { background: var(--hover); }
 .pop-note { font-size: 11.5px; color: var(--muted); }
 #gantt-container:focus { outline: none; }
 #gantt-container:focus-visible { box-shadow: inset 0 0 0 2px rgba(230,0,0,.35); border-radius: 12px; }
-#gantt-container .gantt-item.kb > :is(rect, path, circle):not(.gantt-baseline) { stroke: var(--accent); stroke-width: 2.6px; }
+#gantt-container .gantt-item.kb > :is(rect, path, circle):not(.gantt-baseline, .gantt-grip) { stroke: var(--accent); stroke-width: 2.6px; }
 #gantt-container .gantt-item.kb > text { text-decoration: underline; text-decoration-color: var(--accent); }
 #gantt-container.dragging, #gantt-container.dragging * { cursor: grabbing !important; }
 #gantt-container.dragging .gantt-item:hover { filter: none; }

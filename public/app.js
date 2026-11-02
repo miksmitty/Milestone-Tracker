@@ -2124,6 +2124,11 @@ function renderGantt() {
         x: x1 - 2.5, y: cy - bh / 2 - 2.5, width: Math.max(2, x2 - x1) + 5, height: bh + 5, rx: Math.min(5, bh / 3) + 2,
         fill: 'none', stroke: G.accent, 'stroke-width': 1.8, 'pointer-events': 'none', class: 'gantt-crit',
       }));
+      // invisible grab zones over each end, reaching past the bar, so its ends are easy to catch
+      const w = Math.max(2, x2 - x1), gw = GRIP_OUT + Math.min(GRIP_IN, w / 3);
+      if (w >= GRIP_MIN_W) for (const x of [x1 - GRIP_OUT, x1 + w + GRIP_OUT - gw]) {
+        g.appendChild(svgEl('rect', { x, y: cy - bh / 2 - 2, width: gw, height: bh + 4, fill: 'transparent', class: 'gantt-grip' }));
+      }
       if (m._side === 'inside') {
         g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text, c.text));
         if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: G.muted, ...halo() }, m._meta));
@@ -2292,13 +2297,17 @@ function markRecentMoved(svg) {
 // Which part of an item the pointer is on: a task's ends are for resizing.
 function dragModeAt(g, m, clientX) {
   if (!isTask(m)) return 'move';
-  const bar = g.querySelector('rect:not(.gantt-baseline)');
+  const bar = g.querySelector('.gantt-shape');
   if (!bar) return 'move';
   const r = bar.getBoundingClientRect();
-  if (r.width >= 18 && Math.abs(clientX - r.right) <= 6) return 'end';
-  if (r.width >= 18 && Math.abs(clientX - r.left) <= 6) return 'start';
+  if (r.width < GRIP_MIN_W) return 'move';
+  const inside = Math.min(GRIP_IN, r.width / 3);
+  if (clientX >= r.right - inside && clientX <= r.right + GRIP_OUT) return 'end';
+  if (clientX >= r.left - GRIP_OUT && clientX <= r.left + inside) return 'start';
   return 'move';
 }
+// how far a task's resize zones reach past and into its bar (px), and the narrowest bar that has them
+const GRIP_OUT = 8, GRIP_IN = 10, GRIP_MIN_W = 18;
 
 function onDragMove(e) {
   if (!drag) return;
