@@ -2726,6 +2726,7 @@ function ganttMatches(m) {
 
 function clearGanttFilters() {
   Object.assign(ganttFilter, { q: '', streams: [], owner: '', type: '', rag: [], late: false, crit: false });
+  document.getElementById('gf-stream-q').value = '';
 }
 
 // Folded streams, per workspace (a per-browser preference).
@@ -2794,10 +2795,22 @@ function renderGanttFilters() {
   const streamsHere = workspaceStreams().filter(l => state.items.some(m => m.stream_id === l.id))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
   for (const id of f.streams) if (!streamsHere.some(l => l.id === id)) streamsHere.push(streamById(id) || { id, name: '(deleted stream)' });
-  // any number ticked; none ticked shows every stream
-  document.getElementById('gf-stream').innerHTML = streamsHere.map(l =>
-    `<label class="check"><input type="checkbox" value="${escAttr(l.id)}" ${f.streams.includes(l.id) ? 'checked' : ''} /> ${escAttr(l.name)}</label>`).join('')
+  // any number ticked; none ticked shows every stream. One per line so long names and long lists stay
+  // readable: the list scrolls, names are cut short (the full name on hover), and a search box joins
+  // once there are more than a handful
+  const list = document.getElementById('gf-stream');
+  const scroll = list.scrollTop; // re-rendered on every tick: keep the place
+  list.innerHTML = streamsHere.map(l => `
+    <div class="sp-row" data-name="${escAttr(l.name.toLowerCase())}">
+      <label class="check" title="${escAttr(l.name)}"><input type="checkbox" value="${escAttr(l.id)}" ${f.streams.includes(l.id) ? 'checked' : ''} /><span class="sp-name">${escAttr(l.name)}</span></label>
+      <button type="button" class="sp-only" data-only="${escAttr(l.id)}" title="Show only this stream">Only</button>
+    </div>`).join('')
     || '<span class="pop-note">No streams yet</span>';
+  list.scrollTop = scroll;
+  document.getElementById('gf-stream-q').hidden = streamsHere.length <= 6;
+  document.getElementById('gf-stream-count').textContent = f.streams.length ? `${f.streams.length} of ${streamsHere.length}` : '';
+  document.getElementById('gf-stream-none').disabled = !f.streams.length;
+  filterStreamPick();
   fill('gf-owner', 'All owners', distinct('owner'), f.owner);
   const types = [['', 'All'], ['top', 'Top level'], ['milestone', T.Milestones], ['task', T.Tasks]];
   document.getElementById('gf-type').innerHTML = types.map(([v, label]) =>
@@ -2884,15 +2897,39 @@ function wireMenus() {
   });
 }
 
+// Narrow the stream list in the Filter menu to names containing the search text.
+function filterStreamPick() {
+  const q = document.getElementById('gf-stream-q').value.trim().toLowerCase();
+  const rows = [...document.querySelectorAll('#gf-stream .sp-row')];
+  for (const r of rows) r.hidden = !!q && !r.dataset.name.includes(q);
+  let none = document.querySelector('#gf-stream .sp-none');
+  if (!none) {
+    none = Object.assign(document.createElement('span'), { className: 'pop-note sp-none', textContent: 'No stream matches' });
+    document.getElementById('gf-stream').appendChild(none);
+  }
+  none.hidden = !rows.length || rows.some(r => !r.hidden);
+}
+
 function wireGanttFilters() {
   Object.assign(ganttSort, loadAppPrefs().ganttSort || {});
   wireMenus();
   const saveSort = () => { saveAppPrefs({ ganttSort: { ...ganttSort } }); renderGantt(); };
   document.getElementById('gf-q').addEventListener('input', (e) => { ganttFilter.q = e.target.value; renderGantt(); });
-  document.getElementById('gf-stream').addEventListener('change', (e) => {
-    ganttFilter.streams = [...e.currentTarget.querySelectorAll('input:checked')].map(c => c.value);
+  const streamList = document.getElementById('gf-stream');
+  streamList.addEventListener('change', () => {
+    ganttFilter.streams = [...streamList.querySelectorAll('input:checked')].map(c => c.value);
     renderGantt();
   });
+  streamList.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-only]');
+    if (b) { ganttFilter.streams = [b.dataset.only]; renderGantt(); }
+  });
+  document.getElementById('gf-stream-q').addEventListener('input', filterStreamPick);
+  document.getElementById('gf-stream-all').addEventListener('click', () => {
+    ganttFilter.streams = [...streamList.querySelectorAll('input')].map(c => c.value);
+    renderGantt();
+  });
+  document.getElementById('gf-stream-none').addEventListener('click', () => { ganttFilter.streams = []; renderGantt(); });
   document.getElementById('gf-owner').addEventListener('change', (e) => { ganttFilter.owner = e.target.value; renderGantt(); });
   document.getElementById('gf-type').addEventListener('click', (e) => {
     const b = e.target.closest('[data-type]');
@@ -6476,7 +6513,6 @@ function wireReports() {
     dlg.close();
     showReportsFor(rpItemId);
   };
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   document.getElementById('rp-prev').addEventListener('click', onPrevPanelClick);
   document.getElementById('rp-error').addEventListener('click', (e) => {
     const b = e.target.closest('[data-open-report]');
@@ -7021,7 +7057,6 @@ function wireImport() {
   document.getElementById('btn-items-import').onclick = openImportDialog;
   document.getElementById('im-close').onclick = close;
   document.getElementById('im-cancel').onclick = close;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
   document.getElementById('im-change').onclick = () => { document.getElementById('im-file').value = ''; showImportStep('source'); };
   document.getElementById('im-file').addEventListener('change', (e) => { if (e.target.files[0]) readImportFile(e.target.files[0]); });
   const drop = document.getElementById('im-drop');
@@ -7737,7 +7772,6 @@ function wireWorkspaces() {
   document.getElementById('pg-delete').onclick = deleteWorkspace;
   document.getElementById('pg-clear-history').onclick = () => clearWorkspaceHistory(false);
   document.getElementById('pg-clear-all-history').onclick = () => clearWorkspaceHistory(true);
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
 /* ================= program and stream overviews ================= */
@@ -8575,7 +8609,6 @@ function wireOverview() {
   document.getElementById('up-cancel').onclick = () => dlg.close();
   document.getElementById('up-close').onclick = () => dlg.close();
   document.getElementById('up-delete').onclick = deleteUpdate;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
 /* ================= risks, issues and dependencies ================= */
@@ -9400,7 +9433,6 @@ function wireFreezes() {
   const dlg = document.getElementById('freeze-dialog');
   document.getElementById('fz-close').onclick = () => dlg.close();
   document.getElementById('fz-cancel').onclick = () => dlg.close();
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 }
 
 function wireRaid() {
@@ -9444,7 +9476,6 @@ function wireRaid() {
   document.getElementById('rd-close').onclick = () => dlg.close();
   document.getElementById('rd-delete').onclick = deleteRaid;
   document.getElementById('rd-issue').onclick = riskToIssue;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   wirePgDepLists();
   wirePgStreams();
   wireFreezes();
@@ -10165,7 +10196,6 @@ function wireRaidImport() {
   document.getElementById('btn-raid-import').onclick = openRaidImport;
   document.getElementById('ri-close').onclick = close;
   document.getElementById('ri-cancel').onclick = close;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
   document.getElementById('ri-change').onclick = () => { document.getElementById('ri-file').value = ''; showRaidImportStep('source'); };
   document.getElementById('ri-file').addEventListener('change', (e) => { if (e.target.files[0]) readRaidImportFile(e.target.files[0]); });
   const drop = document.getElementById('ri-drop');
@@ -12158,7 +12188,6 @@ function wireMeetingImport() {
   document.getElementById('btn-mt-import').onclick = openMeetingImport;
   document.getElementById('mi-close').onclick = close;
   document.getElementById('mi-cancel').onclick = close;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
   document.getElementById('mi-change').onclick = () => { document.getElementById('mi-file').value = ''; showMeetingImportStep('source'); };
   document.getElementById('mi-file').addEventListener('change', (e) => { if (e.target.files[0]) readMeetingImportFile(e.target.files[0]); });
   const drop = document.getElementById('mi-drop');
@@ -12280,7 +12309,7 @@ function wireMeetings() {
 
   // dialogs
   const close = (id) => () => document.getElementById(id).close();
-  const backdrop = (id) => { const d = document.getElementById(id); d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); };
+  const backdrop = (id) => { const d = document.getElementById(id); d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); }; // read-only lists only: edit dialogs close by ✕, Cancel or Esc, never a stray click outside
   document.getElementById('meeting-form').addEventListener('submit', submitMeeting);
   const mins = document.getElementById('meeting-form').elements.minutes;
   mdEditor(mins, { paste: clipboardMinutes }); // edited as formatted text, kept as Markdown
@@ -12304,7 +12333,6 @@ function wireMeetings() {
   document.getElementById('sr-cancel').onclick = close('series-dialog');
   document.getElementById('sr-close').onclick = close('series-dialog');
   document.getElementById('sr-delete').onclick = deleteSeries;
-  backdrop('series-dialog');
   document.getElementById('sl-close').onclick = close('series-list-dialog');
   document.getElementById('sl-done').onclick = close('series-list-dialog');
   document.getElementById('sl-new').onclick = () => openSeriesDialog(null);
@@ -12318,7 +12346,6 @@ function wireMeetings() {
   document.getElementById('mt-cancel').onclick = close('meeting-dialog');
   document.getElementById('mt-close').onclick = close('meeting-dialog');
   document.getElementById('mt-delete').onclick = deleteMeeting;
-  backdrop('meeting-dialog');
 
   document.getElementById('extract-form').addEventListener('submit', submitExtract);
   document.getElementById('mx-cancel').onclick = close('extract-dialog');
@@ -12342,7 +12369,6 @@ function wireMeetings() {
     document.getElementById('mx-add').textContent = n ? `Add ${count(n, 'action', 'actions')}` : 'Add';
     document.getElementById('mx-add').disabled = !n;
   });
-  backdrop('extract-dialog');
 
   document.getElementById('action-form').addEventListener('submit', submitAction);
   document.getElementById('ad-from').addEventListener('click', (e) => { const b = e.target.closest('[data-mt-open]'); if (b) showMeeting(b.dataset.mtOpen); });
@@ -12362,7 +12388,6 @@ function wireMeetings() {
     renderAdLinks();
     document.getElementById('ad-addlink').focus();
   });
-  backdrop('action-dialog');
 }
 
 /* ================= find (⌘K) ================= */
@@ -12929,7 +12954,6 @@ function wireEvents() {
   document.getElementById('ed-history').onclick = () => { const m = editing; dlg.close(); showReportsFor(m.id); };
   document.getElementById('ed-dates').onclick = () => showDatesFor(editing.id);
   document.getElementById('ed-raid').onclick = () => showRaidFor(`item:${editing.id}`);
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   // The list is rebuilt after a change, so the focus goes back to the add box, ready for the next one.
   document.getElementById('ed-deps').addEventListener('click', (e) => {
     const rm = e.target.closest('[data-edrm]');

@@ -431,7 +431,13 @@
             Filter <span id="gf-badge" class="tb-badge" hidden></span>
           </button>
           <div id="gm-filter" class="tb-pop" hidden>
-            <div class="pop-field"><span>Streams</span><div id="gf-stream" class="pop-checks" role="group" aria-label="Streams"></div></div>
+            <div class="pop-field stream-pick">
+              <div class="sp-head"><span>Streams</span><span id="gf-stream-count" class="sp-count"></span>
+                <button type="button" id="gf-stream-all" class="link-btn" title="Tick every stream (the same as showing them all)">All</button>
+                <button type="button" id="gf-stream-none" class="link-btn" title="Untick every stream: every stream is shown">None</button></div>
+              <input id="gf-stream-q" class="sp-q" type="search" placeholder="Find a stream" autocomplete="off" aria-label="Find a stream" hidden />
+              <div id="gf-stream" class="sp-list" role="group" aria-label="Streams"></div>
+            </div>
             <label class="pop-field"><span>Owner</span><select id="gf-owner"></select></label>
             <div class="pop-field"><span>Type</span><div id="gf-type" class="pop-seg" role="group" aria-label="Type"></div></div>
             <div class="pop-field"><span>RAG</span><div id="gf-rag" class="rag-pick sm" role="group" aria-label="RAG"></div></div>
