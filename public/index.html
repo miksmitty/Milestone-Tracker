@@ -987,7 +987,8 @@
         <label>Series<select name="series_id" title="The regular meeting this is one of, or a one-off"></select></label>
         <label class="span2">Attendees<input name="attendees" placeholder="Who was there — separate names with commas" /></label>
         <label class="span3">Link<input name="link" placeholder="Where the recording, transcript or original notes live (optional)" /></label>
-        <label class="span3">Minutes <span class="md-hint">— paste them in as written, from Copilot, Teams, Word or an LLM: headings, lists, tables and bold are kept. Or <button type="button" id="mt-file-btn" class="link-btn">open a file</button> (RTF, text, Markdown or HTML).</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here, or drop an RTF file here"></textarea></label>
+        <!-- not a <label>: a click in the editor would "click" the open-a-file button -->
+        <div class="span3 field"><span class="field-label">Minutes</span><span class="md-hint">— paste them in as written, from Copilot, Teams, Word or an LLM: headings, lists, tables and bold are kept. Or <button type="button" id="mt-file-btn" class="link-btn">open a file</button> (RTF, text, Markdown or HTML).</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here, or drop an RTF file here"></textarea></div>
         <input type="file" id="mt-file" accept=".rtf,.txt,.md,.markdown,.html,.htm,text/rtf,application/rtf,text/plain,text/markdown,text/html" hidden />
       </div>
       <p id="mt-error" class="dlg-error"></p>
