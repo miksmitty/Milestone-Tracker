@@ -591,6 +591,11 @@ body.fill-dragging { user-select: none; }
   font-size: 13px; font-family: inherit; color: var(--text);
 }
 .bulk-bar input[type="number"] { width: 80px; }
+/* meetings and actions: the same ticks (see SEL in app.js) */
+:is(#mt-table, #actions-table) :is(th, td).col-sel, #mt-table th.mt-sel { text-align: center; padding-left: 4px; padding-right: 4px; cursor: default; }
+:is(#mt-table, #actions-table) :is(.col-sel, .mt-sel) input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+#mt-table td.col-sel { vertical-align: top; padding-top: 12px; }
+:is(#mt-table, #actions-table) tr.ticked td, #mt-table tr.ticked:hover td { background: var(--tint-2); }
 .grid-empty { text-align: left; color: var(--muted); padding: 24px !important; font-size: 13px; }
 
 /* ---------- quick update panel + RAG picker ---------- */
@@ -1857,6 +1862,7 @@ button.raid-link:hover:not(:disabled) { border-color: var(--accent); color: var(
 .mode-seg input:checked + span #mt-open-count:not(.seg-count-late) { background: var(--panel-2); }
 .mt-split .rp-list { flex-basis: var(--mt-list-w, clamp(300px, 36%, 520px)); }
 #mt-table { table-layout: fixed; }
+#mt-table th.mt-sel { width: 34px; }
 #mt-table th.mt-date { width: 56px; }
 #mt-table th.mt-acts { width: 64px; text-align: right; }
 #mt-table thead { position: sticky; top: 0; z-index: 1; }

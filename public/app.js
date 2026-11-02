@@ -11181,6 +11181,7 @@ function renderMeetings() {
   seg.hidden = !open.length;
   seg.classList.toggle('seg-count-late', open.some(actionOverdue));
   if (actions) renderActions(); else renderMeetingList();
+  renderSelBar(actions ? SEL.mt : SEL.act); // the other tab's bar is put away
   updateMeetingsBadge();
 }
 
@@ -11230,27 +11231,30 @@ function renderMeetingList() {
   if (!mtRows.some(m => m.id === mtSelId)) mtSelId = mtRows[0]?.id || null; // the newest is open unless one was chosen
   // Series whose latest meeting has no minutes yet, with a way to record them.
   const due = series.filter(x => (!mtFilter.series || x.id === mtFilter.series) && seriesDue(x));
-  const rows = due.map(x => `<tr class="mt-due"><td colspan="3"><div><span class="mt-due-what"><b>${escAttr(x.name)}</b> · ${fmtNice(seriesDue(x))} — no minutes yet</span>
+  const rows = due.map(x => `<tr class="mt-due"><td colspan="4"><div><span class="mt-due-what"><b>${escAttr(x.name)}</b> · ${fmtNice(seriesDue(x))} — no minutes yet</span>
       <button type="button" class="btn btn-sm" data-mt-record="${x.id}">Record minutes</button></div></td></tr>`);
   let month = null;
   for (const m of mtRows) {
     const mo = m.date ? m.date.slice(0, 7) : '';
     if (mo !== month) {
       month = mo;
-      rows.push(`<tr class="mt-month"><td colspan="3">${mo ? parseDate(m.date).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'No date'}</td></tr>`);
+      rows.push(`<tr class="mt-month"><td colspan="4">${mo ? parseDate(m.date).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'No date'}</td></tr>`);
     }
     const acts = actionsFor(m.id), openN = acts.filter(a => !isActionDone(a)).length, late = acts.some(actionOverdue);
     const snippet = words.length ? searchSnippet(mdToText(m.minutes), words) : '';
     const d = m.date && parseDate(m.date);
-    rows.push(`<tr data-mid="${m.id}" class="mt-row${m.id === mtSelId ? ' selected' : ''}" tabindex="0">
+    const ticked = SEL.mt.ids.has(m.id);
+    rows.push(`<tr data-mid="${m.id}" class="mt-row${m.id === mtSelId ? ' selected' : ''}${ticked ? ' ticked' : ''}" tabindex="0">
+      <td class="col-sel"><input type="checkbox" data-mt-sel="${m.id}" ${ticked ? 'checked' : ''} aria-label="Select ${escAttr(m.title)}" /></td>
       <td class="mt-date">${d ? `<b>${d.getDate()}</b><small>${d.toLocaleDateString('en-GB', { weekday: 'short' })}</small>` : '<span class="muted">—</span>'}</td>
       <td class="mt-title"><b>${escAttr(m.title) || '<span class="muted">(untitled)</span>'}</b>${seriesName(m.series_id) ? `<span class="mt-series">${escAttr(seriesName(m.series_id))}</span>` : ''}
         ${m.attendees ? `<div class="mt-sub">${escAttr(m.attendees)}</div>` : ''}${snippet ? `<div class="mt-snip">${snippet}</div>` : ''}</td>
       <td class="mt-acts">${acts.length ? `<span class="mt-act-n${openN ? (late ? ' late' : ' open') : ''}" title="${count(openN, 'open action', 'open actions')} of ${acts.length}">${openN}<small>/${acts.length}</small></span>` : ''}</td></tr>`);
   }
   document.getElementById('mt-body').innerHTML = rows.join('')
-    || `<tr><td colspan="3" class="grid-empty">${all.length ? 'Nothing matches.' : 'No meetings yet. <b>+ New meeting</b> records one with its minutes.'}</td></tr>`;
+    || `<tr><td colspan="4" class="grid-empty">${all.length ? 'Nothing matches.' : 'No meetings yet. <b>+ New meeting</b> records one with its minutes.'}</td></tr>`;
   document.getElementById('mt-count').textContent = count(mtRows.length, 'meeting', 'meetings');
+  pruneSel(SEL.mt, mtRows.map(m => m.id));
   renderMeetingPane(words);
 }
 
@@ -11338,6 +11342,7 @@ function updateMeetingsBadge() {
 // A spreadsheet-style table like Items and the Reports list: sort, filter, move and size the
 // columns from their headings (see makeTable). It starts filtered to open actions.
 const ACT_COLS = [
+  { key: 'sel', label: '', w: 36, fixed: true, head: () => '<input type="checkbox" id="act-sel-all" title="Select all shown" />' },
   { key: 'ref', label: 'Ref', w: 84 },
   { key: 'text', label: 'Title', w: 380 },
   { key: 'owner', label: 'Owner', w: 140, blank: '(No owner)' },
@@ -11364,6 +11369,7 @@ function actionDueNote(a) {
   return d <= 7 ? `<small class="soon">In ${daysText(d)}</small>` : '';
 }
 const ACT_CELLS = {
+  sel: (a) => `<td class="col-sel"><input type="checkbox" data-act-sel="${a.id}" ${SEL.act.ids.has(a.id) ? 'checked' : ''} aria-label="Select ${escAttr(a.ref || a.text)}" /></td>`,
   ref: (a) => `<td class="act-ref">${a.ref ? escAttr(a.ref) : dash}</td>`,
   text: (a) => `<td class="act-text">${escAttr(a.text)}${a.description ? `<div class="act-desc">${escAttr(a.description)}</div>` : ''}${a.links.length ? `<div class="act-links">${a.links.map(l => linkChip(l)).join('')}</div>` : ''}</td>`,
   owner: (a) => `<td>${ownerChip(a.owner)}</td>`,
@@ -11387,12 +11393,13 @@ function renderActions() {
   const valueOf = (a, key) => { const c = ACT_COLS.find(x => x.key === key); return c.sort ? c.sort(a) : a[key]; };
   actRows = sortRows(actTable, all.filter(a => passesFilters(actTable, a) && actionMatches(a, words)), valueOf, actionOrder);
   const cols = actTable.cols();
-  document.getElementById('act-body').innerHTML = actRows.map(a => `<tr data-act="${a.id}" class="act-row${isActionDone(a) ? ' done' : actionOverdue(a) ? ' late' : ''}">${cols.map(c => ACT_CELLS[c.key](a)).join('')}</tr>`).join('')
+  document.getElementById('act-body').innerHTML = actRows.map(a => `<tr data-act="${a.id}" class="act-row${isActionDone(a) ? ' done' : actionOverdue(a) ? ' late' : ''}${SEL.act.ids.has(a.id) ? ' ticked' : ''}">${cols.map(c => ACT_CELLS[c.key](a)).join('')}</tr>`).join('')
     || `<tr><td colspan="${cols.length}" class="grid-empty">${all.length ? 'No actions match the filters.' : 'No actions yet. They come from a meeting’s minutes (<b>Extract actions</b> on the Minutes tab) or <b>+ Add action</b>.'}</td></tr>`;
   const filtered = Object.keys(actTable.filters).length > 0 || !!words.length;
   const late = actRows.filter(actionOverdue).length;
   document.getElementById('mt-count').textContent = `${filtered ? `Showing ${actRows.length} of ${all.length}` : count(actRows.length, 'action', 'actions')}${late ? ` · ${late} overdue` : ''}`;
   document.getElementById('act-clear').hidden = !filtered;
+  pruneSel(SEL.act, actRows.map(a => a.id));
 }
 
 async function setActionDone(id, done) {
@@ -11404,26 +11411,232 @@ async function setActionDone(id, done) {
   await saveActions(`Action ${a.ref} ${done ? 'done' : 'reopened'}`);
 }
 
-function downloadMeetingsCSV() {
-  renderMeetings();
+// The two downloads read back in through Import with their links intact: each meeting carries its
+// Meeting ID, and each action the Meeting ID of the meeting it came from, so an action finds its
+// meeting again even when two meetings share a title and date, or the meetings are given new ids
+// in another workspace. A meeting's series goes by name with its cadence and first date, so it can
+// be set up again; an action's links go by the item's ref and title, or "Stream: name".
+const MEETINGS_CSV_HEAD = ['Meeting ID', 'Date', 'Title', 'Series', 'Series cadence', 'Series start', 'Attendees', 'Link', 'Minutes', 'Open actions', 'Actions'];
+const ACTIONS_CSV_HEAD = ['Ref', 'Title', 'Description', 'Owner', 'Due', 'Status', 'Done on', 'Meeting ID', 'Meeting', 'Meeting date', 'Linked to'];
+// An action as a line of a meeting's Actions cell: "A3 Send the plan (Jane) due 2026-11-20 — Open".
+const actionCellLine = (a) => `${a.ref} ${a.text}${a.owner ? ` (${a.owner})` : ''}${a.due ? ` due ${a.due}` : ''} — ${a.status}`;
+const meetingCSVRow = (m) => {
+  const acts = actionsFor(m.id), x = seriesById(m.series_id);
+  return [m.id, m.date, m.title, x?.name || '', x?.cadence || '', x?.start || '', m.attendees, m.link, m.minutes, acts.filter(a => !isActionDone(a)).length, acts.map(actionCellLine).join('\n')];
+};
+const actionCSVRow = (a) => {
+  const m = meetingById(a.meeting_id);
+  return [a.ref, a.text, a.description, a.owner, a.due, a.status, a.done_at.slice(0, 10), a.meeting_id, m?.title || '', m?.date || '', a.links.map(l => linkInfo(l).title).join('; ')];
+};
+function downloadCSVFile(name, head, lines) {
   const p = currentWorkspace();
   const slug = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
-  let head, lines, name;
-  if (mtMode === 'actions') {
-    head = ['Ref', 'Title', 'Description', 'Owner', 'Due', 'Status', 'Done on', 'Meeting', 'Meeting date', 'Linked to'];
-    lines = actRows.map(a => [a.ref, a.text, a.description, a.owner, a.due, a.status, a.done_at.slice(0, 10), meetingById(a.meeting_id)?.title || '', meetingById(a.meeting_id)?.date || '', a.links.map(l => linkInfo(l).title).join('; ')]);
-    name = 'meeting-actions';
-  } else {
-    head = ['Date', 'Title', 'Series', 'Attendees', 'Link', 'Minutes', 'Open actions', 'Actions'];
-    lines = mtRows.map(m => { const acts = actionsFor(m.id); return [m.date, m.title, seriesName(m.series_id), m.attendees, m.link, m.minutes, acts.filter(a => !isActionDone(a)).length, acts.map(a => `${a.ref} ${a.text}${a.owner ? ` (${a.owner})` : ''}${a.due ? ` due ${a.due}` : ''} — ${a.status}`).join('\n')]; });
-    name = 'meetings';
-  }
   const blob = new Blob(['﻿' + [head, ...lines].map(r => r.map(csvEscape).join(',')).join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.download = `${slug}-${name}-${fmtISO(new Date())}.csv`;
   a.href = URL.createObjectURL(blob);
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+// What's shown, filters applied.
+function downloadMeetingsCSV() {
+  renderMeetings();
+  if (mtMode === 'actions') downloadCSVFile('meeting-actions', ACTIONS_CSV_HEAD, actRows.map(actionCSVRow));
+  else downloadCSVFile('meetings', MEETINGS_CSV_HEAD, mtRows.map(meetingCSVRow));
+}
+// Every meeting and every action of the workspace, whatever the filters: the pair to import elsewhere.
+function downloadAllMeetingsCSV() {
+  downloadCSVFile('meetings', MEETINGS_CSV_HEAD, meetingsOf().map(meetingCSVRow));
+  setTimeout(() => downloadCSVFile('meeting-actions', ACTIONS_CSV_HEAD, actionsOf().sort(cmpRef).map(actionCSVRow)), 300); // two at once can be taken for one
+  flashStatus(`Downloaded ${count(meetingsOf().length, 'meeting', 'meetings')} and ${count(actionsOf().length, 'action', 'actions')}: import both files together to bring them back`, true);
+}
+
+/* ---- ticking meetings and actions: bulk changes ---- */
+// Tick meetings in the list, or actions in the table (shift-click for a range), to change them all
+// at once or delete them, as on Items. Only rows on screen stay ticked, so a bulk change never
+// reaches something filtered out of view.
+const SEL = {
+  mt: { ids: new Set(), anchor: null, field: 'series_id', body: 'mt-body', attr: 'mtSel', all: 'mt-sel-all', bar: 'mt-bulk', one: 'meeting', many: 'meetings' },
+  act: { ids: new Set(), anchor: null, field: 'status', body: 'act-body', attr: 'actSel', all: 'act-sel-all', bar: 'act-bulk', one: 'action', many: 'actions' },
+};
+const MT_BULK_FIELDS = [['series_id', 'Series'], ['attendees', 'Attendees'], ['shift', 'Date — move by'], ['close', 'Their open actions']];
+const ACT_BULK_FIELDS = [['status', 'Status'], ['owner', 'Owner'], ['due', 'Due date'], ['shift', 'Due date — move by'], ['meeting_id', 'Meeting']];
+const selBoxes = (s) => [...document.querySelectorAll(`#${s.body} [data-${s.attr === 'mtSel' ? 'mt-sel' : 'act-sel'}]`)];
+const selBoxId = (s, box) => box.dataset[s.attr];
+
+function tickRow(s, box, range) {
+  const boxes = selBoxes(s);
+  const from = boxes.findIndex(b => selBoxId(s, b) === s.anchor), to = boxes.indexOf(box);
+  for (const b of range && from >= 0 ? boxes.slice(Math.min(from, to), Math.max(from, to) + 1) : [box]) setTicked(s, b, box.checked);
+  s.anchor = selBoxId(s, box);
+  renderSelBar(s);
+}
+function setTicked(s, box, on) {
+  box.checked = on;
+  if (on) s.ids.add(selBoxId(s, box)); else s.ids.delete(selBoxId(s, box));
+  box.closest('tr').classList.toggle('ticked', on);
+}
+function tickAllShown(s, on) {
+  selBoxes(s).forEach(b => setTicked(s, b, on));
+  s.anchor = null;
+  renderSelBar(s);
+}
+// After the rows are drawn: forget what's no longer shown.
+function pruneSel(s, shownIds) {
+  const shown = new Set(shownIds);
+  for (const id of s.ids) if (!shown.has(id)) s.ids.delete(id);
+  renderSelBar(s);
+}
+
+function selValueControl(s) {
+  const k = s.field;
+  if (s === SEL.mt) {
+    switch (k) {
+      case 'series_id': return `<span>to</span><select id="mt-bulk-input"><option value="">One-off meeting</option>${seriesOf().map(x => `<option value="${x.id}">${escAttr(x.name)}</option>`).join('')}</select>`;
+      case 'attendees': return '<span>to</span><input id="mt-bulk-input" placeholder="Leave blank to clear" />';
+      case 'shift': return '<input id="mt-bulk-input" type="number" step="1" value="7" /><span>days (negative for earlier)</span>';
+      case 'close': return '<span>to Done</span>';
+    }
+  }
+  switch (k) {
+    case 'status': return `<span>to</span><select id="act-bulk-input">${optionList(ACTION_STATUSES, 'Done')}</select>`;
+    case 'owner': return '<span>to</span><input id="act-bulk-input" list="people-list" placeholder="Leave blank to clear" />';
+    case 'due': return '<span>to</span><input id="act-bulk-input" type="date" /><span>(blank clears it)</span>';
+    case 'shift': return '<input id="act-bulk-input" type="number" step="1" value="7" /><span>days (negative for earlier)</span>';
+    case 'meeting_id': return `<span>to</span><select id="act-bulk-input"><option value="">— none (added by hand) —</option>${meetingsOf().map(m => `<option value="${m.id}">${escAttr(`${m.date ? `${fmtShort(m.date)} · ` : ''}${m.title || '(untitled)'}`)}</option>`).join('')}</select>`;
+  }
+}
+
+function renderSelBar(s) {
+  const n = s.ids.size, shown = selBoxes(s).length;
+  const all = document.getElementById(s.all);
+  if (all) {
+    all.checked = n > 0 && n === shown;
+    all.indeterminate = n > 0 && n < shown;
+  }
+  const bar = document.getElementById(s.bar);
+  const wasHidden = bar.hidden;
+  bar.hidden = !n || (s === SEL.mt) === (mtMode === 'actions');
+  if (bar.hidden) return;
+  document.getElementById(`${s.bar}-count`).textContent = `${count(n, s.one, s.many)} selected`;
+  document.getElementById(`${s.bar}-field`).innerHTML = (s === SEL.mt ? MT_BULK_FIELDS : ACT_BULK_FIELDS)
+    .map(([k, label]) => `<option value="${k}" ${k === s.field ? 'selected' : ''}>${label}</option>`).join('');
+  if (wasHidden) document.getElementById(`${s.bar}-value`).innerHTML = selValueControl(s);
+  if (wasHidden) refreshDatalists();
+}
+
+async function applyMeetingBulk() {
+  const s = SEL.mt;
+  const list = meetingsOf().filter(m => s.ids.has(m.id));
+  if (!list.length) return;
+  const v = document.getElementById('mt-bulk-input')?.value.trim() ?? '';
+  const snap = snapshotData();
+  const now = new Date().toISOString();
+  const what = count(list.length, 'meeting', 'meetings');
+  if (s.field === 'close') {
+    const open = state.actions.filter(a => s.ids.has(a.meeting_id) && !isActionDone(a));
+    if (!open.length) return flashStatus(`The actions from the ${list.length === 1 ? 'meeting' : 'meetings'} selected are all done already`, false);
+    for (const a of open) Object.assign(a, { status: 'Done', done_at: now, updated: now });
+    const label = `${count(open.length, 'action', 'actions')} from ${what} marked done`;
+    rerenderCurrentView();
+    offerUndo(snap, label);
+    return saveActions(label);
+  }
+  const n = Math.round(+v);
+  if (s.field === 'shift' && !n) return flashStatus('Enter a number of days to move by, e.g. 7 or -3', false);
+  let done = 0;
+  for (const m of list) {
+    const was = m[s.field === 'shift' ? 'date' : s.field];
+    if (s.field === 'shift') { if (m.date) m.date = addDays(m.date, n); } else m[s.field] = v;
+    if (m[s.field === 'shift' ? 'date' : s.field] !== was) { m.updated = now; done++; }
+  }
+  if (!done) return flashStatus('Nothing to change', false);
+  const label = s.field === 'shift' ? `Moved ${count(done, 'meeting', 'meetings')} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}`
+    : `${MT_BULK_FIELDS.find(([k]) => k === s.field)[1]} updated on ${count(done, 'meeting', 'meetings')}`;
+  rerenderCurrentView();
+  offerUndo(snap, label);
+  await saveMeetings(label);
+}
+
+async function deleteSelectedMeetings() {
+  const s = SEL.mt;
+  const list = meetingsOf().filter(m => s.ids.has(m.id));
+  if (!list.length) return;
+  const withActs = document.getElementById('mt-bulk-with-acts').checked;
+  const gone = withActs ? state.actions.filter(a => s.ids.has(a.meeting_id)) : [];
+  const snap = snapshotData();
+  state.meetings = state.meetings.filter(m => !s.ids.has(m.id));
+  if (gone.length) state.actions = state.actions.filter(a => !gone.includes(a));
+  if (s.ids.has(mtSelId)) mtSelId = null;
+  s.ids.clear();
+  const label = `Deleted ${count(list.length, 'meeting', 'meetings')}${gone.length ? ` and ${count(gone.length, 'action', 'actions')}` : ''}`;
+  rerenderCurrentView();
+  offerUndo(snap, label);
+  await Promise.all([saveMeetings(label), gone.length && saveActions(label)]);
+}
+
+async function applyActionBulk() {
+  const s = SEL.act;
+  const list = actionsOf().filter(a => s.ids.has(a.id));
+  if (!list.length) return;
+  const v = document.getElementById('act-bulk-input')?.value.trim() ?? '';
+  if (s.field === 'due' && v && !parseDate(v)) return flashStatus('That isn’t a date', false);
+  const n = Math.round(+v);
+  if (s.field === 'shift' && !n) return flashStatus('Enter a number of days to move by, e.g. 7 or -3', false);
+  const snap = snapshotData();
+  const now = new Date().toISOString();
+  let done = 0;
+  for (const a of list) {
+    const was = JSON.stringify(a);
+    if (s.field === 'shift') { if (a.due) a.due = addDays(a.due, n); }
+    else if (s.field === 'status') { if (a.status !== v) Object.assign(a, { status: v, done_at: v === 'Done' ? now : '' }); }
+    else a[s.field] = v;
+    if (JSON.stringify(a) !== was) { a.updated = now; done++; }
+  }
+  if (!done) return flashStatus(s.field === 'shift' ? 'None of them has a due date to move' : 'Nothing to change', false);
+  const label = s.field === 'shift' ? `Moved the due date of ${count(done, 'action', 'actions')} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}`
+    : s.field === 'status' ? `${count(done, 'action', 'actions')} ${v === 'Done' ? 'marked done' : 'reopened'}`
+    : `${ACT_BULK_FIELDS.find(([k]) => k === s.field)[1]} updated on ${count(done, 'action', 'actions')}`;
+  rerenderCurrentView();
+  offerUndo(snap, label);
+  await saveActions(label);
+}
+
+async function deleteSelectedActions() {
+  const s = SEL.act;
+  const list = actionsOf().filter(a => s.ids.has(a.id));
+  if (!list.length) return;
+  const snap = snapshotData();
+  state.actions = state.actions.filter(a => !s.ids.has(a.id));
+  s.ids.clear();
+  const label = `Deleted ${count(list.length, 'action', 'actions')}`;
+  rerenderCurrentView();
+  offerUndo(snap, label);
+  await saveActions(label);
+}
+
+function wireSelBars() {
+  for (const s of Object.values(SEL)) {
+    const bar = s.bar;
+    document.getElementById(`${bar}-field`).onchange = (e) => {
+      s.field = e.target.value;
+      document.getElementById(`${bar}-value`).innerHTML = selValueControl(s);
+    };
+    document.getElementById(`${bar}-value`).addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById(`${bar}-apply`).click(); });
+    document.getElementById(`${bar}-clear`).onclick = () => tickAllShown(s, false);
+    // Ticking a row never opens it; shift-click ticks the range from the last one ticked.
+    document.getElementById(s.body).addEventListener('click', (e) => {
+      const box = e.target.closest(`[data-${s === SEL.mt ? 'mt-sel' : 'act-sel'}]`);
+      if (box) { e.stopPropagation(); tickRow(s, box, e.shiftKey); }
+      else if (e.target.closest('td.col-sel')) e.stopPropagation(); // a near miss on the box
+    }, true);
+  }
+  document.getElementById('mt-sel-all').onchange = (e) => tickAllShown(SEL.mt, e.target.checked);
+  document.getElementById('actions-table').querySelector('thead').addEventListener('change', (e) => { if (e.target.id === 'act-sel-all') tickAllShown(SEL.act, e.target.checked); });
+  document.getElementById('mt-bulk-apply').onclick = applyMeetingBulk;
+  document.getElementById('mt-bulk-delete').onclick = deleteSelectedMeetings;
+  document.getElementById('act-bulk-apply').onclick = applyActionBulk;
+  document.getElementById('act-bulk-delete').onclick = deleteSelectedActions;
 }
 
 /* ---- the meeting dialog ---- */
@@ -11721,13 +11934,14 @@ async function deleteAction() {
 // Import, which offers Undo.
 
 const MI_FIELDS = {
-  meetings: ['title', 'date', 'series', 'attendees', 'link', 'minutes', 'actions'],
-  actions: ['ref', 'text', 'description', 'owner', 'due', 'status', 'done_at', 'meeting', 'meeting_date', 'links'],
+  meetings: ['file_id', 'title', 'date', 'series', 'series_cadence', 'series_start', 'attendees', 'link', 'minutes', 'actions'],
+  actions: ['ref', 'text', 'description', 'owner', 'due', 'status', 'done_at', 'meeting_file_id', 'meeting', 'meeting_date', 'links'],
 };
 // Several columns can go into these: their text is put together.
 const MI_MULTI = ['attendees', 'minutes', 'actions', 'description', 'links'];
-const MI_DATES = ['date', 'due', 'done_at', 'meeting_date'];
+const MI_DATES = ['date', 'due', 'done_at', 'meeting_date', 'series_start'];
 const miFieldLabel = (k) => ({
+  file_id: 'Meeting ID (from Download CSV)', series_cadence: 'Series cadence', series_start: 'Series first meeting', meeting_file_id: 'Meeting ID (from Download CSV)',
   title: 'Title', date: 'Date', series: 'Series (found or added by name)', attendees: 'Attendees', link: 'Link (recording or notes)',
   minutes: 'Minutes', actions: 'Actions (one per line)', ref: 'Ref', text: 'Title', description: 'Description', owner: 'Owner', due: 'Due date', status: 'Status (open or done)',
   done_at: 'Done on', meeting: 'Meeting (by title)', meeting_date: 'Meeting date', links: `Linked ${T.items} or streams`,
@@ -11735,6 +11949,9 @@ const miFieldLabel = (k) => ({
 // Headings are compared with everything but letters and digits removed; earlier names win.
 const MI_ALIASES = {
   meetings: {
+    file_id: ['meetingid'],
+    series_cadence: ['seriescadence', 'cadence', 'frequency', 'recurrencepattern'],
+    series_start: ['seriesstart', 'seriesfirstmeeting', 'firstmeeting'],
     title: ['title', 'meetingtitle', 'meeting', 'meetingname', 'name', 'subject', 'topic'],
     date: ['date', 'meetingdate', 'dateofmeeting', 'heldon', 'held', 'when', 'startdate', 'start', 'starttime', 'datetime'],
     series: ['series', 'meetingseries', 'recurring', 'recurrence', 'meetingtype', 'type', 'forum', 'committee', 'board'],
@@ -11754,6 +11971,7 @@ const MI_ALIASES = {
     status: ['status', 'actionstatus', 'state', 'progress', 'done', 'complete'],
     done_at: ['doneon', 'donedate', 'datedone', 'doneat', 'completedon', 'completeddate', 'datecompleted', 'completiondate', 'completed',
       'closedon', 'closeddate', 'dateclosed', 'closed', 'resolvedon'],
+    meeting_file_id: ['meetingid'],
     meeting: ['meeting', 'meetingtitle', 'frommeeting', 'sourcemeeting', 'raisedat', 'raisedin', 'source', 'forum'],
     meeting_date: ['meetingdate', 'dateofmeeting', 'dateraised', 'raised', 'raisedon', 'dateopened', 'opened', 'datelogged', 'logged', 'date', 'created'],
     links: ['linkedto', 'links', 'related', 'relatedto', 'relateditems', 'linkeditems', 'linkedmilestones', 'milestones', 'milestone', 'items'],
@@ -11763,7 +11981,7 @@ const MI_ALIASES = {
 const MI_IGNORED = [...RI_IGNORED, 'id', 'workspaceid', 'seriesid', 'meetingid', 'openactions', 'updated', 'modified'];
 const OPEN_WORDS = /^(open|new|not started|in progress|wip|ongoing|active|pending|to do|todo|outstanding|overdue|late|on hold|blocked|re ?opened|no|n)$/i;
 
-const mimp = { name: '', rows: [], headerRow: 0, map: [], order: 'auto', mode: 'merge', kind: 'meetings', extract: true, plan: null, detected: null };
+const mimp = { name: '', rows: [], headerRow: 0, map: [], order: 'auto', mode: 'merge', kind: 'meetings', extract: true, plan: null, detected: null, queue: [] };
 
 function miHeaderRow(rows) {
   const known = new Set([...Object.values(MI_ALIASES.meetings), ...Object.values(MI_ALIASES.actions)].flat().concat(MI_IGNORED));
@@ -11822,9 +12040,13 @@ function guessMeetingImportMap(header) {
 }
 
 // The lines of an Actions cell, as Download CSV writes them ("A3 Send the plan (Jane) due
-// 2026-11-20 — Open") or one action a line, read as Extract actions reads the minutes.
+// 2026-11-20 — Open": taken as written, ref and all), or one action a line, read as Extract
+// actions reads the minutes.
+const OWN_ACTION_LINE = /^([A-Za-z]{1,5}-?\d+)\s+(.+?)(?:\s+\(([^()]*)\))?(?:\s+due\s+(\d{4}-\d{2}-\d{2}))?\s+—\s+(Open|Done)$/;
 function actionsFromCell(text, meetingDate, people) {
   return text.split('\n').map(l => l.trim().replace(/^(?:[-*+•]|\d+[.)])\s+/, '')).filter(Boolean).map(l => {
+    const own = l.match(OWN_ACTION_LINE);
+    if (own) return { ref: own[1], text: own[2].trim(), owner: (own[3] || '').trim(), due: own[4] || '', done: own[5] === 'Done', key: actionKey(own[2]) };
     let done = false;
     const st = l.match(/\s+[—–-]\s+(open|done)\s*$/i);
     if (st) { done = /done/i.test(st[1]); l = l.slice(0, st.index); }
@@ -11833,6 +12055,25 @@ function actionsFromCell(text, meetingDate, people) {
     return { ...a, done: a.done || done };
   }).filter(a => a.text);
 }
+
+// The meetings each Meeting ID of a file became when it was imported here, so the actions file
+// imported after it (or the same files imported again) finds them: { workspace: { file id: meeting id } },
+// kept in this browser.
+const MI_IDS_STORE = 'milestone-tracker.meeting-import-ids';
+function importedMeetingId(fileId) {
+  try { return JSON.parse(localStorage.getItem(MI_IDS_STORE) || '{}')[state.workspaceId]?.[fileId] || ''; } catch { return ''; }
+}
+function rememberMeetingIds(ws, pairs) {
+  if (!pairs.length) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(MI_IDS_STORE) || '{}');
+    all[ws] = { ...(all[ws] || {}), ...Object.fromEntries(pairs) };
+    localStorage.setItem(MI_IDS_STORE, JSON.stringify(all));
+  } catch { /* storage full or blocked: actions then find their meeting by title and date */ }
+}
+// An action in a meetings file's Actions cell is this one: the same words, or (read as Download
+// CSV writes them) a title ending in brackets taken as "title (owner)".
+const sameAction = (x, a) => actionKey(x.text) === a.key || (!!a.owner && actionKey(x.text) === actionKey(`${a.text} ${a.owner}`));
 
 /* ---- plan ---- */
 // Works out, row by row, what the import will do. Nothing changes until applyMeetingImport.
@@ -11847,13 +12088,15 @@ function planMeetingImport() {
 }
 
 function planMeetingRows(data, header, cell, cols, order) {
-  const existing = meetingsOf();
+  const existing = meetingsOf(), acts = actionsOf();
   const people = knownPeople();
-  const rows = [], used = new Set(), seen = new Map(), keys = new Set(), newSeries = new Set();
+  const rows = [], used = new Set(), seen = new Map(), keys = new Set(), refs = new Set(), relinked = new Set();
+  const newSeries = new Map(); // name, lower case → { cadence, start } for a series to add
+  const free = (m) => (m && m.workspace_id === state.workspaceId && !used.has(m) ? m : null);
   data.forEach((r, i) => {
     const line = mimp.headerRow + i + 2;
     if (r.every(v => !String(v).trim())) return;
-    const row = { line, action: 'add', warn: [], fields: {}, target: null, newActions: [] };
+    const row = { line, action: 'add', warn: [], fields: {}, target: null, newActions: [], relink: [], fileId: '' };
     rows.push(row);
     const f = row.fields;
 
@@ -11864,10 +12107,19 @@ function planMeetingRows(data, header, cell, cols, order) {
     date = iso || '';
     if (!title && series) title = series;
     if (!title && !date) { row.action = 'skip'; row.warn.push('No title or date'); return; }
-    const key = `${date}|${noteKey(title || '')}`;
+    // A Meeting ID (Download CSV's) names the meeting, so two with the same title on the same day are two.
+    const fileId = row.fileId = cell(r, 'file_id');
+    const key = fileId ? `id:${fileId}` : `${date}|${noteKey(title || '')}`;
     if (seen.has(key)) { row.action = 'skip'; row.warn.push(`The same meeting as row ${seen.get(key).line}`); return; }
     seen.set(key, row);
-    const t = mimp.mode === 'add' ? null : existing.find(m => !used.has(m) && m.date === date && noteKey(m.title) === noteKey(title || m.title) && (title || m.title));
+    // The meeting it was downloaded from (the same id and title), or one it was imported as before;
+    // else the one with the same date and title.
+    // Of several with that date and title, the one whose minutes, then attendees, are the same.
+    const alike = existing.filter(m => !used.has(m) && m.date === date && noteKey(m.title) === noteKey(title || m.title) && (title || m.title));
+    const mins = cols('minutes').map(c => riClean(r[c])).join('\n\n').trim(), present = cols('attendees').map(c => riClean(r[c])).filter(Boolean).join(', ').replace(/\s*\n\s*/g, ', ');
+    const t = mimp.mode === 'add' ? null
+      : (fileId && (free(existing.find(m => m.id === fileId && (!title || noteKey(m.title) === noteKey(title)))) || free(meetingById(importedMeetingId(fileId)))))
+        || alike.find(m => mins && m.minutes.trim() === tidyMinutes(mins)) || alike.find(m => present && m.attendees === present) || alike[0] || null;
     if (t) { row.target = t; row.action = 'update'; used.add(t); }
     if (title) f.title = title;
     else if (!t) f.title = 'Meeting';
@@ -11876,8 +12128,12 @@ function planMeetingRows(data, header, cell, cols, order) {
     if (series) {
       const x = seriesOf().find(s => s.name.toLowerCase() === series.toLowerCase());
       f.series_id = x ? x.id : `new:${series}`;
-      if (!x && !newSeries.has(series.toLowerCase())) row.warn.push(`Series “${series}” isn't one of this workspace's yet, so it will be added`);
-      if (!x) newSeries.add(series.toLowerCase());
+      if (!x) {
+        const k = series.toLowerCase(), cadence = fromList(cell(r, 'series_cadence'), MEETING_CADENCES), start = readDate(cell(r, 'series_start'), order) || '';
+        const was = newSeries.get(k);
+        if (!was) row.warn.push(`Series “${series}” isn't one of this workspace's yet, so it will be added`);
+        newSeries.set(k, { cadence: was?.cadence || (MEETING_CADENCES.includes(cadence) ? cadence : ''), start: was?.start || start });
+      }
     }
     const att = cols('attendees').map(c => riClean(r[c])).filter(Boolean).join(', ');
     if (att) f.attendees = att.replace(/\s*\n\s*/g, ', ');
@@ -11889,20 +12145,34 @@ function planMeetingRows(data, header, cell, cols, order) {
     const minutes = parts.length > 1 ? parts.map(([h, v]) => `## ${h}\n\n${v}`).join('\n\n') : parts[0]?.[1] || '';
     if (minutes && minutes !== t?.minutes.trim()) f.minutes = minutes;
 
-    // Actions: an Actions column, and (if asked) the minutes, less any already tracked.
+    // Actions: an Actions column, and (if asked) the minutes, less any already tracked. One with a
+    // ref (as Download CSV writes them) is the action of that ref: tracked already, it's left as it
+    // is, but put back on this meeting if it has lost it (its actions imported first); new, it keeps
+    // its ref unless another action here has it.
     const on = date || t?.date || todayISO();
     const found = [...cols('actions').flatMap(c => actionsFromCell(riClean(r[c]), on, people)),
       ...(mimp.extract && f.minutes && f.minutes !== t?.minutes ? actionCandidates(f.minutes, on, people) : [])]; // only minutes that are new or changed
     for (const a of found) {
-      if (keys.has(a.key) || trackedAs(a)) continue;
+      if (a.ref) {
+        const low = a.ref.toLowerCase();
+        if (refs.has(low)) continue;
+        refs.add(low);
+        const had = acts.find(x => x.ref.toLowerCase() === low);
+        if (had && sameAction(had, a)) {
+          keys.add(a.key);
+          if (!meetingById(had.meeting_id) && !relinked.has(had)) { relinked.add(had); row.relink.push(had); }
+          continue;
+        }
+        if (had) a.ref = ''; // its ref is another action's here: it gets the next free
+      } else if (keys.has(a.key) || trackedAs(a)) continue;
       keys.add(a.key);
       row.newActions.push(a);
     }
 
     if (t) for (const k of Object.keys(f)) if (f[k] === (t[k] ?? '')) delete f[k];
-    if (t && !Object.keys(f).length && !row.newActions.length) row.action = 'same';
+    if (t && !Object.keys(f).length && !row.newActions.length && !row.relink.length) row.action = 'same';
   });
-  return { rows };
+  return { rows, newSeries };
 }
 
 function planActionRows(data, cell, cols, order) {
@@ -11910,6 +12180,10 @@ function planActionRows(data, cell, cols, order) {
   const meetings = meetingsOf();
   const rows = [], used = new Set(), refRow = new Map();
   const now = new Date().toISOString();
+  // Download CSV's own file (it has the Meeting ID column) says everything about each action, so a
+  // blank owner, due date, description or meeting there is blank, not unknown.
+  const own = cols('meeting_file_id').length > 0;
+  const blank = (k) => own && cols(k).length > 0;
   data.forEach((r, i) => {
     const line = mimp.headerRow + i + 2;
     if (r.every(v => !String(v).trim())) return;
@@ -11940,7 +12214,8 @@ function planActionRows(data, cell, cols, order) {
     }
     if (t && used.has(t)) { row.action = 'skip'; row.warn.push(`Matches ${t.ref}, which an earlier row already updates`); return; }
     if (t) { row.target = t; row.action = 'update'; used.add(t); }
-    if (t && ref && text && actionKey(t.text) !== actionKey(text)) row.warn.push(`Matched to ${t.ref} by its ref, but the wording differs: check it's the same action`);
+    // (A title ending in brackets, read from a meetings file as "title (owner)", is the same action.)
+    if (t && ref && text && actionKey(t.text) !== actionKey(text) && actionKey(`${t.text} ${t.owner}`) !== actionKey(text)) row.warn.push(`Matched to ${t.ref} by its ref, but the wording differs: check it's the same action`);
     row.ref = ref;
     if (!t && !text) { row.action = 'skip'; row.warn.push('No action'); return; }
     if (text) f.text = text;
@@ -11948,10 +12223,12 @@ function planActionRows(data, cell, cols, order) {
     // Several description columns: each under its heading, when more than one has something.
     const desc = cols('description').map(c => [mimp.rows[mimp.headerRow][c], riClean(r[c])]).filter(([, v]) => v);
     if (desc.length) f.description = desc.length > 1 ? desc.map(([h, v]) => `${h}: ${v}`).join('\n\n') : desc[0][1];
-    if (cell(r, 'owner')) f.owner = cell(r, 'owner');
+    else if (blank('description')) f.description = '';
+    if (cell(r, 'owner') || blank('owner')) f.owner = cell(r, 'owner');
     const due = readDate(cell(r, 'due'), order);
     if (due) f.due = due;
     else if (due === null) row.warn.push(`Couldn't read the date “${cell(r, 'due')}”`);
+    else if (blank('due')) f.due = '';
 
     // Status: done or open. A date in the Done on column marks it done too.
     const st = cell(r, 'status'), doneRaw = cell(r, 'done_at');
@@ -11969,17 +12246,23 @@ function planActionRows(data, cell, cols, order) {
     if (status === 'Done') f.done_at = (doneAt && kept && kept.slice(0, 10) === readDate(doneRaw, order) ? kept : doneAt) || kept || now;
     else if (status === 'Open') f.done_at = '';
 
-    // Meeting: by title and date, by title if only one has it, or by date if only one was held then.
-    const mt = cell(r, 'meeting'), mdRaw = cell(r, 'meeting_date');
+    // Meeting: by its Meeting ID (the meeting it was imported as, or the same meeting when the file
+    // came from this workspace); else by title and date, by title if only one has it, or by date if
+    // only one was held then. Of several with the title and date, the one it's on already.
+    const mid = cell(r, 'meeting_file_id'), mt = cell(r, 'meeting'), mdRaw = cell(r, 'meeting_date');
     const md = readDate(mdRaw, order);
     if (md === null) row.warn.push(`Couldn't read the date “${mdRaw}”`);
-    if (mt || md) {
+    let m = null;
+    if (mid) m = meetings.find(x => x.id === importedMeetingId(mid)) || meetings.find(x => x.id === mid && (!mt || noteKey(x.title) === noteKey(mt))) || null;
+    if (!m && (mt || md)) {
       const one = (list) => (list.length === 1 ? list[0] : null);
-      const named = meetings.filter(m => mt && noteKey(m.title) === noteKey(mt));
-      const m = (md && named.find(x => x.date === md)) || one(named) || (!mt && md ? one(meetings.filter(x => x.date === md)) : null);
-      if (m) f.meeting_id = m.id;
-      else if (mt) row.warn.push(`No meeting “${mt}”${md ? ` on ${fmtNice(md)}` : ''} in this workspace, so it isn't linked to one`);
+      const named = meetings.filter(x => mt && noteKey(x.title) === noteKey(mt));
+      const onDay = md ? named.filter(x => x.date === md) : [];
+      m = onDay.find(x => x.id === t?.meeting_id) || onDay[0] || one(named) || (!mt && md ? one(meetings.filter(x => x.date === md)) : null);
     }
+    if (m) f.meeting_id = m.id;
+    else if (mt) row.warn.push(`No meeting “${mt}”${md ? ` on ${fmtNice(md)}` : ''} in this workspace, so it isn't linked to one: import the meetings first, or both files together`);
+    else if (own && !mid) f.meeting_id = ''; // added by hand
 
     for (const c of cols('links')) {
       const v = riClean(r[c]);
@@ -12012,12 +12295,17 @@ async function applyMeetingImport() {
   let added = 0, updated = 0, acts = 0, series = 0;
   const taken = [];
   const newAction = (meetingId, a) => {
-    const ref = nextActionRef(ws, taken);
+    const free = a.ref && !taken.some(r => r.toLowerCase() === a.ref.toLowerCase()) && !actionsOf(ws).some(x => x.ref.toLowerCase() === a.ref.toLowerCase());
+    const ref = free ? a.ref : nextActionRef(ws, taken);
     taken.push(ref);
     state.actions.push({ id: nextActionId(), workspace_id: ws, meeting_id: meetingId, ref, text: a.text, description: '', owner: a.owner, due: a.due, status: a.done ? 'Done' : 'Open', links: [], done_at: a.done ? now : '', created: now, updated: now });
     acts++;
   };
+  let relinked = 0;
+  const ids = [];
+  const remember = (row, m) => { if (row.fileId && m) ids.push([row.fileId, m.id]); };
   for (const row of plan.rows) {
+    if (row.action === 'same') remember(row, row.target);
     if (row.action === 'skip' || row.action === 'same') continue;
     if (mimp.kind === 'meetings') {
       let m = row.target;
@@ -12027,7 +12315,8 @@ async function applyMeetingImport() {
         const name = f.series_id.slice(4);
         let x = seriesOf(ws).find(s => s.name.toLowerCase() === name.toLowerCase());
         if (!x) {
-          state.meetingSeries.push(x = { id: nextSeriesId(), workspace_id: ws, name, cadence: '', start: '', attendees: f.attendees || '', notes: '', created: now, updated: now });
+          const { cadence = '', start = '' } = plan.newSeries?.get(name.toLowerCase()) || {};
+          state.meetingSeries.push(x = { id: nextSeriesId(), workspace_id: ws, name, cadence, start, attendees: f.attendees || '', notes: '', created: now, updated: now });
           series++;
         }
         f.series_id = x.id;
@@ -12037,7 +12326,9 @@ async function applyMeetingImport() {
         added++;
       } else if (Object.keys(f).length) { updated++; m.updated = now; }
       Object.assign(m, f);
+      remember(row, m);
       for (const a of row.newActions) newAction(m.id, a);
+      for (const a of row.relink) if (state.actions.includes(a)) { a.meeting_id = m.id; a.updated = now; relinked++; }
     } else {
       let a = row.target;
       if (a && !state.actions.includes(a)) continue;
@@ -12049,15 +12340,21 @@ async function applyMeetingImport() {
       if (row.links.length) a.links = [...new Set([...a.links, ...row.links])];
     }
   }
-  document.getElementById('meeting-import-dialog').close();
+  rememberMeetingIds(ws, ids);
+  // A second file chosen with this one (the actions, after their meetings) is read next, now
+  // that the meetings it refers to are here.
+  const next = mimp.queue.shift();
+  if (!next) document.getElementById('meeting-import-dialog').close();
   rerenderCurrentView();
   const what = mimp.kind === 'meetings' ? ['meeting', 'meetings'] : ['action', 'actions'];
   const parts = [added && `${count(added, ...what)} added`, updated && `${count(updated, ...what)} updated`,
-    acts && `${count(acts, 'action', 'actions')} from the minutes`, series && `${count(series, 'series', 'series')} added`].filter(Boolean);
+    acts && `${count(acts, 'action', 'actions')} from the minutes`, relinked && `${count(relinked, 'action', 'actions')} put back on ${relinked === 1 ? 'its meeting' : 'their meetings'}`,
+    series && `${count(series, 'series', 'series')} added`].filter(Boolean);
   const label = `Imported: ${parts.join(', ') || 'nothing changed'}`;
   if (parts.length) offerUndo(snap, label);
   const meetingsChanged = mimp.kind === 'meetings' && (added || updated);
-  await Promise.all([series && saveSeries(label), meetingsChanged && saveMeetings(label), (acts || (mimp.kind === 'actions' && (added || updated))) && saveActions(label)]);
+  if (next) loadMeetingImportText(next.text, next.name);
+  await Promise.all([series && saveSeries(label), meetingsChanged && saveMeetings(label), (acts || relinked || (mimp.kind === 'actions' && (added || updated))) && saveActions(label)]);
 }
 
 /* ---- dialog ---- */
@@ -12065,6 +12362,7 @@ function openMeetingImport() {
   document.getElementById('mi-workspace').textContent = currentWorkspace().name;
   document.getElementById('mi-paste').value = '';
   document.getElementById('mi-file').value = '';
+  mimp.queue = [];
   showMeetingImportStep('source');
   document.getElementById('meeting-import-dialog').showModal();
   document.getElementById('mi-file').focus();
@@ -12086,16 +12384,29 @@ function loadMeetingImportText(text, name) {
   const kind = guessMeetingImportKind(name, rows[headerRow]);
   Object.assign(mimp, { name, rows, headerRow, order: 'auto', mode: 'merge', kind, extract: true });
   mimp.map = guessMeetingImportMap(rows[headerRow]);
+  // Download CSV's own meetings list their actions: reading the minutes again would add them twice.
+  mimp.extract = !mimp.map.includes('file_id');
   document.querySelector(`[name="mi-kind"][value="${kind}"]`).checked = true;
   document.querySelector('[name="mi-mode"][value="merge"]').checked = true;
-  document.getElementById('mi-extract').checked = true;
+  document.getElementById('mi-extract').checked = mimp.extract;
   showMeetingImportStep('map');
   renderMeetingImport();
 }
 
-async function readMeetingImportFile(file) {
-  const text = await readTextFile(file, document.getElementById('mi-error'));
-  if (text != null) loadMeetingImportText(text, file.name);
+// One file, or several (the meetings and actions downloaded together): the meetings go first,
+// so the actions find them, and each is reviewed in turn.
+async function readMeetingImportFiles(files) {
+  const read = [];
+  for (const file of files) {
+    const text = await readTextFile(file, document.getElementById('mi-error'));
+    if (text == null) return;
+    read.push({ text, name: file.name });
+  }
+  const kindOf = (x) => { const rows = parseAny(x.text.replace(/^﻿?sep=.\r?\n/i, '')); return guessMeetingImportKind(x.name, rows[miHeaderRow(rows)] || []); };
+  read.sort((a, b) => (kindOf(a) === 'actions') - (kindOf(b) === 'actions'));
+  if (!read.length) return;
+  mimp.queue = read.slice(1);
+  loadMeetingImportText(read[0].text, read[0].name);
 }
 
 function renderMeetingImport() {
@@ -12114,7 +12425,7 @@ function renderMeetingImport() {
     ['auto', d.found ? `Detected: ${label[d.found]}` : `Automatic: ${label[local]}`], ['dmy', 'Day first: 03/04 is 3 April'], ['mdy', 'Month first: 03/04 is 4 March'],
   ].map(([v, t]) => `<option value="${v}" ${v === mimp.order ? 'selected' : ''}>${t}</option>`).join('');
   document.getElementById('mi-extract-label').hidden = !meetings;
-  document.getElementById('mi-source-name').textContent = `${mimp.name} · ${count(data.length, 'row', 'rows')}${mimp.headerRow ? ` · headings on row ${mimp.headerRow + 1}` : ''}`;
+  document.getElementById('mi-source-name').textContent = `${mimp.name} · ${count(data.length, 'row', 'rows')}${mimp.headerRow ? ` · headings on row ${mimp.headerRow + 1}` : ''}${mimp.queue.length ? ` · then ${mimp.queue.map(x => x.name).join(', ')}` : ''}`;
 
   const plan = mimp.plan = planMeetingImport();
   const opts = (sel) => `<option value="">— don't import —</option>` +
@@ -12147,7 +12458,7 @@ function renderMeetingImport() {
       return `<tr class="${row.action}">${head(row)}${c('date', v.date ? fmtNice(v.date) : '')}${c('title', escAttr(v.title || ''), 'im-title')}
         ${c('series_id', escAttr(series))}${c('attendees', escAttr(short(v.attendees || '', 50)), '')}
         <td class="${row.target && 'minutes' in row.fields ? 'changed' : ''}" title="${escAttr(short(v.minutes || '', 600))}">${escAttr(short(mins, 60))}</td>
-        <td class="${row.newActions.length && row.target ? 'changed' : ''}" title="${escAttr(row.newActions.map(a => `${a.text}${a.owner ? ` (${a.owner})` : ''}${a.due ? ` by ${fmtNice(a.due)}` : ''}`).join('\n'))}">${row.newActions.length ? `+${row.newActions.length}` : ''}</td>
+        <td class="${(row.newActions.length || row.relink.length) && row.target ? 'changed' : ''}" title="${escAttr(row.newActions.map(a => `${a.text}${a.owner ? ` (${a.owner})` : ''}${a.due ? ` by ${fmtNice(a.due)}` : ''}`).concat(row.relink.map(a => `${a.ref} ${a.text}: put back on this meeting`)).join('\n'))}">${[row.newActions.length && `+${row.newActions.length}`, row.relink.length && `↺${row.relink.length}`].filter(Boolean).join(' ')}</td>
         <td class="im-notes">${escAttr(row.warn.join('. '))}</td></tr>`;
     }).join('');
   } else {
@@ -12188,15 +12499,15 @@ function wireMeetingImport() {
   document.getElementById('btn-mt-import').onclick = openMeetingImport;
   document.getElementById('mi-close').onclick = close;
   document.getElementById('mi-cancel').onclick = close;
-  document.getElementById('mi-change').onclick = () => { document.getElementById('mi-file').value = ''; showMeetingImportStep('source'); };
-  document.getElementById('mi-file').addEventListener('change', (e) => { if (e.target.files[0]) readMeetingImportFile(e.target.files[0]); });
+  document.getElementById('mi-change').onclick = () => { document.getElementById('mi-file').value = ''; mimp.queue = []; showMeetingImportStep('source'); };
+  document.getElementById('mi-file').addEventListener('change', (e) => { if (e.target.files.length) readMeetingImportFiles([...e.target.files]); });
   const drop = document.getElementById('mi-drop');
   drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', (e) => {
     e.preventDefault();
     drop.classList.remove('over');
-    if (e.dataTransfer.files[0]) readMeetingImportFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files.length) readMeetingImportFiles([...e.dataTransfer.files]);
   });
   document.getElementById('mi-paste').addEventListener('paste', () => {
     setTimeout(() => { const t = document.getElementById('mi-paste').value; if (t.trim()) loadMeetingImportText(t, 'Pasted rows'); }, 0);
@@ -12239,6 +12550,8 @@ function wireMeetings() {
   document.getElementById('btn-mt-series').onclick = openSeriesList;
   document.getElementById('btn-act-add').onclick = () => openActionDialog(null);
   document.getElementById('btn-mt-csv').onclick = downloadMeetingsCSV;
+  document.getElementById('btn-mt-csv-all').onclick = downloadAllMeetingsCSV;
+  wireSelBars();
 
   // the list
   const body = document.getElementById('mt-body');

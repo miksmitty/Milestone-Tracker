@@ -294,14 +294,34 @@
           <button type="button" class="btn btn-menu" data-menu="ex-meetings" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
           <div id="ex-meetings" class="tb-pop tb-pop-right tb-pop-list" hidden>
             <button type="button" id="btn-mt-csv" title="Download what's shown (filters applied) as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button>
+            <button type="button" id="btn-mt-csv-all" title="Every meeting and every action of the workspace, whatever the filters, as two CSV files that Import reads back with each action on its meeting"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download all meetings &amp; actions</button>
           </div>
         </div>
       </div>
     </div>
+    <div id="mt-bulk" class="bulk-bar" hidden>
+      <span id="mt-bulk-count" class="bulk-count"></span>
+      <label class="bulk-set">Set <select id="mt-bulk-field"></select></label>
+      <span id="mt-bulk-value" class="bulk-value"></span>
+      <button type="button" id="mt-bulk-apply" class="btn btn-sm btn-primary">Apply</button>
+      <span class="spacer"></span>
+      <label class="bulk-set" title="Delete the meetings’ actions with them; otherwise the actions stay, marked as from a deleted meeting"><input type="checkbox" id="mt-bulk-with-acts" /> with their actions</label>
+      <button type="button" id="mt-bulk-delete" class="btn btn-sm btn-danger">Delete selected</button>
+      <button type="button" id="mt-bulk-clear" class="btn btn-sm btn-ghost">Clear selection</button>
+    </div>
+    <div id="act-bulk" class="bulk-bar" hidden>
+      <span id="act-bulk-count" class="bulk-count"></span>
+      <label class="bulk-set">Set <select id="act-bulk-field"></select></label>
+      <span id="act-bulk-value" class="bulk-value"></span>
+      <button type="button" id="act-bulk-apply" class="btn btn-sm btn-primary">Apply</button>
+      <span class="spacer"></span>
+      <button type="button" id="act-bulk-delete" class="btn btn-sm btn-danger">Delete selected</button>
+      <button type="button" id="act-bulk-clear" class="btn btn-sm btn-ghost">Clear selection</button>
+    </div>
     <div id="mt-split" class="rp-split mt-split">
       <div class="table-wrap rp-list mt-list">
         <table id="mt-table" class="ov-table">
-          <thead><tr><th class="mt-date">Date</th><th>Meeting</th><th class="mt-acts" title="Open actions / all actions from the meeting">Actions</th></tr></thead>
+          <thead><tr><th class="mt-sel"><input type="checkbox" id="mt-sel-all" title="Select all shown" /></th><th class="mt-date">Date</th><th>Meeting</th><th class="mt-acts" title="Open actions / all actions from the meeting">Actions</th></tr></thead>
           <tbody id="mt-body"></tbody>
         </table>
       </div>
@@ -318,7 +338,8 @@
     <div class="help" hidden><p><b>Minutes</b> lists the workspace’s meetings newest first; select one to read its minutes beside the list (<b>↑</b> <b>↓</b> move through them). Paste minutes in as they were written — by Copilot, Teams, Word, an LLM or a person: rich text is turned into Markdown, so headings, bullets, tables and bold are kept, and an RTF file can be opened or dropped on the box. The search box reads the whole of every meeting: title, series, attendees, the minutes and their actions, and marks the matches.</p>
       <p><b>Series…</b> is where the workspace’s regular meetings are set up — a name, how often, the date of the first meeting and the usual attendees. A meeting recorded against a series takes its name, attendees and the date due; when a meeting has come round without minutes, the top of the list says so.</p>
       <p><b>Extract actions</b> reads the minutes for actions — an <i>Actions</i>, <i>Action items</i> or <i>Next steps</i> section, a table of actions, lines starting <i>Action:</i>, checkboxes — and works out the owner and due date where it can (<i>by Friday</i>, <i>12 Nov</i>). Nothing is added until you’ve looked them over. Saving new minutes offers this straight away.</p>
-      <p><b>Actions</b> tracks every action across meetings: tick one off when it’s done, click it to change the wording, owner or due date, or link it to <span data-term="items">items</span> on the plan. A due date in red has passed. Headings work like a spreadsheet’s: <b>▾</b> sorts or filters (open actions are shown until the Status filter says otherwise), drag a heading to move the column or its edge to resize it (double-click to fit), right-click for autofit. The dashboard and the menu show how many are open.</p></div>
+      <p><b>Actions</b> tracks every action across meetings: tick one off when it’s done, click it to change the wording, owner or due date, or link it to <span data-term="items">items</span> on the plan. A due date in red has passed. Headings work like a spreadsheet’s: <b>▾</b> sorts or filters (open actions are shown until the Status filter says otherwise), drag a heading to move the column or its edge to resize it (double-click to fit), right-click for autofit. The dashboard and the menu show how many are open.</p>
+      <p><b>Bulk changes</b>: tick meetings in the list, or actions in the table (shift-click for a range), to change their series, attendees, dates, status, owner or meeting all at once, or delete them. <b>Export › Download all meetings &amp; actions</b> saves two files that <b>Import…</b> brings back together, each action on the meeting it came from.</p></div>
   </main>
 
   <!-- ============ WHAT CHANGED ============ -->
@@ -1323,16 +1344,16 @@
       <div class="im-body">
         <section id="mi-step-source" class="im-source">
           <label id="mi-drop" class="im-drop">
-            <input type="file" id="mi-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" />
+            <input type="file" id="mi-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" multiple />
             <strong>Choose a CSV file</strong> or drop it here
-            <small>A list of meetings (with their minutes) or of actions: any comma, semicolon or tab separated file with column headings, such as a SharePoint list export or the page’s own Download CSV.</small>
+            <small>A list of meetings (with their minutes) or of actions: any comma, semicolon or tab separated file with column headings, such as a SharePoint list export or the page’s own Download CSV. Choose the meetings and actions files together to bring both back with each action on its meeting.</small>
           </label>
           <div class="im-or"><span>or</span></div>
           <div class="form-grid im-paste">
             <div class="span3 field"><span class="field-label">Paste rows from a spreadsheet</span>
               <textarea id="mi-paste" rows="7" placeholder="Copy the cells in Excel or Sheets, headings included, and paste them here"></textarea></div>
           </div>
-          <p class="dlg-hint">Columns are matched to fields by their headings (Date, Title, Series, Attendees, Minutes; or Action, Owner, Due date, Status, Meeting) and you can change the matching before anything is imported. Meetings match an existing one with the same date and title; actions match by ref, or else by the same wording, so importing a later copy of the same list updates rather than adds. Actions found in imported minutes can be added too; ones already tracked aren’t added twice.</p>
+          <p class="dlg-hint">Columns are matched to fields by their headings (Date, Title, Series, Attendees, Minutes; or Action, Owner, Due date, Status, Meeting) and you can change the matching before anything is imported. Meetings match an existing one with the same date and title; actions match by ref, or else by the same wording, so importing a later copy of the same list updates rather than adds. Actions found in imported minutes can be added too; ones already tracked aren’t added twice. Files from <b>Export › Download all meetings &amp; actions</b> carry each meeting’s ID, so every action goes back on the meeting it came from, keeping its ref, and each series is set up again with its cadence.</p>
         </section>
         <section id="mi-step-map" class="im-map" hidden>
           <div class="im-bar">
