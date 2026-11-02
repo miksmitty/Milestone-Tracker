@@ -2124,11 +2124,6 @@ function renderGantt() {
         x: x1 - 2.5, y: cy - bh / 2 - 2.5, width: Math.max(2, x2 - x1) + 5, height: bh + 5, rx: Math.min(5, bh / 3) + 2,
         fill: 'none', stroke: G.accent, 'stroke-width': 1.8, 'pointer-events': 'none', class: 'gantt-crit',
       }));
-      // invisible grab zones over each end, reaching past the bar, so its ends are easy to catch
-      const w = Math.max(2, x2 - x1), gw = GRIP_OUT + Math.min(GRIP_IN, w / 3);
-      if (w >= GRIP_MIN_W) for (const x of [x1 - GRIP_OUT, x1 + w + GRIP_OUT - gw]) {
-        g.appendChild(svgEl('rect', { x, y: cy - bh / 2 - 2, width: gw, height: bh + 4, fill: 'transparent', class: 'gantt-grip' }));
-      }
       if (m._side === 'inside') {
         g.appendChild(titleText({ x: x1 + 8, y: cy + 4.5, 'font-size': 12, 'font-weight': 600, fill: c.text }, m, c.text, c.text));
         if (m._meta) g.appendChild(svgEl('text', { x: x1 + 2, y: cy + bh / 2 + 13, 'font-size': 10.5, fill: G.muted, ...halo() }, m._meta));
@@ -2179,6 +2174,12 @@ function renderGantt() {
       badge.appendChild(svgEl('circle', { cx: bx, cy: by, r: 6, fill: late ? G.accent : '#f59e0b', stroke: G.bg, 'stroke-width': 1.5 }));
       badge.appendChild(svgEl('text', { x: bx, y: by + 3.4, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': 800, fill: late ? '#fff' : '#422006' }, '!'));
       g.appendChild(badge);
+    }
+    // invisible grab zones over a task's ends, reaching past the bar and on top of its label, so
+    // its ends are easy to catch (they wear the resize cursor)
+    const w = x2 - x1, gw = GRIP_OUT + Math.min(GRIP_IN, w / 3);
+    if (m._task && w >= GRIP_MIN_W) for (const x of [x1 - GRIP_OUT, x2 + GRIP_OUT - gw]) {
+      g.appendChild(svgEl('rect', { x, y: cy - rm.barH / 2 - 2, width: gw, height: rm.barH + 4, fill: 'transparent', class: 'gantt-grip' }));
     }
     svg.appendChild(g);
   }
@@ -12170,12 +12171,6 @@ function wireEvents() {
   document.addEventListener('pointerup', onDragEnd);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && drag?.active) { drag.days = 0; onDragEnd(); }
-  });
-  gc.addEventListener('mousemove', (e) => { // a task's ends show the resize cursor
-    if (drag) return;
-    const g = e.target.closest('.gantt-item');
-    const m = g && itemById(g.dataset.id);
-    gc.style.cursor = m && !collapsedStreams().has(m.stream_id) && dragModeAt(g, m, e.clientX) !== 'move' ? 'ew-resize' : '';
   });
   gc.tabIndex = 0;
   gc.setAttribute('aria-label', 'Chart: use the arrow keys to move between items and Enter to update one');

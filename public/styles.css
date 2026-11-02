@@ -346,6 +346,7 @@ tr.shifted td { animation: shifted 2.5s ease-out; }
 /* ---------- refs, hover card, edit dialog ---------- */
 #editor-table input.dup { border-color: var(--tint-border); background: var(--tint); }
 .gantt-item { cursor: pointer; }
+#gantt-container .gantt-grip { cursor: ew-resize; }
 .gantt-item:hover { filter: brightness(1.06); }
 .gantt-item:hover text { text-decoration: underline; text-decoration-color: var(--faint); }
 
