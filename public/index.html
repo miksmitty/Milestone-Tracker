@@ -431,7 +431,7 @@
             Filter <span id="gf-badge" class="tb-badge" hidden></span>
           </button>
           <div id="gm-filter" class="tb-pop" hidden>
-            <label class="pop-field"><span>Stream</span><select id="gf-stream"></select></label>
+            <div class="pop-field"><span>Streams</span><div id="gf-stream" class="pop-checks" role="group" aria-label="Streams"></div></div>
             <label class="pop-field"><span>Owner</span><select id="gf-owner"></select></label>
             <div class="pop-field"><span>Type</span><div id="gf-type" class="pop-seg" role="group" aria-label="Type"></div></div>
             <div class="pop-field"><span>RAG</span><div id="gf-rag" class="rag-pick sm" role="group" aria-label="RAG"></div></div>
@@ -483,6 +483,7 @@
               <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Top timescale</label>
               <label class="check"><input type="checkbox" id="toggle-months" checked /> Bottom timescale</label>
               <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
+              <label class="check" title="Shade each company-wide change freeze across every stream"><input type="checkbox" id="toggle-freezes" checked /> Change freezes <button type="button" id="edit-freezes" class="link-btn" title="Add or change the company’s change freezes, which apply to every workspace">Edit…</button></label>
               <label class="check" title="Show where each item was planned when the baseline was set"><input type="checkbox" id="toggle-baseline" checked /> Baseline</label>
             </div>
             <div class="pop-field"><span>Critical path</span>
@@ -510,7 +511,7 @@
               <input type="range" id="row-slider" min="24" max="60" step="2" value="40" title="Below 40 the dates/owner line is hidden" />
             </label>
             <label class="pop-field"><span>Zoom</span>
-              <input type="range" id="zoom-slider" min="1" max="80" step="0.5" value="6" />
+              <input type="range" id="zoom-slider" min="0.5" max="80" step="0.5" value="6" />
             </label>
           </div>
         </div>
@@ -530,6 +531,7 @@
         </div>
 
         <div id="timescale" class="tb-seg tb-scale" role="group" aria-label="Timescale">
+          <button type="button" data-scale="years" title="Years over quarters">Years</button>
           <button type="button" data-scale="quarters" title="Quarters over months">Quarters</button>
           <button type="button" data-scale="months" title="Months over weeks">Months</button>
           <button type="button" data-scale="weeks" title="Weeks over days">Weeks</button>
@@ -537,7 +539,7 @@
 
         <div class="tb-seg" role="group" aria-label="Zoom">
           <button type="button" id="zoom-out" title="Zoom out">−</button>
-          <button type="button" id="zoom-fit" title="Fit chart to window">Fit</button>
+          <button type="button" id="zoom-fit" title="Fit the items shown (filters applied) to the window">Fit</button>
           <button type="button" id="zoom-in" title="Zoom in">+</button>
         </div>
 
@@ -697,6 +699,7 @@
         <label title="A milestone has one date and is drawn as a diamond; a top level milestone is also under change control. A task has a start and end and is drawn as a bar. Change the type to switch between them.">Type<select name="type"></select></label>
         <label id="ed-start">Start<input name="start" type="date" /></label>
         <label><span id="ed-end-label">End</span><input name="end" type="date" /></label>
+        <label id="ed-dur" title="Working days (Monday to Friday), counting the start and end day. Type a number, or weeks such as 2w, to set the end date from the start.">Duration (working days)<input name="duration" inputmode="numeric" autocomplete="off" placeholder="e.g. 10 or 2w" /></label>
         <label>RAG<select name="status"></select></label>
         <label>Rolls up to<select name="parent"></select></label>
         <div class="span3 field"><span class="field-label">Depends on</span><div id="ed-deps" class="deps"></div></div>
@@ -1017,6 +1020,30 @@
     </form>
   </dialog>
 
+  <!-- ============ CHANGE FREEZES DIALOG (company wide) ============ -->
+  <dialog id="freeze-dialog" class="edit-dialog freeze-dialog">
+    <form id="freeze-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge prog">Company wide</span>
+        <h2>Change freezes</h2>
+        <button type="button" id="fz-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <p class="cf-intro">Periods when nothing should go live, anywhere in the company: every workspace’s plan shades them across all its streams, in each one’s colour. The dates are included.</p>
+      <table class="pg-rag-table pg-freezes-table">
+        <thead><tr><th>Name</th><th>From</th><th>To</th><th>Colour</th><th></th></tr></thead>
+        <tbody id="fz-body"></tbody>
+      </table>
+      <div class="pg-rag-actions">
+        <button type="button" id="fz-add" class="btn btn-sm">+ Add change freeze</button>
+      </div>
+      <p id="fz-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" id="fz-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
   <dialog id="series-list-dialog" class="edit-dialog series-list-dialog">
     <form method="dialog">
       <header class="dlg-head">

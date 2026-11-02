@@ -84,14 +84,14 @@ const GANTT_THEMES = {
   light: {
     bg: '#ffffff', alt: '#f9f8f5', line: '#e0ded6', strong: '#cccabc', tick: '#a8a69c', tierTop: '#ecebe4', tierBottom: '#f4f3ee',
     text: '#262626', textTop: '#1c1c1c', sub: '#5a5d5c', muted: '#7a7870', accent: '#e60000', today: '#1c1c1c',
-    weekend: '#1c1c1c', weekendOpacity: 0.035, shadow: '#1c1c1c', shadowOpacity: 0.3, baseline: '#a8a69c',
+    weekend: '#1c1c1c', weekendOpacity: 0.035, freezeOpacity: 0.12, shadow: '#1c1c1c', shadowOpacity: 0.3, baseline: '#a8a69c',
     links: { dep: '#0f8b8d', roll: '#7c3aed' }, // connector colours stay clear of the RAG palette
     streamAccents: ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'],
   },
   dark: {
     bg: '#1f1f1d', alt: '#252523', line: '#34342f', strong: '#45443e', tick: '#5d5c55', tierTop: '#2c2c29', tierBottom: '#262624',
     text: '#ecebe4', textTop: '#f4f3ee', sub: '#b3b1a6', muted: '#9a988d', accent: '#ff5a5a', today: '#f4f3ee',
-    weekend: '#ffffff', weekendOpacity: 0.03, shadow: '#000000', shadowOpacity: 0.5, baseline: '#8e8d83',
+    weekend: '#ffffff', weekendOpacity: 0.03, freezeOpacity: 0.2, shadow: '#000000', shadowOpacity: 0.5, baseline: '#8e8d83',
     links: { dep: '#2bb5b0', roll: '#a78bfa' },
     streamAccents: ['#ff5a5a', '#cccabc', '#8e8d83', '#d0705c', '#5b9bd5', '#cfbd9b', '#7a7870'],
   },
@@ -110,6 +110,7 @@ const state = {
   meetingSeries: [],    // regular meetings, every workspace: {id, workspace_id, name, cadence, start, attendees, notes, created, updated}
   meetings: [],         // meetings, every workspace: {id, workspace_id, title, date, series_id, attendees, link, minutes (Markdown), created, updated}
   actions: [],          // actions from meetings, every workspace: {id, workspace_id, meeting_id, ref, text, owner, due, status, links, done_at, created, updated}
+  freezes: [],          // change freeze periods, company wide (every workspace): {id, name, start, end, color}
   reportComments: [],   // comments on passages of reports, every workspace: {id, workspace_id, report_id, field, quote, start, end, parent_id, at, by, text, resolved}
   lastWorkspaceId: 0,
   workspaceId: '',        // the workspace being viewed
@@ -127,6 +128,7 @@ const state = {
   showQuarters: true,
   timescale: 'quarters', // key of TIMESCALES
   showToday: true,
+  showFreezes: true,    // change freeze periods shaded across every stream
   linkMode: 'all',      // dependency lines: 'all', 'hover' (only the item under the pointer) or 'none'
   showBaseline: true,
   showCritical: false,  // pick out the critical path: items with no float, and the links between them
@@ -365,7 +367,7 @@ async function loadData() {
     synced[file] = { version: r.headers.get('X-Version'), text };
     return text;
   }));
-  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, meetingSeries, meetings, actions, reportComments] = texts;
+  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, meetingSeries, meetings, actions, reportComments, freezes] = texts;
   state.workspaces = rowsToWorkspaces(parseAny(workspaces));
   state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
@@ -381,6 +383,7 @@ async function loadData() {
   state.meetings = rowsToMeetings(parseAny(meetings));
   state.actions = rowsToActions(parseAny(actions));
   state.reportComments = rowsToComments(parseAny(reportComments));
+  state.freezes = rowsToFreezes(parseAny(freezes));
   dataLoaded = true;
   if (created) await saveWorkspaces();
   if (seriesFromNames()) await Promise.all([saveSeries('Meeting series created from names'), saveMeetings()]);
@@ -457,6 +460,7 @@ const saveSeries = (msg) => saveCSV('meeting-series', msg);
 const saveMeetings = (msg) => saveCSV('meetings', msg);
 const saveActions = (msg) => saveCSV('meeting-actions', msg);
 const saveComments = (msg) => saveCSV('report-comments', msg);
+const saveFreezes = (msg) => saveCSV('freezes', msg);
 
 /* ---- working together ---- */
 // Several people can have the app open at once. Each file is held with the version it was read
@@ -527,6 +531,10 @@ const FILES = {
     parse: (t) => rowsToComments(parseAny(t)), all: () => state.reportComments, set: (l) => { state.reportComments = l; },
     csv: () => commentsToCSV(state.reportComments), key: (c) => c.id,
     name: (c) => `${c.parent_id ? 'Reply' : 'Comment'} on ${FILES.reports.name(allReports().find(r => r.id === c.report_id) || { period_end: '' })}, ${fmtStamp(c.at)}`,
+  },
+  freezes: {
+    parse: (t) => rowsToFreezes(parseAny(t)), all: () => state.freezes, set: (l) => { state.freezes = l; },
+    csv: () => freezesToCSV(state.freezes), key: (z) => z.id, name: (z) => `Change freeze ${z.name}`,
   },
 };
 const FILE_NAMES = Object.keys(FILES); // in the order they depend on each other
@@ -817,7 +825,7 @@ function wireConflicts() {
 // import, a block is fetched so the rest come straight from hand. Ids still in hand when the page
 // closes are never used, so a burst can leave a gap in the numbers. If the server can't be reached,
 // the next number after the highest seen is used.
-const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'meeting-series': [], meetings: [], 'meeting-actions': [], 'report-comments': [] };
+const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'meeting-series': [], meetings: [], 'meeting-actions': [], 'report-comments': [], freezes: [] };
 const idLastTaken = {};
 function takeId(file, fallback) {
   const burst = Date.now() - (idLastTaken[file] || 0) < 2000;
@@ -864,8 +872,8 @@ function flashStatus(msg, ok, sticky) {
 // to take back). Undo puts the snapshot back and saves what it changes.
 
 const undoStack = []; // [{ label, snap }], newest last
-const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'meetingSeries', 'meetings', 'actions', 'reportComments'];
-const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', meetingSeries: 'meeting-series', meetings: 'meetings', actions: 'meeting-actions', reportComments: 'report-comments' };
+const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'meetingSeries', 'meetings', 'actions', 'reportComments', 'freezes'];
+const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', meetingSeries: 'meeting-series', meetings: 'meetings', actions: 'meeting-actions', reportComments: 'report-comments', freezes: 'freezes' };
 
 function snapshotData() {
   syncEditorToState();
@@ -873,7 +881,7 @@ function snapshotData() {
     items: JSON.stringify(allItems()), reports: JSON.stringify(allReports()), updates: JSON.stringify(state.updates),
     workspaces: JSON.stringify(state.workspaces), statuses: JSON.stringify(state.statuses), streams: JSON.stringify(state.streams),
     raid: JSON.stringify(state.raid), raidNotes: JSON.stringify(state.raidNotes), meetingSeries: JSON.stringify(state.meetingSeries), meetings: JSON.stringify(state.meetings), actions: JSON.stringify(state.actions),
-    reportComments: JSON.stringify(state.reportComments), workspaceId: state.workspaceId,
+    reportComments: JSON.stringify(state.reportComments), freezes: JSON.stringify(state.freezes), workspaceId: state.workspaceId,
   };
 }
 
@@ -925,6 +933,7 @@ async function undoLast() {
   state.meetings = back.meetings;
   state.actions = back.actions;
   state.reportComments = back.reportComments;
+  state.freezes = back.freezes;
   state.items = []; state.reports = [];
   state.otherItems = back.items;
   state.otherReports = back.reports;
@@ -938,7 +947,7 @@ async function undoLast() {
   showToast(`Undone: ${u.label}${kept ? ' · anything changed again since was left as it is' : ''}`);
   knockOn.clear();
   directEdits.clear();
-  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, meetingSeries: saveSeries, meetings: saveMeetings, actions: saveActions, reportComments: saveComments };
+  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, meetingSeries: saveSeries, meetings: saveMeetings, actions: saveActions, reportComments: saveComments, freezes: saveFreezes };
   await Promise.all(changed.map(k => save[k]('Undone')));
 }
 
@@ -964,12 +973,123 @@ function fmtISO(d) {
   // local date parts — toISOString() would shift to UTC and can land on the previous day
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+// Every full date reads dd/Mmm/yyyy, e.g. 05/Jan/2026, whatever the browser's locale.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtDMY = (d) => `${String(d.getDate()).padStart(2, '0')}/${MONTH_ABBR[d.getMonth()]}/${d.getFullYear()}`;
 function fmtNice(iso) {
-  return parseDate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return fmtDMY(parseDate(iso));
 }
 function fmtShort(iso) {
   return parseDate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
+
+/* ---- date fields ----
+   A native date input shows the browser's own format (mm/dd/yyyy in a US browser), so each one is
+   turned into a text box showing dd/Mmm/yyyy that takes a typed date and opens the calendar from
+   its icon. Its .value stays yyyy-mm-dd, and input / change fire only when the date itself changes,
+   so the code around it works as it would with the native input. */
+const nativeValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+const isoOrBlank = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') && parseDate(v) ? v : '');
+const showISO = (iso) => (iso ? fmtNice(iso) : '');
+// Typed text → yyyy-mm-dd, '' for blank, null if it isn't a date. Takes 5/jan/2026, 5 January 26,
+// 05/01/2026 (day first) and 2026-01-05; a two-digit year only once the box is left (final).
+function parseTypedDate(text, final) {
+  const s = text.trim();
+  if (!s) return '';
+  let m, d, mo, y;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) [y, mo, d] = [+m[1], +m[2], +m[3]];
+  else if ((m = s.match(/^(\d{1,2})[\s/.-]*([a-z]{3,})[\s/.,-]*(\d{2}|\d{4})$/i))) {
+    [d, mo, y] = [+m[1], MONTH_ABBR.findIndex(x => x.toLowerCase() === m[2].slice(0, 3).toLowerCase()) + 1, m[3]];
+  } else if ((m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/))) [d, mo, y] = [+m[1], +m[2], m[3]];
+  else return null;
+  if (typeof y === 'string') { if (y.length === 2 && !final) return null; y = y.length === 2 ? 2000 + +y : +y; }
+  const dt = new Date(y, mo - 1, d);
+  return mo && dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d ? fmtISO(dt) : null;
+}
+function upgradeDateInput(el) {
+  if (el._proxy) return;
+  if (!el._date) {
+    el._date = { iso: isoOrBlank(nativeValue.get.call(el) || el.getAttribute('value')) };
+    Object.defineProperty(el, 'value', {
+      configurable: true,
+      get() { return this._date.iso; },
+      set(v) { this._date.iso = isoOrBlank(v); nativeValue.set.call(this, showISO(this._date.iso)); },
+    });
+  }
+  if (el.getAttribute('type') !== 'text') el.setAttribute('type', 'text');
+  el.classList.add('date-field');
+  if (!el.placeholder) el.placeholder = 'dd/Mmm/yyyy';
+  el.autocomplete = 'off';
+  if (el !== document.activeElement) nativeValue.set.call(el, showISO(el._date.iso));
+}
+const upgradeDatesIn = (root) => {
+  if (root.matches?.('input[type=date]')) upgradeDateInput(root);
+  root.querySelectorAll?.('input[type=date]').forEach(upgradeDateInput);
+};
+function setDateField(el, iso) {
+  if (iso === el._date.iso) return;
+  el._date.iso = iso;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+// Leaving the box (or Enter): a date is tidied into dd/Mmm/yyyy, anything else goes back to the last date.
+function settleDateField(el) {
+  const iso = parseTypedDate(nativeValue.get.call(el), true);
+  if (iso !== null) setDateField(el, iso);
+  nativeValue.set.call(el, showISO(el._date.iso));
+  if (el._date.iso !== el._date.atFocus) { el._date.atFocus = el._date.iso; el.dispatchEvent(new Event('change', { bubbles: true })); }
+}
+// The calendar is a native date input's picker, opened over the box; it isn't seen otherwise.
+let datePickerProxy = null;
+function openDatePicker(el) {
+  if (!datePickerProxy) {
+    datePickerProxy = Object.assign(document.createElement('input'), { type: 'date', tabIndex: -1, _proxy: true, className: 'date-proxy' });
+    datePickerProxy.setAttribute('aria-hidden', 'true');
+    datePickerProxy.addEventListener('change', () => {
+      const f = datePickerProxy._for;
+      if (!f || !datePickerProxy.value) return;
+      f.focus();
+      setDateField(f, datePickerProxy.value);
+      nativeValue.set.call(f, showISO(f._date.iso));
+      settleDateField(f);
+    });
+  }
+  const r = el.getBoundingClientRect();
+  (el.closest('dialog') || document.body).appendChild(datePickerProxy); // a modal dialog leaves the rest of the page inert
+  Object.assign(datePickerProxy.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+  datePickerProxy._for = el;
+  datePickerProxy.value = el._date.iso;
+  if (el.min) datePickerProxy.min = el.min; else datePickerProxy.removeAttribute('min');
+  if (el.max) datePickerProxy.max = el.max; else datePickerProxy.removeAttribute('max');
+  try { datePickerProxy.showPicker(); } catch { /* no picker here: typing still works */ }
+}
+// The browser's own events from the box are held back; setDateField / settleDateField send the real ones.
+window.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!e.isTrusted || !el._date) return;
+  e.stopImmediatePropagation();
+  const iso = parseTypedDate(nativeValue.get.call(el), false);
+  if (iso !== null) setDateField(el, iso);
+}, true);
+window.addEventListener('change', (e) => { if (e.isTrusted && e.target._date) e.stopImmediatePropagation(); }, true);
+window.addEventListener('focusin', (e) => { if (e.target._date) e.target._date.atFocus = e.target._date.iso; }, true);
+window.addEventListener('focusout', (e) => { if (e.target._date) settleDateField(e.target); }, true);
+window.addEventListener('keydown', (e) => {
+  const el = e.target;
+  if (!el._date) return;
+  if (e.key === 'Enter') settleDateField(el);
+  else if (e.key === 'ArrowDown' && e.altKey) { e.preventDefault(); openDatePicker(el); }
+}, true);
+window.addEventListener('click', (e) => {
+  const el = e.target;
+  if (el._date && !el.disabled && !el.readOnly && e.clientX > el.getBoundingClientRect().right - 28) openDatePicker(el);
+}, true);
+// A form reset puts the boxes back to their starting dates.
+window.addEventListener('reset', (e) => {
+  queueMicrotask(() => e.target.querySelectorAll?.('.date-field').forEach(el => { el.value = el.getAttribute('value') || ''; }));
+}, true);
+upgradeDatesIn(document);
+new MutationObserver((recs) => { for (const r of recs) r.addedNodes.forEach(n => { if (n.nodeType === 1) upgradeDatesIn(n); }); })
+  .observe(document.documentElement, { childList: true, subtree: true });
 function addDays(iso, n) {
   const d = parseDate(iso);
   d.setDate(d.getDate() + n);
@@ -981,6 +1101,31 @@ function daysBetween(a, b) {
 
 // A task's length in calendar days, counting both its start and end day.
 const taskDays = (m) => (m.start && m.end ? Math.max(1, daysBetween(m.start, m.end) + 1) : 0);
+
+// Working days are Monday to Friday. workDays counts them from start to end, both included;
+// addWorkDays gives the end date of a task that starts on start and runs n working days.
+const isWorkday = (d) => d.getDay() % 6 !== 0;
+function workDays(start, end) {
+  if (!start || !end || end < start) return 0;
+  const total = daysBetween(start, end) + 1;
+  const d = parseDate(start);
+  let n = Math.floor(total / 7) * 5;
+  for (let i = 0; i < total % 7; i++, d.setDate(d.getDate() + 1)) if (isWorkday(d)) n++;
+  return n;
+}
+function addWorkDays(start, n) {
+  const d = parseDate(start);
+  while (!isWorkday(d)) d.setDate(d.getDate() + 1);
+  for (let left = Math.max(1, n) - 1; left > 0;) { d.setDate(d.getDate() + 1); if (isWorkday(d)) left--; }
+  return fmtISO(d);
+}
+// A typed duration in working days: "10", "10d" or "10 days"; "2w" is two weeks (10 days).
+function parseDuration(text) {
+  const t = String(text).trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(d|days?|wd|w|wks?|weeks?)?$/);
+  if (!t) return null;
+  const n = Math.round(parseFloat(t[1]) * (t[2] && t[2][0] === 'w' && t[2] !== 'wd' ? 5 : 1));
+  return n >= 1 ? n : null;
+}
 
 // Whether a RAG status means the work is done (named or described as complete / done).
 function isDoneStatus(name, workspaceId = state.workspaceId) {
@@ -1541,6 +1686,11 @@ const DETAIL_MIN_ROW_H = 40; // below this, the dates/owner line under each item
 // Header units. labels() lists candidates longest first; the first that fits its cell is drawn.
 const gb = (d, o) => d.toLocaleDateString('en-GB', o);
 const TIME_UNITS = {
+  year: {
+    start: d => new Date(d.getFullYear(), 0, 1),
+    next: d => new Date(d.getFullYear() + 1, 0, 1),
+    labels: d => [String(d.getFullYear()), `’${String(d.getFullYear()).slice(2)}`],
+  },
   quarter: {
     start: d => new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1),
     next: d => new Date(d.getFullYear(), d.getMonth() + 3, 1),
@@ -1564,10 +1714,12 @@ const TIME_UNITS = {
 };
 // Timescale presets: top and bottom header tiers, and the zoom (px per day) each opens at.
 const TIMESCALES = {
+  years: { top: 'year', bottom: 'quarter', px: 1 },
   quarters: { top: 'quarter', bottom: 'month', px: null }, // fits the range to the window
   months: { top: 'month', bottom: 'week', px: 14 },
   weeks: { top: 'week', bottom: 'day', px: 50 },
 };
+const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 80;
 
 // Sizes derived from the row-height slider.
@@ -2010,6 +2162,25 @@ function renderGantt() {
     }
   }
 
+  // change freezes: a band in the freeze's colour down every stream, named at the top when there's room
+  if (state.showFreezes) {
+    for (const z of allFreezes()) {
+      const x1 = xOf(parseDate(z.start)), x2 = xOf(parseDate(addDays(z.end, 1))); // the end day is included
+      if (x2 - x1 < 1) continue;
+      const g = svgEl('g', { class: 'gantt-freeze' });
+      g.appendChild(svgEl('title', {}, `Change freeze${z.name ? `: ${z.name}` : ''}, ${freezeDates(z)}`));
+      g.appendChild(svgEl('rect', { x: x1, y: headerH, width: x2 - x1, height: bodyH, fill: z.color, 'fill-opacity': G.freezeOpacity }));
+      for (const x of [x1, x2]) {
+        g.appendChild(svgEl('line', { x1: x, y1: headerH, x2: x, y2: headerH + bodyH, stroke: z.color, 'stroke-opacity': 0.45, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+      }
+      const label = (z.name || 'Change freeze').toUpperCase();
+      if (textW(label, 9.5, 700) + 8 <= x2 - x1) {
+        g.appendChild(svgEl('text', { x: (x1 + x2) / 2, y: headerH + 12, 'text-anchor': 'middle', 'font-size': 9.5, 'font-weight': 700, 'letter-spacing': '.04em', fill: z.color }, label));
+      }
+      svg.appendChild(g);
+    }
+  }
+
   // One tier: header band with a label per unit, and a gridline at each unit's start.
   const drawTier = (unit, bandY, bandH, top) => {
     const u = TIME_UNITS[unit];
@@ -2025,7 +2196,9 @@ function renderGantt() {
         head.appendChild(svgEl('line', { x1: rawX(d), y1: bandY, x2: rawX(d), y2: headerH, ...line }));
         svg.appendChild(svgEl('line', { x1: rawX(d), y1: headerH, x2: rawX(d), y2: gridBottom, ...line }));
       }
-      cells.push({ x1, x2, labels: u.labels(d), full: rawX(u.next(d)) - rawX(d) });
+      // under a year tier a quarter needs no year of its own
+      const labels = unit === 'quarter' && !top && scale.top === 'year' && state.showQuarters ? u.labels(d).slice(-1) : u.labels(d);
+      cells.push({ x1, x2, labels, full: rawX(u.next(d)) - rawX(d) });
     }
     // one label style for the whole tier: the longest that fits every full-width cell
     const fits = (c, i) => textW(c.labels[i], size, weight) <= c.full - 8;
@@ -2484,15 +2657,15 @@ function syncGanttSticky() {
 // "packed" fits several items to a row by date, the other orders give each item its own row.
 // The sort is a per-browser preference.
 
-const ganttFilter = { q: '', stream: '', owner: '', type: '', rag: [], late: false, crit: false };
+const ganttFilter = { q: '', streams: [], owner: '', type: '', rag: [], late: false, crit: false }; // streams: ids, none = all
 const GANTT_SORT_DEFAULT = { streams: 'name', rows: 'packed', dir: 1 }; // streams A–Z, items packed by date
 const ganttSort = { ...GANTT_SORT_DEFAULT };
 
-const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.stream || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late || ganttFilter.crit);
+const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.streams.length || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late || ganttFilter.crit);
 
 function ganttMatches(m) {
   const f = ganttFilter, q = f.q.trim().toLowerCase();
-  return (!f.stream || m.stream_id === f.stream)
+  return (!f.streams.length || f.streams.includes(m.stream_id))
     && (!f.owner || m.owner === f.owner)
     && (!f.type || (f.type === 'task' ? isTask(m) : f.type === 'top' ? isTopLevel(m) : !isTask(m)))
     && (!f.rag.length || f.rag.includes(m.status))
@@ -2502,7 +2675,7 @@ function ganttMatches(m) {
 }
 
 function clearGanttFilters() {
-  Object.assign(ganttFilter, { q: '', stream: '', owner: '', type: '', rag: [], late: false, crit: false });
+  Object.assign(ganttFilter, { q: '', streams: [], owner: '', type: '', rag: [], late: false, crit: false });
 }
 
 // Folded streams, per workspace (a per-browser preference).
@@ -2570,9 +2743,11 @@ function renderGanttFilters() {
   };
   const streamsHere = workspaceStreams().filter(l => state.items.some(m => m.stream_id === l.id))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-  if (f.stream && !streamsHere.some(l => l.id === f.stream)) streamsHere.push(streamById(f.stream) || { id: f.stream, name: '(deleted stream)' });
-  document.getElementById('gf-stream').innerHTML = '<option value="">All streams</option>' + streamsHere.map(l =>
-    `<option value="${escAttr(l.id)}" ${l.id === f.stream ? 'selected' : ''}>${escAttr(l.name)}</option>`).join('');
+  for (const id of f.streams) if (!streamsHere.some(l => l.id === id)) streamsHere.push(streamById(id) || { id, name: '(deleted stream)' });
+  // any number ticked; none ticked shows every stream
+  document.getElementById('gf-stream').innerHTML = streamsHere.map(l =>
+    `<label class="check"><input type="checkbox" value="${escAttr(l.id)}" ${f.streams.includes(l.id) ? 'checked' : ''} /> ${escAttr(l.name)}</label>`).join('')
+    || '<span class="pop-note">No streams yet</span>';
   fill('gf-owner', 'All owners', distinct('owner'), f.owner);
   const types = [['', 'All'], ['top', 'Top level'], ['milestone', T.Milestones], ['task', T.Tasks]];
   document.getElementById('gf-type').innerHTML = types.map(([v, label]) =>
@@ -2587,7 +2762,7 @@ function renderGanttFilters() {
   if (document.activeElement !== q) q.value = f.q; // don't disturb the caret while typing
 
   const chips = [
-    f.stream && ['stream', 'Stream', streamName(f.stream) || '(deleted stream)'],
+    f.streams.length && ['streams', f.streams.length > 1 ? 'Streams' : 'Stream', f.streams.map(id => streamName(id) || '(deleted stream)').join(', ')],
     f.owner && ['owner', 'Owner', f.owner],
     f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : f.type === 'top' ? T.Tops : T.Milestones],
     f.rag.length && ['rag', 'RAG', f.rag.join(', ')],
@@ -2664,9 +2839,11 @@ function wireGanttFilters() {
   wireMenus();
   const saveSort = () => { saveAppPrefs({ ganttSort: { ...ganttSort } }); renderGantt(); };
   document.getElementById('gf-q').addEventListener('input', (e) => { ganttFilter.q = e.target.value; renderGantt(); });
-  for (const [id, k] of [['gf-stream', 'stream'], ['gf-owner', 'owner']]) {
-    document.getElementById(id).addEventListener('change', (e) => { ganttFilter[k] = e.target.value; renderGantt(); });
-  }
+  document.getElementById('gf-stream').addEventListener('change', (e) => {
+    ganttFilter.streams = [...e.currentTarget.querySelectorAll('input:checked')].map(c => c.value);
+    renderGantt();
+  });
+  document.getElementById('gf-owner').addEventListener('change', (e) => { ganttFilter.owner = e.target.value; renderGantt(); });
   document.getElementById('gf-type').addEventListener('click', (e) => {
     const b = e.target.closest('[data-type]');
     if (b) { ganttFilter.type = b.dataset.type; renderGantt(); }
@@ -2685,7 +2862,7 @@ function wireGanttFilters() {
     const k = e.target.closest('[data-unfilter]')?.dataset.unfilter;
     if (!k) return;
     if (k === 'all') clearGanttFilters();
-    else ganttFilter[k] = k === 'rag' ? [] : k === 'late' || k === 'crit' ? false : '';
+    else ganttFilter[k] = k === 'rag' || k === 'streams' ? [] : k === 'late' || k === 'crit' ? false : '';
     renderGantt();
   });
   document.getElementById('gs-streams').addEventListener('change', (e) => { ganttSort.streams = e.target.value; saveSort(); });
@@ -2705,7 +2882,7 @@ function showTip(m, e) {
   const task = isTask(m);
   const days = daysBetween(m.start, m.end) + 1;
   const when = task
-    ? `${fmtShort(m.start)} – ${fmtNice(m.end)} <span class="tip-muted">(${days} days)</span>`
+    ? `${fmtShort(m.start)} – ${fmtNice(m.end)} <span class="tip-muted">(${workDays(m.start, m.end)} working ${workDays(m.start, m.end) === 1 ? 'day' : 'days'} · ${daysText(days)} elapsed)</span>`
     : fmtNice(m.end);
   const where = [m.owner, [streamName(m.stream_id), m.substream].filter(Boolean).join(' › ')].filter(Boolean).map(escAttr).join(' · ');
   const prog = !task && milestoneProgress(m);
@@ -2964,6 +3141,26 @@ function updateEdType() {
   document.getElementById('ed-start').classList.toggle('invisible', !task);
   document.getElementById('ed-end-label').textContent = task ? 'End' : 'Date';
   if (!task) f.start.value = f.end.value;
+  document.getElementById('ed-dur').classList.toggle('invisible', !task);
+  showEdDuration();
+}
+
+// A task's duration box shows its working days; typing one moves the end date to suit.
+function showEdDuration() {
+  const f = document.getElementById('edit-form').elements;
+  if (document.activeElement === f.duration) return;
+  const n = workDays(f.start.value, f.end.value);
+  f.duration.value = n || '';
+}
+function applyEdDuration(final) {
+  const f = document.getElementById('edit-form').elements;
+  const n = parseDuration(f.duration.value);
+  f.duration.classList.toggle('invalid', !!f.duration.value.trim() && n === null);
+  if (n !== null && f.start.value) {
+    const end = addWorkDays(f.start.value, n);
+    if (end !== f.end.value) { f.end.value = end; f.end.dispatchEvent(new Event('input', { bubbles: true })); }
+  }
+  if (final) { f.duration.classList.remove('invalid'); f.duration.blur(); showEdDuration(); }
 }
 
 async function submitEditDialog(e) {
@@ -3030,7 +3227,7 @@ async function deleteFromDialog() {
 /* ================= zoom / range controls ================= */
 
 function setZoom(px) {
-  state.pxPerDay = Math.min(MAX_ZOOM, Math.max(1, px));
+  state.pxPerDay = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, px));
   document.getElementById('zoom-slider').value = state.pxPerDay;
   renderGantt();
 }
@@ -3043,7 +3240,7 @@ function fitZoom() {
   setZoom(avail / totalDays);
 }
 
-// Switch the header tiers and jump to that preset's zoom; Months and Weeks open around today.
+// Switch the header tiers and jump to that preset's zoom; Years, Months and Weeks open around today.
 function setTimescale(key) {
   if (!TIMESCALES[key]) key = 'quarters';
   state.timescale = key;
@@ -3195,7 +3392,7 @@ function fitColumn(t, c) {
     if (td.colSpan > 1) continue;
     const el = td.children.length === 1 ? td.firstElementChild : null;
     let inner;
-    if (el?.matches('input[type=date]')) inner = 118 + pad(el);
+    if (el?.matches('.date-field')) inner = 104 + pad(el);
     else if (el?.matches('input[type=checkbox]')) inner = el.offsetWidth;
     else if (el?.matches('input')) inner = measure(el.value || el.placeholder || '', el) + pad(el) + 2;
     else if (el?.matches('select')) inner = measure(el.selectedOptions[0]?.text || '', el) + pad(el) + 22; // the arrow
@@ -3712,7 +3909,8 @@ function setCell(td, html) {
     const next = tpl.content.firstElementChild;
     if (tpl.content.children.length === 1 && next.tagName === live.tagName) {
       for (const a of [...live.attributes]) if (!next.hasAttribute(a.name)) live.removeAttribute(a.name);
-      for (const a of [...next.attributes]) if (a.name !== 'value' && live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value);
+      for (const a of [...next.attributes]) if (a.name !== 'value' && !(a.name === 'type' && live._date) && live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value);
+      if (live._date) upgradeDateInput(live); // its class and placeholder, which the copy above took off
       if (live.tagName === 'SELECT') { const v = live.value; live.innerHTML = next.innerHTML; live.value = v; }
       return;
     }
@@ -4369,7 +4567,7 @@ function defaultPeriodEnd(cadence) {
 
 function fmtStamp(iso) {
   const d = new Date(iso);
-  return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return isNaN(d) ? '' : `${fmtDMY(d)}, ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 }
 const periodText = (r) => `${fmtShort(r.period_start)} – ${fmtNice(r.period_end)}`;
 const statusPill = (st, map) => { const c = pal(st, map); return `<span class="pill" style="background:${c.base};color:${c.text}">${escAttr(st)}</span>`; };
@@ -5327,7 +5525,7 @@ function filteredReports() {
 function stampCell(iso) {
   const d = new Date(iso);
   if (isNaN(d)) return '<td class="rc-stamp"></td>';
-  return `<td class="rc-stamp" title="${escAttr(fmtStamp(iso))}">${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}<small>${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</small></td>`;
+  return `<td class="rc-stamp" title="${escAttr(fmtStamp(iso))}">${fmtDMY(d)}<small>${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</small></td>`;
 }
 
 /* ---- reports due ---- */
@@ -6949,7 +7147,7 @@ async function openBucket(workspaceId, bucket, stream = '') {
   await switchWorkspace(workspaceId, 'gantt');
   clearGanttFilters();
   ganttFilter.type = 'milestone';
-  ganttFilter.stream = stream;
+  ganttFilter.streams = stream ? [stream] : [];
   if (bucket !== 'total') ganttFilter.rag = STATUSES.filter(st => msBucket(st, workspaceId) === bucket);
   renderGantt();
 }
@@ -7536,6 +7734,30 @@ function streamsToCSV(streams) {
   return [STREAM_COLUMNS.join(','), ...streams.map(l => STREAM_COLUMNS.map(k => csvEscape(l[k])).join(','))].join('\n') + '\n';
 }
 const streamById = (id) => (id ? state.streams.find(l => l.id === id) : undefined);
+
+// A change freeze: a period when nothing goes live. Freezes are company wide: every workspace's plan
+// shades them across all its streams, each in its own colour. Dates are inclusive, like a task's;
+// one with no end is a single day.
+const FREEZE_COLUMNS = ['id', 'name', 'start', 'end', 'color'];
+const FREEZE_COLOR = '#2563eb';
+function rowsToFreezes(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const seen = new Set();
+  return rows.slice(1).map(r => {
+    const o = {};
+    for (const k of FREEZE_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
+    if (!parseDate(o.end) || o.end < o.start) o.end = o.start;
+    if (!/^#[0-9a-f]{6}$/i.test(o.color)) o.color = FREEZE_COLOR;
+    return o;
+  }).filter(z => parseDate(z.start) && /^\d+$/.test(z.id) && !seen.has(z.id) && seen.add(z.id));
+}
+function freezesToCSV(freezes) {
+  return [FREEZE_COLUMNS.join(','), ...freezes.map(z => FREEZE_COLUMNS.map(k => csvEscape(z[k])).join(','))].join('\n') + '\n';
+}
+const allFreezes = () => [...state.freezes].sort((a, b) => a.start.localeCompare(b.start));
+const nextFreezeId = () => takeId('freezes', () => String(Math.max(0, ...state.freezes.map(z => +z.id || 0)) + 1));
+const freezeDates = (z) => (z.end === z.start ? fmtNice(z.start) : `${fmtNice(z.start)} – ${fmtNice(z.end)}`);
 const streamName = (id) => streamById(id)?.name || '';
 const workspaceStreams = (workspaceId = state.workspaceId) => state.streams.filter(l => l.workspace_id === workspaceId);
 const nextStreamId = () => takeId('streams', () => String(Math.max(0, ...state.streams.map(l => +l.id || 0)) + 1));
@@ -8063,7 +8285,7 @@ async function dashGo(go) {
   switch (go.k) {
     case 'gantt':
       clearGanttFilters();
-      Object.assign(ganttFilter, { stream: go.stream || '', owner: go.owner || '', type: go.type || '', rag: go.rag || [], late: !!go.late });
+      Object.assign(ganttFilter, { streams: go.stream ? [go.stream] : [], owner: go.owner || '', type: go.type || '', rag: go.rag || [], late: !!go.late });
       return switchView('gantt');
     case 'item': return showItemOnGantt(go.id);
     case 'raid': {
@@ -8263,7 +8485,7 @@ async function deleteUpdate() {
 // Show one stream (by id) on the Gantt chart.
 function openStreamOnGantt(id) {
   clearGanttFilters();
-  ganttFilter.stream = id;
+  ganttFilter.streams = [id];
   switchView('gantt');
 }
 
@@ -9046,6 +9268,84 @@ function wirePgStreams() {
   };
 }
 
+/* ---- Change freezes dialog ---- */
+// Company wide, so edited apart from any workspace. fzRows is the list being edited:
+// { id (null for a new one), name, start, end, color }.
+let fzRows = [];
+
+function openFreezeDialog() {
+  fzRows = allFreezes().map(z => ({ ...z }));
+  renderFreezeRows();
+  document.getElementById('fz-error').textContent = '';
+  document.getElementById('freeze-dialog').showModal();
+  if (!fzRows.length) document.getElementById('fz-add').click();
+}
+function renderFreezeRows() {
+  document.getElementById('fz-body').innerHTML = fzRows.map((z, i) => `
+    <tr data-idx="${i}">
+      <td><input data-zf="name" value="${escAttr(z.name)}" placeholder="e.g. Year-end freeze" aria-label="Name" /></td>
+      <td><input data-zf="start" type="date" value="${escAttr(z.start)}" aria-label="From" /></td>
+      <td><input data-zf="end" type="date" value="${escAttr(z.end)}" aria-label="To" /></td>
+      <td><input data-zf="color" type="color" value="${escAttr(z.color)}" aria-label="Colour" /></td>
+      <td><button type="button" class="btn btn-sm btn-ghost" data-zremove="${i}" title="Remove">✕</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">No change freezes.</td></tr>';
+}
+// An error message, or null when the list is sound. A freeze with no end is one day.
+function checkFreezes() {
+  for (const z of fzRows) {
+    z.name = z.name.trim();
+    if (!z.start) return `Give ${z.name ? `“${z.name}”` : 'every change freeze'} a start date.`;
+    if (!z.end) z.end = z.start;
+    if (z.end < z.start) return `${z.name ? `“${z.name}”` : 'A change freeze'} ends before it starts.`;
+  }
+  return null;
+}
+async function submitFreezeDialog(e) {
+  e.preventDefault();
+  const err = checkFreezes();
+  if (err) return (document.getElementById('fz-error').textContent = err);
+  document.getElementById('freeze-dialog').close();
+  const key = (l) => JSON.stringify(l.map(z => [z.id, z.name, z.start, z.end, z.color]));
+  for (const z of fzRows) if (!z.id) z.id = nextFreezeId();
+  const next = fzRows.map(z => ({ id: z.id, name: z.name, start: z.start, end: z.end, color: z.color }))
+    .sort((a, b) => a.start.localeCompare(b.start));
+  if (key(next) === key(allFreezes())) return;
+  const snap = snapshotData();
+  state.freezes = next;
+  rerenderCurrentView();
+  offerUndo(snap, 'Change freezes saved');
+  await saveFreezes('Change freezes saved');
+}
+function wireFreezes() {
+  const body = document.getElementById('fz-body');
+  body.addEventListener('input', (e) => {
+    const f = e.target.dataset.zf;
+    if (!f) return;
+    const z = fzRows[+e.target.closest('tr').dataset.idx];
+    z[f] = e.target.value;
+    if (f === 'start' && z.start && (!z.end || z.end < z.start)) { z.end = z.start; e.target.closest('tr').querySelector('[data-zf="end"]').value = z.start; }
+  });
+  body.addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-zremove]');
+    if (!rm) return;
+    const i = +rm.dataset.zremove;
+    fzRows.splice(i, 1);
+    renderFreezeRows();
+    (body.querySelector(`[data-idx="${Math.min(i, fzRows.length - 1)}"] [data-zremove]`) || document.getElementById('fz-add')).focus();
+  });
+  document.getElementById('fz-add').onclick = () => {
+    // a new one takes the last one's colour, so the freezes match unless changed
+    fzRows.push({ id: null, name: '', start: '', end: '', color: fzRows.at(-1)?.color || FREEZE_COLOR });
+    renderFreezeRows();
+    document.querySelector('#fz-body tr:last-child input').focus();
+  };
+  document.getElementById('freeze-form').addEventListener('submit', submitFreezeDialog);
+  const dlg = document.getElementById('freeze-dialog');
+  document.getElementById('fz-close').onclick = () => dlg.close();
+  document.getElementById('fz-cancel').onclick = () => dlg.close();
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+}
+
 function wireRaid() {
   document.getElementById('raid-kind').addEventListener('change', (e) => { raidFilter.kind = e.target.value; renderRaid(); });
   document.getElementById('raid-status').onchange = (e) => { raidFilter.status = e.target.value; renderRaid(); };
@@ -9090,6 +9390,7 @@ function wireRaid() {
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   wirePgDepLists();
   wirePgStreams();
+  wireFreezes();
   wireDash();
 }
 
@@ -11914,7 +12215,7 @@ function readHash() {
   const q = new URLSearchParams(m[3] || '');
   const filter = {};
   for (const k of ['q', 'owner']) if (q.has(k)) filter[k] = q.get(k);
-  if (q.has('stream')) filter.streamName = q.get('stream'); // by name, for readable links; matched once the workspace is known
+  if (q.has('stream')) filter.streamNames = q.getAll('stream'); // by name, for readable links; matched once the workspace is known
   if (TYPES.includes(q.get('type'))) filter.type = q.get('type');
   if (q.get('rag')) filter.rag = q.get('rag').split(',').filter(Boolean);
   if (q.get('late') === '1') filter.late = true;
@@ -11931,7 +12232,7 @@ function writeHash() {
   if (view === 'gantt') {
     const f = ganttFilter, q = new URLSearchParams();
     if (f.q.trim()) q.set('q', f.q.trim());
-    if (f.stream) q.set('stream', streamName(f.stream) || f.stream);
+    for (const id of f.streams) q.append('stream', streamName(id) || id);
     if (f.owner) q.set('owner', f.owner);
     if (f.type) q.set('type', f.type);
     if (f.rag.length) q.set('rag', f.rag.join(','));
@@ -11948,6 +12249,13 @@ function writeHash() {
   history.replaceState(null, '', h);
 }
 
+// A link's Gantt filters; its streams are named, and matched to this workspace's.
+function applyLinkFilter(linkFilter) {
+  const { streamNames = [], ...filter } = linkFilter || {};
+  Object.assign(ganttFilter, filter);
+  if (streamNames.length) ganttFilter.streams = streamNames.map(name => streamIdFor(state.workspaceId, name, false) || name);
+}
+
 // An address typed or pasted into this tab.
 async function followHash() {
   const link = readHash();
@@ -11955,9 +12263,7 @@ async function followHash() {
   if (link.ws && link.ws !== state.workspaceId && workspaceById(link.ws)) await switchWorkspace(link.ws, link.view);
   if (link.view === 'gantt') {
     clearGanttFilters();
-    const { streamName: name, ...filter } = link.filter || {};
-    Object.assign(ganttFilter, filter);
-    if (name) ganttFilter.stream = streamIdFor(state.workspaceId, name, false) || name;
+    applyLinkFilter(link.filter);
   }
   if (link.view === 'meetings') { setMeetingsMode(link.tab || 'minutes'); if (link.meeting) mtSelId = link.meeting; }
   switchView(link.view);
@@ -12180,7 +12486,7 @@ function wireEvents() {
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
-  document.getElementById('zoom-fit').onclick = () => { state.userZoomed = false; fitZoom(); };
+  document.getElementById('zoom-fit').onclick = () => { state.userZoomed = false; fitRange(); }; // the items the filters show, not the whole plan
   document.getElementById('timescale').onclick = (e) => {
     const b = e.target.closest('button[data-scale]');
     if (b) setTimescale(b.dataset.scale);
@@ -12203,6 +12509,8 @@ function wireEvents() {
   document.getElementById('toggle-months').onchange = (e) => { state.showMonths = e.target.checked; renderGantt(); };
   document.getElementById('toggle-quarters').onchange = (e) => { state.showQuarters = e.target.checked; renderGantt(); };
   document.getElementById('toggle-today').onchange = (e) => { state.showToday = e.target.checked; renderGantt(); };
+  document.getElementById('toggle-freezes').onchange = (e) => { state.showFreezes = e.target.checked; renderGantt(); };
+  document.getElementById('edit-freezes').onclick = () => { closeMenus(); openFreezeDialog(); };
   document.getElementById('link-mode').onchange = (e) => { state.linkMode = e.target.value; saveAppPrefs({ linkMode: state.linkMode }); renderGantt(); };
   document.getElementById('toggle-baseline').onchange = (e) => { state.showBaseline = e.target.checked; saveAppPrefs({ showBaseline: state.showBaseline }); renderGantt(); };
   document.getElementById('toggle-critical').onchange = (e) => { state.showCritical = e.target.checked; saveAppPrefs({ showCritical: state.showCritical }); renderGantt(); };
@@ -12278,6 +12586,10 @@ function wireEvents() {
   });
   form.elements.newstream.addEventListener('blur', (e) => { if (!e.target.value.trim()) closeNewStream(form.elements); });
   form.elements.end.addEventListener('input', updateEdType); // keeps a milestone's hidden start in step
+  form.elements.start.addEventListener('input', showEdDuration);
+  form.elements.duration.addEventListener('input', () => applyEdDuration(false));
+  form.elements.duration.addEventListener('change', () => applyEdDuration(true));
+  form.elements.duration.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyEdDuration(true); } });
   document.getElementById('ed-cancel').onclick = () => dlg.close();
   document.getElementById('ed-close').onclick = () => dlg.close();
   document.getElementById('ed-delete').onclick = deleteFromDialog;
@@ -12422,7 +12734,7 @@ async function loadConfig() {
   }
   applyWorkspaceChrome();
   const link = readHash();
-  if (link?.filter) Object.assign(ganttFilter, link.filter);
+  if (link?.filter) applyLinkFilter(link.filter);
   if (link?.view === 'meetings') { setMeetingsMode(link.tab || 'minutes'); if (link.meeting) mtSelId = link.meeting; }
   switchView(link?.view || (VIEWS.includes(prefs.view) ? prefs.view : 'dash'));
   setTimescale(prefs.timescale); // Quarters fits; the ResizeObserver keeps it fitted as layout settles

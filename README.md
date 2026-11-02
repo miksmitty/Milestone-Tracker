@@ -78,7 +78,7 @@ Everything belongs to a **workspace**. The left-hand menu is in three groups: **
 
 ### Links
 
-The address bar says where you are, so a view can be bookmarked or sent to someone: the workspace, the view and, on the plan, its search and filters (e.g. `#/ws/1/gantt?stream=Delivery&rag=Red,Amber&late=1`; `crit=1` is the critical path filter). **Export → Copy link** on the plan copies it. Addresses from before the pages were renamed (`#/overview`, `#/ws/1/editor`) still work. Adding `&item=12` opens the chart on item 12.
+The address bar says where you are, so a view can be bookmarked or sent to someone: the workspace, the view and, on the plan, its search and filters (e.g. `#/ws/1/gantt?stream=Delivery&stream=Design&rag=Red,Amber&late=1`, one `stream` per stream; `crit=1` is the critical path filter). **Export → Copy link** on the plan copies it. Addresses from before the pages were renamed (`#/overview`, `#/ws/1/editor`) still work. Adding `&item=12` opens the chart on item 12.
 
 ### Undo
 
@@ -259,6 +259,8 @@ Items and reports carry a `workspace_id`. Ids stay unique across all workspaces,
 
 ## Data
 
+On screen every date reads dd/Mmm/yyyy (e.g. 05/Jan/2026), whatever the browser's language. Date boxes take a typed date (5 jan 2026, 05/01/2026 day first, or 2026-01-05) or a pick from the calendar icon. In the files, dates are yyyy-mm-dd.
+
 Items live in [milestones.csv](milestones.csv) with columns:
 
 ```
@@ -350,6 +352,8 @@ Anyone reading a report in the preview can comment on a particular passage, as y
 
 A comment is pinned to its section, where the words sit in it and the words themselves. If the report is edited, the words are found again wherever they've moved to; if they're no longer there, the thread is kept and marked *text since changed*. Deleting a report deletes its comments.
 
+Change freezes are company wide and stored in [freezes.csv](freezes.csv), one row per freeze: `id,name,start,end,color`, with `start` and `end` both included and `color` as `#rrggbb`.
+
 Comments are stored in [report-comments.csv](report-comments.csv), one row per comment or reply:
 
 ```
@@ -377,16 +381,18 @@ id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved
 - **Fold a stream** by clicking its name: its items share one summary row, small and unlabelled (the hover card still works). **View → Streams → Fold all / Unfold all**. Folding is remembered per workspace, per browser
 - **Keyboard**: Tab into the chart, then ← → move along a stream, ↑ ↓ to the row above or below, Enter opens the quick update panel and Esc lets go. Enter on a stream's name folds it. In the panel (and the Items grid's quick update mode) the RAG and type buttons are one tab stop each: ← → move the choice, and Tab goes round the panel
 - **View → Row height** — below 40px the dates/owner line under each item is hidden for a compact view
-- Hover an item for a summary card (including its last report); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)
+- Hover an item for a summary card (including its last report, and a task's length in working days, Monday to Friday, and elapsed calendar days); **click it** to update its RAG or dates, provide a report, see its reports or edit its details (**+ Add** for a new item)
+- In the edit dialog a task's **Duration** is its length in working days (Monday to Friday, counting the start and end day). Type a number, or weeks such as *2w*, and the end date moves to suit; changing the dates updates it
 - The chart fills the window below its toolbar and scrolls inside its own panel
 - One toolbar: **Search**, **Filter**, **Sort** and **View** menus on the left; the date range, zoom and actions on the right
-- Timescale, as in MS Project: **Quarters** (quarters over months, fitted to the window), **Months** (months over weeks) or **Weeks** (weeks over days, with day names). Months and Weeks open scrolled to today, weekends are shaded once days are wide enough, and the choice is remembered per browser
+- Timescale, as in MS Project: **Years** (years over quarters, zoomed out for long plans), **Quarters** (quarters over months, fitted to the window), **Months** (months over weeks) or **Weeks** (weeks over days, with day names). Years, Months and Weeks open scrolled to today, weekends are shaded once days are wide enough, and the choice is remembered per browser
 - The stream column and the timescale header stay pinned while the chart scrolls. The stream and sub-stream columns fit their names; drag a column's edge to set its width (double-click the edge to fit the names again), remembered per workspace in this browser
-- Zoom: − **Fit** + (auto-fits until you zoom manually), with a finer slider under **View**; header labels shorten to fit as you zoom
+- Zoom: − **Fit** + (auto-fits until you zoom manually; **Fit** fits the chart to the items the filters show, not the whole plan), with a finer slider under **View**; header labels shorten to fit as you zoom
 - The date range button shows the months in view; open it to pick dates, or **Fit to items** to fit the range to everything shown
 - Items dated outside the range are named under the toolbar, with a link to fit the range to everything; adding or moving an item beyond the range widens it so the item stays on the chart
-- **Search** by ref, title, description, owner or stream, and **Filter** by stream, owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**; the Filter menu has **Clear all filters** too. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
+- **Search** by ref, title, description, owner or stream, and **Filter** by stream (tick one or more), owner, type and RAG (pick one or more). Active filters show as chips under the toolbar, each with ✕ to remove it, with a count of what's shown and **Clear all**; the Filter menu has **Clear all filters** too. Dependency arrows to hidden items are left out, and filters reset when you switch workspace
 - **Sort** streams A–Z (the default), as listed, by earliest start, by latest end, or most at risk first (most items at an off-track RAG). Items are packed several to a row by date, or choose one per row sorted by start, end, ref, title, RAG or owner, ascending or descending. A dot on **Sort** shows it's changed from the default, and the sort is remembered per browser
-- **View** toggles the **top** and **bottom timescale**, **today line** (labelled in the timescale header, so it never covers an item) and **baseline**, and sets the dependency lines, folding and baseline
+- **View** toggles the **top** and **bottom timescale**, **today line** (labelled in the timescale header, so it never covers an item), **change freezes** and **baseline**, and sets the dependency lines, folding and baseline
+- **Change freezes** are periods when nothing should go live. They're company wide: every workspace's plan shades them across all its streams, each in its own colour, see-through so the items stay readable, with its name at the top when there's room; hover the band for its dates. Add or change them from **View → Change freezes → Edit…**: a name, the first and last day (both included) and a colour. A new one takes the previous one's colour. Saving offers **Undo**, and deleting a workspace leaves them alone
 - **Export → Download PNG** exports the chart at 2× resolution for slide decks / screenshots, named after the workspace, always in the light colours
 - **Export → Copy link** copies a link to the chart with its filters (see **Links**)

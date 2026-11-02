@@ -2,7 +2,8 @@
 // Serves the static frontend and reads/writes workspaces.csv, statuses.csv, milestones.csv, reports.csv,
 // updates.csv, streams.csv, raid.csv (risks, issues and dependencies), raid-notes.csv (their
 // status updates), meeting-series.csv (a workspace's regular meetings), meetings.csv (their minutes),
-// meeting-actions.csv (the actions taken from them) and report-comments.csv (comments on passages of a report, with replies), and
+// meeting-actions.csv (the actions taken from them), report-comments.csv (comments on passages of a report, with replies)
+// and freezes.csv (company-wide change freeze periods), and
 // appends every change to an item's dates to date-changes.csv.
 // Several people can use it at once: each file has a version, a save based on an older version is
 // turned back with the current file for the browser to merge, and every save is pushed to the
@@ -107,6 +108,12 @@ const DATASETS = {
     // `parent_id` set and no passage. `resolved` is 'yes' on a thread that's been dealt with.
     header: 'id,workspace_id,report_id,field,quote,start,end,parent_id,at,by,text,resolved\n',
     stampBy: true,
+  },
+  '/api/freezes': {
+    file: path.join(DATA_DIR, 'freezes.csv'),
+    // A change freeze: a period when nothing should go live, from `start` to `end` (both included),
+    // shaded on the plan in `color` (#rrggbb). Company wide: every workspace's plan shows them.
+    header: 'id,name,start,end,color\n',
   },
 };
 
@@ -456,7 +463,7 @@ setInterval(checkFiles, 2000).unref();
 // next number. A browser reserves a few at a time (POST /api/ids?file=milestones&n=20). The last
 // id given out per file is kept in ids.json; the next is always above every id in the file too.
 const IDS_FILE = path.join(DATA_DIR, 'ids.json');
-const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'streams', 'raid', 'raid-notes', 'meeting-series', 'meetings', 'meeting-actions', 'report-comments'];
+const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'streams', 'raid', 'raid-notes', 'meeting-series', 'meetings', 'meeting-actions', 'report-comments', 'freezes'];
 function reserveIds(file, n) {
   let issued = {};
   try { issued = JSON.parse(fs.readFileSync(IDS_FILE, 'utf8')); } catch { /* none issued yet */ }

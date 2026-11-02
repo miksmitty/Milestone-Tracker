@@ -222,10 +222,17 @@ body.nav-hidden .sidebar { display: none; }
 .toolbar .tb-pop { top: calc(100% + 6px); }
 .toolbar-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-right: 2px; }
 .range-sep { color: var(--muted); }
-input[type="date"] {
+input[type="date"], .date-field {
   border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
   font-size: 13px; font-family: inherit; color: var(--text); background: var(--panel);
 }
+/* a date box shows dd/Mmm/yyyy; its calendar icon opens the picker (see upgradeDateInput) */
+.date-field {
+  padding-right: 28px !important; min-width: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23878787' stroke-width='1.6' stroke-linecap='round'%3E%3Crect x='3' y='4.5' width='14' height='12.5' rx='2'/%3E%3Cpath d='M3 8.5h14M7 2.5v4M13 2.5v4'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important; background-position: right 7px center !important; background-size: 15px !important;
+}
+.date-proxy { position: fixed; opacity: 0; pointer-events: none; padding: 0; border: 0; z-index: -1; }
 input[type="range"] { width: 130px; accent-color: var(--accent); }
 .check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; user-select: none; }
 .check input { accent-color: var(--accent); }
@@ -1056,12 +1063,17 @@ button.cm-quote:hover { background: var(--hover); }
 .tb-pop-list .tb-ico { color: var(--muted); }
 .pop-field { display: flex; flex-direction: column; gap: 5px; }
 .pop-field > span { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-.pop-field select, .pop-field input[type="date"] {
+.pop-field select, .pop-field input[type="date"], .pop-field .date-field {
   width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
   font: inherit; font-size: 13px; color: var(--text); background: var(--panel);
 }
 .pop-field input[type="range"] { width: 100%; }
 .pop-field .rag-pick.sm { flex-wrap: wrap; gap: 5px; }
+.pop-checks {
+  display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; background: var(--panel);
+}
+.pop-checks .check { padding: 3px 0; }
 .pop-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
 .pop-reset { align-self: flex-start; font-size: 12.5px; }
 .pop-seg, .tb-seg { display: flex; padding: 2px; background: var(--hover); border-radius: 8px; }
@@ -1561,6 +1573,9 @@ body.nav-collapsed .nav-arrows .nav-arrow { width: 100%; padding: 9px 10px; }
 .pg-streams-table th:nth-child(3), .pg-streams-table td.pg-used-cell { white-space: nowrap; color: var(--muted); font-size: 12px; }
 .pg-streams-table td.pg-deleted-cell { color: var(--text-2); font-size: 12.5px; }
 .pg-streams-table td.pg-deleted-cell select { margin: 0 4px; }
+.freeze-dialog { width: min(760px, calc(100vw - 32px)); }
+.pg-freezes-table .date-field { width: 150px; }
+.pg-freezes-table td:first-child { width: 100%; }
 .pg-deps-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 640px) { .pg-deps-lists { grid-template-columns: 1fr; } }
 .pg-deps-lists h3 { font-size: 13px; margin: 0 0 8px; }
@@ -1948,3 +1963,4 @@ mark { background: var(--flash); color: inherit; border-radius: 2px; padding: 0 
 }
 
 .im-preview .im-desc { font-size: 11.5px; color: var(--muted); font-weight: 400; }
+#edit-form input[name="duration"].invalid { border-color: var(--accent); }
