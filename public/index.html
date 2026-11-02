@@ -289,6 +289,7 @@
       <div class="toolbar-actions">
         <button id="btn-mt-add" class="btn btn-primary">+ New meeting</button>
         <button id="btn-act-add" class="btn btn-primary" hidden>+ Add action</button>
+        <button id="btn-mt-import" class="btn" title="Bring in meetings (with their minutes) or actions from a CSV file or cells pasted from a spreadsheet">Import…</button>
         <div class="tb-menu">
           <button type="button" class="btn btn-menu" data-menu="ex-meetings" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
           <div id="ex-meetings" class="tb-pop tb-pop-right tb-pop-list" hidden>
@@ -1272,6 +1273,63 @@
         <span class="spacer"></span>
         <button type="button" id="ri-cancel" class="btn">Cancel</button>
         <button type="submit" id="ri-submit" class="btn btn-primary" disabled>Import</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="meeting-import-dialog" class="edit-dialog import-dialog">
+    <form id="meeting-import-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge imp">Import</span>
+        <h2>Import meetings &amp; actions into <span id="mi-workspace"></span></h2>
+        <button type="button" id="mi-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="im-body">
+        <section id="mi-step-source" class="im-source">
+          <label id="mi-drop" class="im-drop">
+            <input type="file" id="mi-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" />
+            <strong>Choose a CSV file</strong> or drop it here
+            <small>A list of meetings (with their minutes) or of actions: any comma, semicolon or tab separated file with column headings, such as a SharePoint list export or the page’s own Download CSV.</small>
+          </label>
+          <div class="im-or"><span>or</span></div>
+          <div class="form-grid im-paste">
+            <div class="span3 field"><span class="field-label">Paste rows from a spreadsheet</span>
+              <textarea id="mi-paste" rows="7" placeholder="Copy the cells in Excel or Sheets, headings included, and paste them here"></textarea></div>
+          </div>
+          <p class="dlg-hint">Columns are matched to fields by their headings (Date, Title, Series, Attendees, Minutes; or Action, Owner, Due date, Status, Meeting) and you can change the matching before anything is imported. Meetings match an existing one with the same date and title; actions match by ref, or else by the same wording, so importing a later copy of the same list updates rather than adds. Actions found in imported minutes can be added too; ones already tracked aren’t added twice.</p>
+        </section>
+        <section id="mi-step-map" class="im-map" hidden>
+          <div class="im-bar">
+            <span id="mi-source-name" class="im-source-name"></span>
+            <button type="button" id="mi-change" class="link-btn">Choose a different file</button>
+          </div>
+          <div class="form-grid im-options">
+            <div class="field"><span class="field-label">Each row is</span>
+              <div class="seg" id="mi-kind">
+                <label title="Each row is a meeting: its date, title, series, attendees and minutes"><input type="radio" name="mi-kind" value="meetings" checked /><span>A meeting</span></label>
+                <label title="Each row is an action: its wording, owner, due date and status, and the meeting it came from"><input type="radio" name="mi-kind" value="actions" /><span>An action</span></label>
+              </div>
+            </div>
+            <div class="field"><span class="field-label">What to do</span>
+              <div class="seg" id="mi-mode">
+                <label title="Rows that match an existing meeting or action update it; the rest are added"><input type="radio" name="mi-mode" value="merge" checked /><span>Add new, update matching</span></label>
+                <label title="Every row is added"><input type="radio" name="mi-mode" value="add" /><span>Add all as new</span></label>
+              </div>
+            </div>
+            <label>Dates like 03/04/2026<select id="mi-order"></select></label>
+            <label class="check span3" id="mi-extract-label" title="Read each meeting’s minutes for action lines, as Extract actions does, and track the ones not already tracked"><input type="checkbox" id="mi-extract" checked /> Add the actions found in the minutes</label>
+          </div>
+          <h3 class="im-h">Columns</h3>
+          <div class="im-scroll im-cols-wrap"><table class="im-table im-cols"><thead><tr><th>Column in file</th><th>Example</th><th>Import as</th></tr></thead><tbody id="mi-cols"></tbody></table></div>
+          <h3 class="im-h">Preview <span id="mi-summary" class="im-summary"></span></h3>
+          <div class="im-scroll im-preview-wrap"><table class="im-table im-preview"><thead id="mi-preview-head"></thead><tbody id="mi-preview"></tbody></table></div>
+        </section>
+      </div>
+      <p id="mi-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" id="mi-cancel" class="btn">Cancel</button>
+        <button type="submit" id="mi-submit" class="btn btn-primary" disabled>Import</button>
       </footer>
     </form>
   </dialog>
