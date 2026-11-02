@@ -79,3 +79,27 @@ id,at,by,workspace_id,item_id,ref,title,field,from,to,days,action,via,note
 774,2026-11-02T10:45:12.836Z,,1,90,,Requirements Gathering (copy),end,,2026-02-05,,Added,New item dialog,
 775,2026-11-02T10:45:13.643Z,,1,90,,Requirements Gathering (copy),start,2026-01-13,,,Deleted,Undo,Undone: Added Requirements Gathering (copy)
 776,2026-11-02T10:45:13.643Z,,1,90,,Requirements Gathering (copy),end,2026-02-05,,,Deleted,Undo,Undone: Added Requirements Gathering (copy)
+777,2026-11-02T10:47:40.549Z,,1,10,4.1,Build Phase 1,start,2026-04-30,2026-05-12,12,Changed,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+778,2026-11-02T10:47:40.549Z,,1,10,4.1,Build Phase 1,end,2026-06-11,2026-06-23,12,Changed,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+779,2026-11-02T10:47:40.549Z,,1,11,4.2,Build Phase 1 Complete,start,2026-06-11,2026-06-23,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+780,2026-11-02T10:47:40.549Z,,1,11,4.2,Build Phase 1 Complete,end,2026-06-11,2026-06-23,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+781,2026-11-02T10:47:40.549Z,,1,12,4.3,Build Phase 2,start,2026-06-11,2026-06-23,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+782,2026-11-02T10:47:40.549Z,,1,12,4.3,Build Phase 2,end,2026-08-17,2026-08-29,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+783,2026-11-02T10:47:40.549Z,,1,13,4.4,Build Phase 2 Complete,start,2026-08-17,2026-08-29,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+784,2026-11-02T10:47:40.549Z,,1,13,4.4,Build Phase 2 Complete,end,2026-08-17,2026-08-29,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+785,2026-11-02T10:47:40.549Z,,1,14,4.5,Integration Testing,start,2026-06-11,2026-06-23,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+786,2026-11-02T10:47:40.549Z,,1,14,4.5,Integration Testing,end,2026-08-10,2026-08-22,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+787,2026-11-02T10:47:40.549Z,,1,16,4.7,Test Exit,start,2026-08-17,2026-08-29,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+788,2026-11-02T10:47:40.549Z,,1,16,4.7,Test Exit,end,2026-08-17,2026-08-29,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+789,2026-11-02T10:47:40.549Z,,1,17,5.1,User Acceptance Testing,start,2026-08-17,2026-08-29,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+790,2026-11-02T10:47:40.549Z,,1,17,5.1,User Acceptance Testing,end,2026-09-02,2026-09-14,12,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+791,2026-11-02T10:47:40.549Z,,1,19,4.8,Migration Tooling,start,2026-06-15,2026-06-23,8,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+792,2026-11-02T10:47:40.549Z,,1,19,4.8,Migration Tooling,end,2026-08-28,2026-09-05,8,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+793,2026-11-02T10:47:40.549Z,,1,20,4.9,Data Migration Rehearsal,start,2026-09-01,2026-09-06,5,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+794,2026-11-02T10:47:40.549Z,,1,20,4.9,Data Migration Rehearsal,end,2026-10-02,2026-10-07,5,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+795,2026-11-02T10:47:40.549Z,,1,21,4.10,Migration Ready,start,2026-10-05,2026-10-07,2,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+796,2026-11-02T10:47:40.549Z,,1,21,4.10,Migration Ready,end,2026-10-05,2026-10-07,2,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+797,2026-11-02T10:47:40.549Z,,1,23,4.11,Cutover Preparation,start,2026-10-06,2026-10-07,1,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+798,2026-11-02T10:47:40.549Z,,1,23,4.11,Cutover Preparation,end,2026-10-16,2026-10-17,1,Knock-on,Dragged on the plan,4.1: 12 May – 23 Jun 2026 · 10 downstream items rescheduled
+799,2026-11-02T10:50:51.287Z,,1,15,4.6,Security Pen Test,end,2026-07-17,2026-07-27,10,Changed,Dragged on the plan,4.6: 6 Jul – 27 Jul 2026
+800,2026-11-02T10:50:56.040Z,,1,15,4.6,Security Pen Test,end,2026-07-27,2026-07-17,-10,Changed,Undo,Undone: 4.6: 6 Jul – 27 Jul 2026
