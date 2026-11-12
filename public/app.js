@@ -84,14 +84,14 @@ const GANTT_THEMES = {
   light: {
     bg: '#ffffff', alt: '#f9f8f5', line: '#e0ded6', strong: '#cccabc', tick: '#a8a69c', tierTop: '#ecebe4', tierBottom: '#f4f3ee',
     text: '#262626', textTop: '#1c1c1c', sub: '#5a5d5c', muted: '#7a7870', accent: '#e60000', today: '#1c1c1c',
-    weekend: '#1c1c1c', weekendOpacity: 0.035, shadow: '#1c1c1c', shadowOpacity: 0.3, baseline: '#a8a69c',
+    weekend: '#1c1c1c', weekendOpacity: 0.035, freezeOpacity: 0.12, shadow: '#1c1c1c', shadowOpacity: 0.3, baseline: '#a8a69c',
     links: { dep: '#0f8b8d', roll: '#7c3aed' }, // connector colours stay clear of the RAG palette
     streamAccents: ['#e60000', '#1c1c1c', '#8e8d83', '#a43725', '#1f6fb2', '#cfbd9b', '#5a5d5c'],
   },
   dark: {
     bg: '#1f1f1d', alt: '#252523', line: '#34342f', strong: '#45443e', tick: '#5d5c55', tierTop: '#2c2c29', tierBottom: '#262624',
     text: '#ecebe4', textTop: '#f4f3ee', sub: '#b3b1a6', muted: '#9a988d', accent: '#ff5a5a', today: '#f4f3ee',
-    weekend: '#ffffff', weekendOpacity: 0.03, shadow: '#000000', shadowOpacity: 0.5, baseline: '#8e8d83',
+    weekend: '#ffffff', weekendOpacity: 0.03, freezeOpacity: 0.2, shadow: '#000000', shadowOpacity: 0.5, baseline: '#8e8d83',
     links: { dep: '#2bb5b0', roll: '#a78bfa' },
     streamAccents: ['#ff5a5a', '#cccabc', '#8e8d83', '#d0705c', '#5b9bd5', '#cfbd9b', '#7a7870'],
   },
@@ -110,6 +110,7 @@ const state = {
   meetingSeries: [],    // regular meetings, every workspace: {id, workspace_id, name, cadence, start, attendees, notes, created, updated}
   meetings: [],         // meetings, every workspace: {id, workspace_id, title, date, series_id, attendees, link, minutes (Markdown), created, updated}
   actions: [],          // actions from meetings, every workspace: {id, workspace_id, meeting_id, ref, text, owner, due, status, links, done_at, created, updated}
+  freezes: [],          // change freeze periods, company wide (every workspace): {id, name, start, end, color}
   reportComments: [],   // comments on passages of reports, every workspace: {id, workspace_id, report_id, field, quote, start, end, parent_id, at, by, text, resolved}
   lastWorkspaceId: 0,
   workspaceId: '',        // the workspace being viewed
@@ -127,6 +128,7 @@ const state = {
   showQuarters: true,
   timescale: 'quarters', // key of TIMESCALES
   showToday: true,
+  showFreezes: true,    // change freeze periods shaded across every stream
   linkMode: 'all',      // dependency lines: 'all', 'hover' (only the item under the pointer) or 'none'
   showBaseline: true,
   showCritical: false,  // pick out the critical path: items with no float, and the links between them
@@ -365,7 +367,7 @@ async function loadData() {
     synced[file] = { version: r.headers.get('X-Version'), text };
     return text;
   }));
-  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, meetingSeries, meetings, actions, reportComments] = texts;
+  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, meetingSeries, meetings, actions, reportComments, freezes] = texts;
   state.workspaces = rowsToWorkspaces(parseAny(workspaces));
   state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
@@ -381,6 +383,7 @@ async function loadData() {
   state.meetings = rowsToMeetings(parseAny(meetings));
   state.actions = rowsToActions(parseAny(actions));
   state.reportComments = rowsToComments(parseAny(reportComments));
+  state.freezes = rowsToFreezes(parseAny(freezes));
   dataLoaded = true;
   if (created) await saveWorkspaces();
   if (seriesFromNames()) await Promise.all([saveSeries('Meeting series created from names'), saveMeetings()]);
@@ -457,6 +460,7 @@ const saveSeries = (msg) => saveCSV('meeting-series', msg);
 const saveMeetings = (msg) => saveCSV('meetings', msg);
 const saveActions = (msg) => saveCSV('meeting-actions', msg);
 const saveComments = (msg) => saveCSV('report-comments', msg);
+const saveFreezes = (msg) => saveCSV('freezes', msg);
 
 /* ---- working together ---- */
 // Several people can have the app open at once. Each file is held with the version it was read
@@ -527,6 +531,10 @@ const FILES = {
     parse: (t) => rowsToComments(parseAny(t)), all: () => state.reportComments, set: (l) => { state.reportComments = l; },
     csv: () => commentsToCSV(state.reportComments), key: (c) => c.id,
     name: (c) => `${c.parent_id ? 'Reply' : 'Comment'} on ${FILES.reports.name(allReports().find(r => r.id === c.report_id) || { period_end: '' })}, ${fmtStamp(c.at)}`,
+  },
+  freezes: {
+    parse: (t) => rowsToFreezes(parseAny(t)), all: () => state.freezes, set: (l) => { state.freezes = l; },
+    csv: () => freezesToCSV(state.freezes), key: (z) => z.id, name: (z) => `Change freeze ${z.name}`,
   },
 };
 const FILE_NAMES = Object.keys(FILES); // in the order they depend on each other
@@ -817,7 +825,7 @@ function wireConflicts() {
 // import, a block is fetched so the rest come straight from hand. Ids still in hand when the page
 // closes are never used, so a burst can leave a gap in the numbers. If the server can't be reached,
 // the next number after the highest seen is used.
-const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'meeting-series': [], meetings: [], 'meeting-actions': [], 'report-comments': [] };
+const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'meeting-series': [], meetings: [], 'meeting-actions': [], 'report-comments': [], freezes: [] };
 const idLastTaken = {};
 function takeId(file, fallback) {
   const burst = Date.now() - (idLastTaken[file] || 0) < 2000;
@@ -864,8 +872,8 @@ function flashStatus(msg, ok, sticky) {
 // to take back). Undo puts the snapshot back and saves what it changes.
 
 const undoStack = []; // [{ label, snap }], newest last
-const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'meetingSeries', 'meetings', 'actions', 'reportComments'];
-const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', meetingSeries: 'meeting-series', meetings: 'meetings', actions: 'meeting-actions', reportComments: 'report-comments' };
+const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'meetingSeries', 'meetings', 'actions', 'reportComments', 'freezes'];
+const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', meetingSeries: 'meeting-series', meetings: 'meetings', actions: 'meeting-actions', reportComments: 'report-comments', freezes: 'freezes' };
 
 function snapshotData() {
   syncEditorToState();
@@ -873,7 +881,7 @@ function snapshotData() {
     items: JSON.stringify(allItems()), reports: JSON.stringify(allReports()), updates: JSON.stringify(state.updates),
     workspaces: JSON.stringify(state.workspaces), statuses: JSON.stringify(state.statuses), streams: JSON.stringify(state.streams),
     raid: JSON.stringify(state.raid), raidNotes: JSON.stringify(state.raidNotes), meetingSeries: JSON.stringify(state.meetingSeries), meetings: JSON.stringify(state.meetings), actions: JSON.stringify(state.actions),
-    reportComments: JSON.stringify(state.reportComments), workspaceId: state.workspaceId,
+    reportComments: JSON.stringify(state.reportComments), freezes: JSON.stringify(state.freezes), workspaceId: state.workspaceId,
   };
 }
 
@@ -925,6 +933,7 @@ async function undoLast() {
   state.meetings = back.meetings;
   state.actions = back.actions;
   state.reportComments = back.reportComments;
+  state.freezes = back.freezes;
   state.items = []; state.reports = [];
   state.otherItems = back.items;
   state.otherReports = back.reports;
@@ -938,7 +947,7 @@ async function undoLast() {
   showToast(`Undone: ${u.label}${kept ? ' · anything changed again since was left as it is' : ''}`);
   knockOn.clear();
   directEdits.clear();
-  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, meetingSeries: saveSeries, meetings: saveMeetings, actions: saveActions, reportComments: saveComments };
+  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, meetingSeries: saveSeries, meetings: saveMeetings, actions: saveActions, reportComments: saveComments, freezes: saveFreezes };
   await Promise.all(changed.map(k => save[k]('Undone')));
 }
 
@@ -964,12 +973,173 @@ function fmtISO(d) {
   // local date parts — toISOString() would shift to UTC and can land on the previous day
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+// Every full date reads dd/Mmm/yyyy, e.g. 05/Jan/2026, whatever the browser's locale.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtDMY = (d) => `${String(d.getDate()).padStart(2, '0')}/${MONTH_ABBR[d.getMonth()]}/${d.getFullYear()}`;
 function fmtNice(iso) {
-  return parseDate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return fmtDMY(parseDate(iso));
 }
 function fmtShort(iso) {
   return parseDate(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
+
+/* ---- date fields ----
+   A native date input shows the browser's own format (mm/dd/yyyy in a US browser), so each one is
+   turned into a text box showing dd/Mmm/yyyy that takes a typed date and opens the calendar from
+   its icon. Its .value stays yyyy-mm-dd, and input / change fire only when the date itself changes,
+   so the code around it works as it would with the native input. */
+const nativeValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+const isoOrBlank = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') && parseDate(v) ? v : '');
+const showISO = (iso) => (iso ? fmtNice(iso) : '');
+// Typed text → yyyy-mm-dd, '' for blank, null if it isn't a date. Takes 5/jan/2026, 5 January 26,
+// 05/01/2026 (day first) and 2026-01-05; a two-digit year only once the box is left (final).
+function parseTypedDate(text, final) {
+  const s = text.trim();
+  if (!s) return '';
+  let m, d, mo, y;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) [y, mo, d] = [+m[1], +m[2], +m[3]];
+  else if ((m = s.match(/^(\d{1,2})[\s/.-]*([a-z]{3,})[\s/.,-]*(\d{2}|\d{4})$/i))) {
+    [d, mo, y] = [+m[1], MONTH_ABBR.findIndex(x => x.toLowerCase() === m[2].slice(0, 3).toLowerCase()) + 1, m[3]];
+  } else if ((m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/))) [d, mo, y] = [+m[1], +m[2], m[3]];
+  else return null;
+  if (typeof y === 'string') { if (y.length === 2 && !final) return null; y = y.length === 2 ? 2000 + +y : +y; }
+  const dt = new Date(y, mo - 1, d);
+  return mo && dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d ? fmtISO(dt) : null;
+}
+function upgradeDateInput(el) {
+  if (!el._date) {
+    el._date = { iso: isoOrBlank(nativeValue.get.call(el) || el.getAttribute('value')) };
+    Object.defineProperty(el, 'value', {
+      configurable: true,
+      get() { return this._date.iso; },
+      set(v) { this._date.iso = isoOrBlank(v); nativeValue.set.call(this, showISO(this._date.iso)); },
+    });
+  }
+  if (el.getAttribute('type') !== 'text') el.setAttribute('type', 'text');
+  el.classList.add('date-field');
+  if (!el.placeholder) el.placeholder = 'dd/Mmm/yyyy';
+  el.autocomplete = 'off';
+  if (el !== document.activeElement) nativeValue.set.call(el, showISO(el._date.iso));
+}
+const upgradeDatesIn = (root) => {
+  if (root.matches?.('input[type=date]')) upgradeDateInput(root);
+  root.querySelectorAll?.('input[type=date]').forEach(upgradeDateInput);
+};
+function setDateField(el, iso) {
+  if (iso === el._date.iso) return;
+  el._date.iso = iso;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+// Leaving the box (or Enter): a date is tidied into dd/Mmm/yyyy, anything else goes back to the last date.
+function settleDateField(el) {
+  const iso = parseTypedDate(nativeValue.get.call(el), true);
+  if (iso !== null) setDateField(el, iso);
+  nativeValue.set.call(el, showISO(el._date.iso));
+  if (el._date.iso !== el._date.atFocus) { el._date.atFocus = el._date.iso; el.dispatchEvent(new Event('change', { bubbles: true })); }
+}
+// The calendar: a month of days under the box (above it when there's no room below). It's drawn
+// here rather than left to the browser's own picker, which lands in the wrong place in a dialog.
+let dateCal = null; // { el, pop, month (yyyy-mm-01), hi (the highlighted day) }
+function openDatePicker(el) {
+  if (dateCal?.el === el) return closeDatePicker();
+  closeDatePicker();
+  const pop = document.createElement('div');
+  pop.className = 'date-cal';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Choose a date');
+  (el.closest('dialog') || document.body).appendChild(pop); // a modal dialog leaves the rest of the page inert
+  const hi = el._date.iso || todayISO();
+  dateCal = { el, pop, month: hi.slice(0, 8) + '01', hi };
+  pop.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); }); // the box keeps the focus, and a menu it's in stays open
+  pop.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    if (b.dataset.step) { dateCal.month = shiftMonth(dateCal.month, +b.dataset.step); return drawDateCal(); }
+    pickCalDate(b.dataset.day ?? (b.dataset.today ? todayISO() : ''));
+  });
+  drawDateCal();
+}
+function closeDatePicker() {
+  dateCal?.pop.remove();
+  dateCal = null;
+}
+const shiftMonth = (iso, n) => { const d = parseDate(iso); return fmtISO(new Date(d.getFullYear(), d.getMonth() + n, 1)); };
+function pickCalDate(iso) {
+  const el = dateCal.el;
+  closeDatePicker();
+  el.focus();
+  setDateField(el, iso);
+  nativeValue.set.call(el, showISO(iso));
+  settleDateField(el);
+}
+function drawDateCal() {
+  const { el, pop, month, hi } = dateCal;
+  const first = parseDate(month), today = todayISO();
+  const start = addDays(month, -((first.getDay() + 6) % 7)); // weeks start on Monday
+  const allowed = (iso) => (!el.min || iso >= el.min) && (!el.max || iso <= el.max);
+  const days = Array.from({ length: 42 }, (_, i) => addDays(start, i));
+  pop.innerHTML = `<div class="dc-head"><button type="button" data-step="-1" title="Previous month" aria-label="Previous month">‹</button>
+      <b>${first.toLocaleString('en-GB', { month: 'long', year: 'numeric' })}</b>
+      <button type="button" data-step="1" title="Next month" aria-label="Next month">›</button></div>
+    <div class="dc-grid">${['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(d => `<span class="dc-wd">${d}</span>`).join('')}
+      ${days.map(d => `<button type="button" data-day="${d}" class="${[d.slice(0, 7) !== month.slice(0, 7) && 'dc-out', d === today && 'dc-today', d === el._date.iso && 'dc-sel', d === hi && 'dc-hi'].filter(Boolean).join(' ')}"
+        ${allowed(d) ? '' : 'disabled'} aria-label="${fmtNice(d)}">${+d.slice(8)}</button>`).join('')}</div>
+    <div class="dc-foot"><button type="button" data-day="" class="link-btn">Clear</button><button type="button" data-today="1" class="link-btn" ${allowed(today) ? '' : 'disabled'}>Today</button></div>`;
+  // under the box, or above it, kept inside the window
+  const r = el.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+  const top = r.bottom + 4 + h > innerHeight - 8 && r.top - 4 - h > 8 ? r.top - 4 - h : r.bottom + 4;
+  Object.assign(pop.style, { left: `${Math.max(8, Math.min(r.right - w, innerWidth - w - 8))}px`, top: `${Math.max(8, Math.min(top, innerHeight - h - 8))}px` });
+}
+// Arrow keys move round the open calendar, Page Up / Down a month, Enter takes the day, Esc closes it.
+function dateCalKey(e) {
+  const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+  if (e.key === 'Escape') closeDatePicker();
+  else if (e.key === 'Enter') pickCalDate(dateCal.hi);
+  else if (step || e.key === 'PageUp' || e.key === 'PageDown') {
+    const to = shiftMonth(dateCal.hi, e.key === 'PageUp' ? -1 : 1), last = +addDays(shiftMonth(to, 1), -1).slice(8); // the same day of that month, or its last
+    const hi = step ? addDays(dateCal.hi, step) : to.slice(0, 8) + String(Math.min(+dateCal.hi.slice(8), last)).padStart(2, '0');
+    dateCal.hi = hi;
+    dateCal.month = hi.slice(0, 8) + '01';
+    drawDateCal();
+  } else return false;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  return true;
+}
+document.addEventListener('pointerdown', (e) => { if (dateCal && !dateCal.pop.contains(e.target) && e.target !== dateCal.el) closeDatePicker(); }, true);
+window.addEventListener('resize', closeDatePicker);
+document.addEventListener('scroll', (e) => { if (dateCal && !dateCal.pop.contains(e.target)) closeDatePicker(); }, true);
+document.addEventListener('close', closeDatePicker, true); // its dialog closing
+// The browser's own events from the box are held back; setDateField / settleDateField send the real ones.
+window.addEventListener('input', (e) => {
+  const el = e.target;
+  if (!e.isTrusted || !el._date) return;
+  e.stopImmediatePropagation();
+  const iso = parseTypedDate(nativeValue.get.call(el), false);
+  if (iso !== null) setDateField(el, iso);
+}, true);
+window.addEventListener('change', (e) => { if (e.isTrusted && e.target._date) e.stopImmediatePropagation(); }, true);
+window.addEventListener('focusin', (e) => { if (e.target._date) e.target._date.atFocus = e.target._date.iso; }, true);
+window.addEventListener('focusout', (e) => { if (e.target._date) settleDateField(e.target); }, true);
+window.addEventListener('keydown', (e) => {
+  const el = e.target;
+  if (!el._date) return;
+  if (dateCal?.el === el && dateCalKey(e)) return;
+  if (e.key === 'Enter') settleDateField(el);
+  else if (e.key === 'ArrowDown' && e.altKey) { e.preventDefault(); openDatePicker(el); }
+}, true);
+window.addEventListener('click', (e) => {
+  const el = e.target;
+  if (el._date && !el.disabled && !el.readOnly && e.clientX > el.getBoundingClientRect().right - 28) openDatePicker(el);
+  else if (el._date && dateCal?.el === el) closeDatePicker(); // typing in the box instead
+}, true);
+// A form reset puts the boxes back to their starting dates.
+window.addEventListener('reset', (e) => {
+  queueMicrotask(() => e.target.querySelectorAll?.('.date-field').forEach(el => { el.value = el.getAttribute('value') || ''; }));
+}, true);
+upgradeDatesIn(document);
+new MutationObserver((recs) => { for (const r of recs) r.addedNodes.forEach(n => { if (n.nodeType === 1) upgradeDatesIn(n); }); })
+  .observe(document.documentElement, { childList: true, subtree: true });
 function addDays(iso, n) {
   const d = parseDate(iso);
   d.setDate(d.getDate() + n);
@@ -981,6 +1151,31 @@ function daysBetween(a, b) {
 
 // A task's length in calendar days, counting both its start and end day.
 const taskDays = (m) => (m.start && m.end ? Math.max(1, daysBetween(m.start, m.end) + 1) : 0);
+
+// Working days are Monday to Friday. workDays counts them from start to end, both included;
+// addWorkDays gives the end date of a task that starts on start and runs n working days.
+const isWorkday = (d) => d.getDay() % 6 !== 0;
+function workDays(start, end) {
+  if (!start || !end || end < start) return 0;
+  const total = daysBetween(start, end) + 1;
+  const d = parseDate(start);
+  let n = Math.floor(total / 7) * 5;
+  for (let i = 0; i < total % 7; i++, d.setDate(d.getDate() + 1)) if (isWorkday(d)) n++;
+  return n;
+}
+function addWorkDays(start, n) {
+  const d = parseDate(start);
+  while (!isWorkday(d)) d.setDate(d.getDate() + 1);
+  for (let left = Math.max(1, n) - 1; left > 0;) { d.setDate(d.getDate() + 1); if (isWorkday(d)) left--; }
+  return fmtISO(d);
+}
+// A typed duration in working days: "10", "10d" or "10 days"; "2w" is two weeks (10 days).
+function parseDuration(text) {
+  const t = String(text).trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(d|days?|wd|w|wks?|weeks?)?$/);
+  if (!t) return null;
+  const n = Math.round(parseFloat(t[1]) * (t[2] && t[2][0] === 'w' && t[2] !== 'wd' ? 5 : 1));
+  return n >= 1 ? n : null;
+}
 
 // Whether a RAG status means the work is done (named or described as complete / done).
 function isDoneStatus(name, workspaceId = state.workspaceId) {
@@ -1541,6 +1736,11 @@ const DETAIL_MIN_ROW_H = 40; // below this, the dates/owner line under each item
 // Header units. labels() lists candidates longest first; the first that fits its cell is drawn.
 const gb = (d, o) => d.toLocaleDateString('en-GB', o);
 const TIME_UNITS = {
+  year: {
+    start: d => new Date(d.getFullYear(), 0, 1),
+    next: d => new Date(d.getFullYear() + 1, 0, 1),
+    labels: d => [String(d.getFullYear()), `’${String(d.getFullYear()).slice(2)}`],
+  },
   quarter: {
     start: d => new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1),
     next: d => new Date(d.getFullYear(), d.getMonth() + 3, 1),
@@ -1564,10 +1764,12 @@ const TIME_UNITS = {
 };
 // Timescale presets: top and bottom header tiers, and the zoom (px per day) each opens at.
 const TIMESCALES = {
+  years: { top: 'year', bottom: 'quarter', px: 1 },
   quarters: { top: 'quarter', bottom: 'month', px: null }, // fits the range to the window
   months: { top: 'month', bottom: 'week', px: 14 },
   weeks: { top: 'week', bottom: 'day', px: 50 },
 };
+const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 80;
 
 // Sizes derived from the row-height slider.
@@ -2010,6 +2212,25 @@ function renderGantt() {
     }
   }
 
+  // change freezes: a band in the freeze's colour down every stream, named at the top when there's room
+  if (state.showFreezes) {
+    for (const z of allFreezes()) {
+      const x1 = xOf(parseDate(z.start)), x2 = xOf(parseDate(addDays(z.end, 1))); // the end day is included
+      if (x2 - x1 < 1) continue;
+      const g = svgEl('g', { class: 'gantt-freeze' });
+      g.appendChild(svgEl('title', {}, `Change freeze${z.name ? `: ${z.name}` : ''}, ${freezeDates(z)}`));
+      g.appendChild(svgEl('rect', { x: x1, y: headerH, width: x2 - x1, height: bodyH, fill: z.color, 'fill-opacity': G.freezeOpacity }));
+      for (const x of [x1, x2]) {
+        g.appendChild(svgEl('line', { x1: x, y1: headerH, x2: x, y2: headerH + bodyH, stroke: z.color, 'stroke-opacity': 0.45, 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+      }
+      const label = (z.name || 'Change freeze').toUpperCase();
+      if (textW(label, 9.5, 700) + 8 <= x2 - x1) {
+        g.appendChild(svgEl('text', { x: (x1 + x2) / 2, y: headerH + 12, 'text-anchor': 'middle', 'font-size': 9.5, 'font-weight': 700, 'letter-spacing': '.04em', fill: z.color }, label));
+      }
+      svg.appendChild(g);
+    }
+  }
+
   // One tier: header band with a label per unit, and a gridline at each unit's start.
   const drawTier = (unit, bandY, bandH, top) => {
     const u = TIME_UNITS[unit];
@@ -2025,7 +2246,9 @@ function renderGantt() {
         head.appendChild(svgEl('line', { x1: rawX(d), y1: bandY, x2: rawX(d), y2: headerH, ...line }));
         svg.appendChild(svgEl('line', { x1: rawX(d), y1: headerH, x2: rawX(d), y2: gridBottom, ...line }));
       }
-      cells.push({ x1, x2, labels: u.labels(d), full: rawX(u.next(d)) - rawX(d) });
+      // under a year tier a quarter needs no year of its own
+      const labels = unit === 'quarter' && !top && scale.top === 'year' && state.showQuarters ? u.labels(d).slice(-1) : u.labels(d);
+      cells.push({ x1, x2, labels, full: rawX(u.next(d)) - rawX(d) });
     }
     // one label style for the whole tier: the longest that fits every full-width cell
     const fits = (c, i) => textW(c.labels[i], size, weight) <= c.full - 8;
@@ -2175,6 +2398,12 @@ function renderGantt() {
       badge.appendChild(svgEl('text', { x: bx, y: by + 3.4, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': 800, fill: late ? '#fff' : '#422006' }, '!'));
       g.appendChild(badge);
     }
+    // invisible grab zones over a task's ends, reaching past the bar and on top of its label, so
+    // its ends are easy to catch (they wear the resize cursor)
+    const w = x2 - x1, gw = GRIP_OUT + Math.min(GRIP_IN, w / 3);
+    if (m._task && w >= GRIP_MIN_W) for (const x of [x1 - GRIP_OUT, x2 + GRIP_OUT - gw]) {
+      g.appendChild(svgEl('rect', { x, y: cy - rm.barH / 2 - 2, width: gw, height: rm.barH + 4, fill: 'transparent', class: 'gantt-grip' }));
+    }
     svg.appendChild(g);
   }
 
@@ -2292,13 +2521,17 @@ function markRecentMoved(svg) {
 // Which part of an item the pointer is on: a task's ends are for resizing.
 function dragModeAt(g, m, clientX) {
   if (!isTask(m)) return 'move';
-  const bar = g.querySelector('rect:not(.gantt-baseline)');
+  const bar = g.querySelector('.gantt-shape');
   if (!bar) return 'move';
   const r = bar.getBoundingClientRect();
-  if (r.width >= 18 && Math.abs(clientX - r.right) <= 6) return 'end';
-  if (r.width >= 18 && Math.abs(clientX - r.left) <= 6) return 'start';
+  if (r.width < GRIP_MIN_W) return 'move';
+  const inside = Math.min(GRIP_IN, r.width / 3);
+  if (clientX >= r.right - inside && clientX <= r.right + GRIP_OUT) return 'end';
+  if (clientX >= r.left - GRIP_OUT && clientX <= r.left + inside) return 'start';
   return 'move';
 }
+// how far a task's resize zones reach past and into its bar (px), and the narrowest bar that has them
+const GRIP_OUT = 8, GRIP_IN = 10, GRIP_MIN_W = 18;
 
 function onDragMove(e) {
   if (!drag) return;
@@ -2474,15 +2707,15 @@ function syncGanttSticky() {
 // "packed" fits several items to a row by date, the other orders give each item its own row.
 // The sort is a per-browser preference.
 
-const ganttFilter = { q: '', stream: '', owner: '', type: '', rag: [], late: false, crit: false };
+const ganttFilter = { q: '', streams: [], owner: '', type: '', rag: [], late: false, crit: false }; // streams: ids, none = all
 const GANTT_SORT_DEFAULT = { streams: 'name', rows: 'packed', dir: 1 }; // streams A–Z, items packed by date
 const ganttSort = { ...GANTT_SORT_DEFAULT };
 
-const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.stream || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late || ganttFilter.crit);
+const ganttFiltered = () => !!(ganttFilter.q.trim() || ganttFilter.streams.length || ganttFilter.owner || ganttFilter.type || ganttFilter.rag.length || ganttFilter.late || ganttFilter.crit);
 
 function ganttMatches(m) {
   const f = ganttFilter, q = f.q.trim().toLowerCase();
-  return (!f.stream || m.stream_id === f.stream)
+  return (!f.streams.length || f.streams.includes(m.stream_id))
     && (!f.owner || m.owner === f.owner)
     && (!f.type || (f.type === 'task' ? isTask(m) : f.type === 'top' ? isTopLevel(m) : !isTask(m)))
     && (!f.rag.length || f.rag.includes(m.status))
@@ -2492,7 +2725,8 @@ function ganttMatches(m) {
 }
 
 function clearGanttFilters() {
-  Object.assign(ganttFilter, { q: '', stream: '', owner: '', type: '', rag: [], late: false, crit: false });
+  Object.assign(ganttFilter, { q: '', streams: [], owner: '', type: '', rag: [], late: false, crit: false });
+  document.getElementById('gf-stream-q').value = '';
 }
 
 // Folded streams, per workspace (a per-browser preference).
@@ -2560,9 +2794,23 @@ function renderGanttFilters() {
   };
   const streamsHere = workspaceStreams().filter(l => state.items.some(m => m.stream_id === l.id))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-  if (f.stream && !streamsHere.some(l => l.id === f.stream)) streamsHere.push(streamById(f.stream) || { id: f.stream, name: '(deleted stream)' });
-  document.getElementById('gf-stream').innerHTML = '<option value="">All streams</option>' + streamsHere.map(l =>
-    `<option value="${escAttr(l.id)}" ${l.id === f.stream ? 'selected' : ''}>${escAttr(l.name)}</option>`).join('');
+  for (const id of f.streams) if (!streamsHere.some(l => l.id === id)) streamsHere.push(streamById(id) || { id, name: '(deleted stream)' });
+  // any number ticked; none ticked shows every stream. One per line so long names and long lists stay
+  // readable: the list scrolls, names are cut short (the full name on hover), and a search box joins
+  // once there are more than a handful
+  const list = document.getElementById('gf-stream');
+  const scroll = list.scrollTop; // re-rendered on every tick: keep the place
+  list.innerHTML = streamsHere.map(l => `
+    <div class="sp-row" data-name="${escAttr(l.name.toLowerCase())}">
+      <label class="check" title="${escAttr(l.name)}"><input type="checkbox" value="${escAttr(l.id)}" ${f.streams.includes(l.id) ? 'checked' : ''} /><span class="sp-name">${escAttr(l.name)}</span></label>
+      <button type="button" class="sp-only" data-only="${escAttr(l.id)}" title="Show only this stream">Only</button>
+    </div>`).join('')
+    || '<span class="pop-note">No streams yet</span>';
+  list.scrollTop = scroll;
+  document.getElementById('gf-stream-q').hidden = streamsHere.length <= 6;
+  document.getElementById('gf-stream-count').textContent = f.streams.length ? `${f.streams.length} of ${streamsHere.length}` : '';
+  document.getElementById('gf-stream-none').disabled = !f.streams.length;
+  filterStreamPick();
   fill('gf-owner', 'All owners', distinct('owner'), f.owner);
   const types = [['', 'All'], ['top', 'Top level'], ['milestone', T.Milestones], ['task', T.Tasks]];
   document.getElementById('gf-type').innerHTML = types.map(([v, label]) =>
@@ -2577,7 +2825,7 @@ function renderGanttFilters() {
   if (document.activeElement !== q) q.value = f.q; // don't disturb the caret while typing
 
   const chips = [
-    f.stream && ['stream', 'Stream', streamName(f.stream) || '(deleted stream)'],
+    f.streams.length && ['streams', f.streams.length > 1 ? 'Streams' : 'Stream', f.streams.map(id => streamName(id) || '(deleted stream)').join(', ')],
     f.owner && ['owner', 'Owner', f.owner],
     f.type && ['type', 'Type', f.type === 'task' ? T.Tasks : f.type === 'top' ? T.Tops : T.Milestones],
     f.rag.length && ['rag', 'RAG', f.rag.join(', ')],
@@ -2649,14 +2897,40 @@ function wireMenus() {
   });
 }
 
+// Narrow the stream list in the Filter menu to names containing the search text.
+function filterStreamPick() {
+  const q = document.getElementById('gf-stream-q').value.trim().toLowerCase();
+  const rows = [...document.querySelectorAll('#gf-stream .sp-row')];
+  for (const r of rows) r.hidden = !!q && !r.dataset.name.includes(q);
+  let none = document.querySelector('#gf-stream .sp-none');
+  if (!none) {
+    none = Object.assign(document.createElement('span'), { className: 'pop-note sp-none', textContent: 'No stream matches' });
+    document.getElementById('gf-stream').appendChild(none);
+  }
+  none.hidden = !rows.length || rows.some(r => !r.hidden);
+}
+
 function wireGanttFilters() {
   Object.assign(ganttSort, loadAppPrefs().ganttSort || {});
   wireMenus();
   const saveSort = () => { saveAppPrefs({ ganttSort: { ...ganttSort } }); renderGantt(); };
   document.getElementById('gf-q').addEventListener('input', (e) => { ganttFilter.q = e.target.value; renderGantt(); });
-  for (const [id, k] of [['gf-stream', 'stream'], ['gf-owner', 'owner']]) {
-    document.getElementById(id).addEventListener('change', (e) => { ganttFilter[k] = e.target.value; renderGantt(); });
-  }
+  const streamList = document.getElementById('gf-stream');
+  streamList.addEventListener('change', () => {
+    ganttFilter.streams = [...streamList.querySelectorAll('input:checked')].map(c => c.value);
+    renderGantt();
+  });
+  streamList.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-only]');
+    if (b) { ganttFilter.streams = [b.dataset.only]; renderGantt(); }
+  });
+  document.getElementById('gf-stream-q').addEventListener('input', filterStreamPick);
+  document.getElementById('gf-stream-all').addEventListener('click', () => {
+    ganttFilter.streams = [...streamList.querySelectorAll('input')].map(c => c.value);
+    renderGantt();
+  });
+  document.getElementById('gf-stream-none').addEventListener('click', () => { ganttFilter.streams = []; renderGantt(); });
+  document.getElementById('gf-owner').addEventListener('change', (e) => { ganttFilter.owner = e.target.value; renderGantt(); });
   document.getElementById('gf-type').addEventListener('click', (e) => {
     const b = e.target.closest('[data-type]');
     if (b) { ganttFilter.type = b.dataset.type; renderGantt(); }
@@ -2675,7 +2949,7 @@ function wireGanttFilters() {
     const k = e.target.closest('[data-unfilter]')?.dataset.unfilter;
     if (!k) return;
     if (k === 'all') clearGanttFilters();
-    else ganttFilter[k] = k === 'rag' ? [] : k === 'late' || k === 'crit' ? false : '';
+    else ganttFilter[k] = k === 'rag' || k === 'streams' ? [] : k === 'late' || k === 'crit' ? false : '';
     renderGantt();
   });
   document.getElementById('gs-streams').addEventListener('change', (e) => { ganttSort.streams = e.target.value; saveSort(); });
@@ -2695,7 +2969,7 @@ function showTip(m, e) {
   const task = isTask(m);
   const days = daysBetween(m.start, m.end) + 1;
   const when = task
-    ? `${fmtShort(m.start)} – ${fmtNice(m.end)} <span class="tip-muted">(${days} days)</span>`
+    ? `${fmtShort(m.start)} – ${fmtNice(m.end)} <span class="tip-muted">(${workDays(m.start, m.end)} working ${workDays(m.start, m.end) === 1 ? 'day' : 'days'} · ${daysText(days)} elapsed)</span>`
     : fmtNice(m.end);
   const where = [m.owner, [streamName(m.stream_id), m.substream].filter(Boolean).join(' › ')].filter(Boolean).map(escAttr).join(' · ');
   const prog = !task && milestoneProgress(m);
@@ -2787,14 +3061,15 @@ const reportsOff = (wsId) => hiddenFields(wsId).includes('reports');
 const itemLinks = (m) => Object.entries({ GitLab: 'gitlab_url', 'Use case': 'use_case_url' })
   .filter(([, k]) => m[k] && !linkHidden(k, m.workspace_id || undefined)).map(([l, k]) => [l, m[k]]);
 
-function openEditDialog(m) {
+// With `copy` (and no m), a new item starts as a copy of that one: Duplicate on the chart.
+function openEditDialog(m, copy) {
   hideTip();
   editing = m;
   editOpened = m && structuredClone(m);
   const f = document.getElementById('edit-form').elements;
   const last = state.items.at(-1);
   const today = fmtISO(new Date());
-  const v = m || {
+  const v = m || (copy && { ...copy, ref: '', title: `${copy.title} (copy)`, deps: [...copy.deps] }) || {
     ref: '', title: '', description: '', stream_id: last?.stream_id || workspaceStreams()[0]?.id || '', substream: '', owner: '', gitlab_url: '', use_case_url: '',
     type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, parent: '', deps: [],
   };
@@ -2812,7 +3087,7 @@ function openEditDialog(m) {
   if (!v.stream_id) { pickEdStream(f.stream_id, true); f.newstream.value = m ? '' : 'General'; } // no streams yet: name the first
   edDeps = [...v.deps];
 
-  document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : `New ${T.item}`;
+  document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : copy ? `Duplicate ${itemLabel(copy)}` : `New ${T.item}`;
   document.getElementById('ed-delete').hidden = !m;
   document.getElementById('ed-report').hidden = !m || reportsOff();
   const n = m ? reportsFor(m.id).length : 0;
@@ -2831,6 +3106,7 @@ function openEditDialog(m) {
   updateEdType();
   document.getElementById('edit-dialog').showModal();
   f.title.focus();
+  if (copy) f.title.select();
 }
 
 // The workspace's streams (A–Z) by id, plus a way to start a new one.
@@ -2861,8 +3137,86 @@ function renderEdDeps() {
   const opts = state.items.filter(p => p !== editing && !edDeps.includes(p.id)).sort(cmpRef);
   document.getElementById('ed-deps').innerHTML =
     edDeps.map(d => `<span class="chip" title="${escAttr(byId.get(d)?.title)}">${escAttr(itemLabel(byId.get(d)))}<button type="button" data-edrm="${d}" title="Remove dependency">×</button></span>`).join('') +
-    `<select id="ed-adddep" class="add-dep"><option value="">+ add dependency</option>${opts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select>`;
+    `<input id="ed-adddep" class="add-dep" placeholder="+ add dependency…" autocomplete="off" />`;
 }
+
+/* A dependency is picked from a searchable list rather than a plain dropdown: type to narrow it by
+   ref, title, stream or sub-stream, and each entry shows where it sits (stream › sub-stream).
+   The box fires a `deppick` event carrying the chosen item's id. */
+function depCandidates(input) {
+  if (input.id === 'ed-adddep') return state.items.filter(p => p !== editing && !edDeps.includes(p.id));
+  const m = state.items[+input.dataset.adddep];
+  return m ? state.items.filter(p => p.id !== m.id && !m.deps.includes(p.id)) : [];
+}
+let depPop = null; // {input, el, list, active}
+function openDepPicker(input) {
+  if (depPop?.input !== input) closeDepPicker();
+  if (!depPop) {
+    const el = document.createElement('div');
+    el.className = 'dep-pop';
+    el.setAttribute('role', 'listbox');
+    // Inside a modal dialog the list has to live in the dialog too, or it sits behind it.
+    (input.closest('dialog') || document.body).appendChild(el);
+    el.addEventListener('mousedown', (e) => e.preventDefault()); // keep the focus in the box
+    el.addEventListener('click', (e) => { const o = e.target.closest('[data-pick]'); if (o) pickDep(o.dataset.pick); });
+    depPop = { input, el, list: [], active: 0 };
+  }
+  const q = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const where = (p) => [streamName(p.stream_id), p.substream].filter(Boolean).join(' › ');
+  depPop.list = depCandidates(input).sort(cmpRef)
+    .filter(p => { const hay = [p.ref, p.title, where(p)].join(' ').toLowerCase(); return q.every(w => hay.includes(w)); });
+  depPop.active = Math.min(depPop.active, Math.max(0, depPop.list.length - 1));
+  depPop.el.innerHTML = depPop.list.length
+    ? depPop.list.map((p, i) => `<div class="dep-opt${i === depPop.active ? ' active' : ''}" role="option" data-pick="${p.id}">
+        <span class="dep-opt-title">${p.ref ? `<b>${escAttr(p.ref)}</b> ` : ''}${escAttr(p.title)}</span>
+        <span class="dep-opt-where">${escAttr(where(p) || 'No stream')}</span></div>`).join('')
+    : '<div class="dep-none">Nothing matches</div>';
+  placeDepPicker();
+}
+function placeDepPicker() {
+  const r = depPop.input.getBoundingClientRect();
+  const w = Math.max(r.width, 320);
+  const below = window.innerHeight - r.bottom;
+  Object.assign(depPop.el.style, {
+    left: `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`, width: `${w}px`,
+    ...(below < 220 && r.top > below
+      ? { top: '', bottom: `${window.innerHeight - r.top + 4}px`, maxHeight: `${Math.min(320, r.top - 12)}px` }
+      : { bottom: '', top: `${r.bottom + 4}px`, maxHeight: `${Math.min(320, below - 12)}px` }),
+  });
+}
+function closeDepPicker() {
+  depPop?.el.remove();
+  depPop = null;
+}
+function pickDep(id) {
+  const input = depPop.input;
+  closeDepPicker();
+  input.value = '';
+  input.dispatchEvent(new CustomEvent('deppick', { bubbles: true, detail: id }));
+}
+document.addEventListener('focusin', (e) => { if (e.target.matches?.('input.add-dep')) { if (depPop) depPop.active = 0; openDepPicker(e.target); } });
+document.addEventListener('input', (e) => { if (e.target.matches?.('input.add-dep')) { if (depPop) depPop.active = 0; openDepPicker(e.target); } });
+document.addEventListener('focusout', (e) => { if (depPop?.input === e.target) closeDepPicker(); });
+// A box redrawn away while its list is open never reports losing the focus, so a click elsewhere closes it too.
+document.addEventListener('mousedown', (e) => { if (depPop && !depPop.el.contains(e.target) && e.target !== depPop.input) closeDepPicker(); }, true);
+document.addEventListener('keydown', (e) => {
+  if (!depPop || e.target !== depPop.input) return;
+  const n = depPop.list.length;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (n) depPop.active = (depPop.active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+    depPop.el.querySelectorAll('.dep-opt').forEach((o, i) => o.classList.toggle('active', i === depPop.active));
+    depPop.el.querySelector('.dep-opt.active')?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    if (n) pickDep(depPop.list[depPop.active].id);
+  } else if (e.key === 'Escape') {
+    depPop.input.value = '';
+    closeDepPicker();
+  } else return;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
+window.addEventListener('resize', closeDepPicker);
+document.addEventListener('scroll', (e) => { if (depPop && !depPop.el.contains(e.target)) placeDepPicker(); }, true);
 
 // A milestone shows one date; a task shows start and end.
 function updateEdType() {
@@ -2874,6 +3228,26 @@ function updateEdType() {
   document.getElementById('ed-start').classList.toggle('invisible', !task);
   document.getElementById('ed-end-label').textContent = task ? 'End' : 'Date';
   if (!task) f.start.value = f.end.value;
+  document.getElementById('ed-dur').classList.toggle('invisible', !task);
+  showEdDuration();
+}
+
+// A task's duration box shows its working days; typing one moves the end date to suit.
+function showEdDuration() {
+  const f = document.getElementById('edit-form').elements;
+  if (document.activeElement === f.duration) return;
+  const n = workDays(f.start.value, f.end.value);
+  f.duration.value = n || '';
+}
+function applyEdDuration(final) {
+  const f = document.getElementById('edit-form').elements;
+  const n = parseDuration(f.duration.value);
+  f.duration.classList.toggle('invalid', !!f.duration.value.trim() && n === null);
+  if (n !== null && f.start.value) {
+    const end = addWorkDays(f.start.value, n);
+    if (end !== f.end.value) { f.end.value = end; f.end.dispatchEvent(new Event('input', { bubbles: true })); }
+  }
+  if (final) { f.duration.classList.remove('invalid'); f.duration.blur(); showEdDuration(); }
 }
 
 async function submitEditDialog(e) {
@@ -2940,7 +3314,7 @@ async function deleteFromDialog() {
 /* ================= zoom / range controls ================= */
 
 function setZoom(px) {
-  state.pxPerDay = Math.min(MAX_ZOOM, Math.max(1, px));
+  state.pxPerDay = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, px));
   document.getElementById('zoom-slider').value = state.pxPerDay;
   renderGantt();
 }
@@ -2953,7 +3327,7 @@ function fitZoom() {
   setZoom(avail / totalDays);
 }
 
-// Switch the header tiers and jump to that preset's zoom; Months and Weeks open around today.
+// Switch the header tiers and jump to that preset's zoom; Years, Months and Weeks open around today.
 function setTimescale(key) {
   if (!TIMESCALES[key]) key = 'quarters';
   state.timescale = key;
@@ -3105,7 +3479,7 @@ function fitColumn(t, c) {
     if (td.colSpan > 1) continue;
     const el = td.children.length === 1 ? td.firstElementChild : null;
     let inner;
-    if (el?.matches('input[type=date]')) inner = 118 + pad(el);
+    if (el?.matches('.date-field')) inner = 104 + pad(el);
     else if (el?.matches('input[type=checkbox]')) inner = el.offsetWidth;
     else if (el?.matches('input')) inner = measure(el.value || el.placeholder || '', el) + pad(el) + 2;
     else if (el?.matches('select')) inner = measure(el.selectedOptions[0]?.text || '', el) + pad(el) + 22; // the arrow
@@ -3539,7 +3913,7 @@ const GRID_COLS = [
   { key: 'parent', label: 'Rolls up to', w: 170, show: itemShow, order: byItemRef, blank: '(None)' },
   { key: 'type', label: 'Type', w: 170, title: 'A single date (diamond; top level ones are under change control and ringed) or a date range (bar)', show: typeLabel },
   { key: 'deps', label: 'Depends on', w: 190, show: itemShow, order: byItemRef, blank: '(None)' },
-  { key: 'stream', label: 'Stream', w: 120 },
+  { key: 'stream', label: 'Stream', w: 120, vals: (m) => streamName(m.stream_id), blank: '(No stream)' },
   { key: 'owner', label: 'Owner', w: 120 },
   { key: 'gitlab_url', label: 'GitLab URL', w: 200 },
   { key: 'use_case_url', label: 'Use case URL', w: 200 },
@@ -3577,6 +3951,7 @@ function gridValue(m, key, byId) {
     case 'id': return +m.id;
     case 'parent': return m.parent ? fullLabel(byId.get(m.parent)) : '';
     case 'deps': return m.deps.map(d => fullLabel(byId.get(d))).join(' ');
+    case 'stream': return streamName(m.stream_id);
     default: return m[key] ?? '';
   }
 }
@@ -3621,7 +3996,8 @@ function setCell(td, html) {
     const next = tpl.content.firstElementChild;
     if (tpl.content.children.length === 1 && next.tagName === live.tagName) {
       for (const a of [...live.attributes]) if (!next.hasAttribute(a.name)) live.removeAttribute(a.name);
-      for (const a of [...next.attributes]) if (a.name !== 'value' && live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value);
+      for (const a of [...next.attributes]) if (a.name !== 'value' && !(a.name === 'type' && live._date) && live.getAttribute(a.name) !== a.value) live.setAttribute(a.name, a.value);
+      if (live._date) upgradeDateInput(live); // its class and placeholder, which the copy above took off
       if (live.tagName === 'SELECT') { const v = live.value; live.innerHTML = next.innerHTML; live.value = v; }
       return;
     }
@@ -3665,7 +4041,6 @@ function renderEditor(highlight = [], keepOrder = false) {
 
     const parentOpts = milestones.filter(p => p.id !== m.id);
     if (m.parent && !parentOpts.some(p => p.id === m.parent)) parentOpts.push(byId.get(m.parent));
-    const depOpts = state.items.filter(p => p.id !== m.id && !m.deps.includes(p.id)).sort(cmpRef);
     const chips = m.deps.map(d => `
       <span class="chip" title="${escAttr(byId.get(d)?.title)}">${escAttr(itemLabel(byId.get(d)))}<button data-rmdep="${i}" data-dep="${d}" title="Remove dependency">×</button></span>`).join('');
     const dup = refCount.get(m.ref) > 1;
@@ -3693,7 +4068,7 @@ function renderEditor(highlight = [], keepOrder = false) {
       status: quick ? `<div class="rag-pick sm compact">${ragButtons(m.status, `data-i="${i}"`)}</div>`
         : `<select data-i="${i}" data-k="status" class="status-sel" style="color:${pal(m.status).dark}">${statusOptions(m.status)}</select>`,
       parent: `<select data-i="${i}" data-k="parent"><option value="">—</option>${parentOpts.map(p => `<option value="${p.id}" ${p.id === m.parent ? 'selected' : ''}>${escAttr(fullLabel(p))}</option>`).join('')}</select>`,
-      deps: `<div class="deps">${chips}<select data-adddep="${i}" class="add-dep"><option value="">+ add</option>${depOpts.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('')}</select></div>`,
+      deps: `<div class="deps">${chips}<input data-adddep="${i}" class="add-dep" placeholder="+ add" autocomplete="off" /></div>`,
       actions: quick ? (reportsOff() ? '' : `<button class="btn btn-sm" data-report="${m.id}" title="Write a report on this ${escAttr(T.item)}">New report</button>`)
         : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
     };
@@ -3756,15 +4131,17 @@ async function applyTableChange(m, changes, msg) {
   scheduleSave([msg, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
 }
 
+function onEditorDepPick(e) {
+  const t = e.target;
+  syncEditorToState();
+  const m = state.items[+t.dataset.adddep];
+  return applyTableChange(m, { deps: [...m.deps, e.detail] }).then(() => refocusGrid(`[data-adddep="${t.dataset.adddep}"]`));
+}
+
 function onEditorChange(e) {
   const t = e.target;
 
-  if (t.dataset.adddep != null) {
-    syncEditorToState();
-    const m = state.items[+t.dataset.adddep];
-    if (!t.value) return;
-    return applyTableChange(m, { deps: [...m.deps, t.value] }).then(() => refocusGrid(`[data-adddep="${t.dataset.adddep}"]`));
-  }
+  if (t.dataset.adddep != null) return; // typed search text, not a pick (see onEditorDepPick)
 
   const k = t.dataset.k;
   if (!k) return;
@@ -4277,7 +4654,7 @@ function defaultPeriodEnd(cadence) {
 
 function fmtStamp(iso) {
   const d = new Date(iso);
-  return isNaN(d) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return isNaN(d) ? '' : `${fmtDMY(d)}, ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 }
 const periodText = (r) => `${fmtShort(r.period_start)} – ${fmtNice(r.period_end)}`;
 const statusPill = (st, map) => { const c = pal(st, map); return `<span class="pill" style="background:${c.base};color:${c.text}">${escAttr(st)}</span>`; };
@@ -4402,6 +4779,7 @@ function renderQuick() {
       ${reportsOff() ? '' : `<button type="button" class="btn" data-act="report">New report…</button>
       <button type="button" class="btn" data-act="history" ${n ? '' : 'disabled'}>Reports (${n})</button>`}
       <button type="button" class="btn" data-act="dates">Date log</button>
+      <button type="button" class="btn" data-act="duplicate" title="A new ${escAttr(T.item)} with the same details, to adjust before saving">Duplicate…</button>
       <button type="button" class="btn" data-act="edit">Edit details…</button>
     </div>
     </form>`;
@@ -4457,6 +4835,7 @@ function onQuickClick(e) {
   hideQuick();
   if (act === 'report') openReportDialog({ itemId: m.id });
   else if (act === 'edit') openEditDialog(m);
+  else if (act === 'duplicate') openEditDialog(null, m);
   else if (act === 'history') showReportsFor(m.id);
   else if (act === 'dates') showDatesFor(m.id);
 }
@@ -4655,7 +5034,8 @@ const ED_TOOLS = [
   { cmd: 'link', label: '<svg viewBox="0 0 20 20"><path d="M8.5 11.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 0 0-5-5L10 5M11.5 8.5a3.5 3.5 0 0 0-5 0L4 11a3.5 3.5 0 0 0 5 5l1-1"/></svg>', title: 'Link (⌘K)' },
 ];
 
-function mdEditor(t) {
+// `opts.paste(clipboardData)` may turn a paste into Markdown first (null: paste the plain text).
+function mdEditor(t, opts = {}) {
   if (t._ed) return t._ed;
   const wrap = document.createElement('div');
   wrap.className = 'wys';
@@ -4680,6 +5060,8 @@ function mdEditor(t) {
   body.addEventListener('keydown', (e) => edKeydown(ed, e));
   body.addEventListener('paste', (e) => {
     e.preventDefault();
+    const md = opts.paste?.(e.clipboardData);
+    if (md) return document.execCommand('insertHTML', false, mdToHtml(md));
     const text = e.clipboardData.getData('text/plain').replace(/\r\n?/g, '\n');
     if (!text) return;
     document.execCommand('insertHTML', false, /\n/.test(text.trim()) ? mdToHtml(text) : mdInline(escAttr(text)));
@@ -4876,9 +5258,13 @@ function htmlToMd(root) {
         walk(n, inner);
         if (!inner.length) { const t = paragraph(inline(n)); if (t.trim()) inner.push(t); }
         if (inner.length) out.push(inner.join('\n').split('\n').map(l => `> ${l}`).join('\n'));
+      } else if (n.nodeName === 'TABLE') {
+        flushLoose();
+        const rows = [...n.querySelectorAll('tr')].filter(r => r.closest('table') === n).map(r => [...r.children].map(c => inline(c).replace(/\s*\n\s*/g, ' ').trim()));
+        if (rows.length) out.push(mdTableOf(rows));
       } else if (n.nodeType === 1 && (n.nodeName === 'P' || n.nodeName === 'DIV')) {
         flushLoose();
-        if (n.querySelector('ul, ol, p, div, blockquote')) walk(n, out); // a wrapper, not a paragraph
+        if (n.querySelector('ul, ol, p, div, blockquote, table')) walk(n, out); // a wrapper, not a paragraph
         else { const t = paragraph(inline(n)); if (t.trim()) out.push(t); }
       } else if (parent === root) loose += n.nodeType === 3 ? esc(n.nodeValue.replace(/\u00a0/g, ' ')) : n.nodeName === 'BR' ? '\n' : inline({ childNodes: [n] });
     }
@@ -5233,7 +5619,7 @@ function filteredReports() {
 function stampCell(iso) {
   const d = new Date(iso);
   if (isNaN(d)) return '<td class="rc-stamp"></td>';
-  return `<td class="rc-stamp" title="${escAttr(fmtStamp(iso))}">${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}<small>${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</small></td>`;
+  return `<td class="rc-stamp" title="${escAttr(fmtStamp(iso))}">${fmtDMY(d)}<small>${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</small></td>`;
 }
 
 /* ---- reports due ---- */
@@ -6127,7 +6513,6 @@ function wireReports() {
     dlg.close();
     showReportsFor(rpItemId);
   };
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   document.getElementById('rp-prev').addEventListener('click', onPrevPanelClick);
   document.getElementById('rp-error').addEventListener('click', (e) => {
     const b = e.target.closest('[data-open-report]');
@@ -6672,7 +7057,6 @@ function wireImport() {
   document.getElementById('btn-items-import').onclick = openImportDialog;
   document.getElementById('im-close').onclick = close;
   document.getElementById('im-cancel').onclick = close;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
   document.getElementById('im-change').onclick = () => { document.getElementById('im-file').value = ''; showImportStep('source'); };
   document.getElementById('im-file').addEventListener('change', (e) => { if (e.target.files[0]) readImportFile(e.target.files[0]); });
   const drop = document.getElementById('im-drop');
@@ -6855,7 +7239,7 @@ async function openBucket(workspaceId, bucket, stream = '') {
   await switchWorkspace(workspaceId, 'gantt');
   clearGanttFilters();
   ganttFilter.type = 'milestone';
-  ganttFilter.stream = stream;
+  ganttFilter.streams = stream ? [stream] : [];
   if (bucket !== 'total') ganttFilter.rag = STATUSES.filter(st => msBucket(st, workspaceId) === bucket);
   renderGantt();
 }
@@ -7388,7 +7772,6 @@ function wireWorkspaces() {
   document.getElementById('pg-delete').onclick = deleteWorkspace;
   document.getElementById('pg-clear-history').onclick = () => clearWorkspaceHistory(false);
   document.getElementById('pg-clear-all-history').onclick = () => clearWorkspaceHistory(true);
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
 /* ================= program and stream overviews ================= */
@@ -7442,6 +7825,30 @@ function streamsToCSV(streams) {
   return [STREAM_COLUMNS.join(','), ...streams.map(l => STREAM_COLUMNS.map(k => csvEscape(l[k])).join(','))].join('\n') + '\n';
 }
 const streamById = (id) => (id ? state.streams.find(l => l.id === id) : undefined);
+
+// A change freeze: a period when nothing goes live. Freezes are company wide: every workspace's plan
+// shades them across all its streams, each in its own colour. Dates are inclusive, like a task's;
+// one with no end is a single day.
+const FREEZE_COLUMNS = ['id', 'name', 'start', 'end', 'color'];
+const FREEZE_COLOR = '#2563eb';
+function rowsToFreezes(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase().replace(/[\s-]+/g, '_'));
+  const seen = new Set();
+  return rows.slice(1).map(r => {
+    const o = {};
+    for (const k of FREEZE_COLUMNS) o[k] = (r[colIndex(header, k)] ?? '').trim();
+    if (!parseDate(o.end) || o.end < o.start) o.end = o.start;
+    if (!/^#[0-9a-f]{6}$/i.test(o.color)) o.color = FREEZE_COLOR;
+    return o;
+  }).filter(z => parseDate(z.start) && /^\d+$/.test(z.id) && !seen.has(z.id) && seen.add(z.id));
+}
+function freezesToCSV(freezes) {
+  return [FREEZE_COLUMNS.join(','), ...freezes.map(z => FREEZE_COLUMNS.map(k => csvEscape(z[k])).join(','))].join('\n') + '\n';
+}
+const allFreezes = () => [...state.freezes].sort((a, b) => a.start.localeCompare(b.start));
+const nextFreezeId = () => takeId('freezes', () => String(Math.max(0, ...state.freezes.map(z => +z.id || 0)) + 1));
+const freezeDates = (z) => (z.end === z.start ? fmtNice(z.start) : `${fmtNice(z.start)} – ${fmtNice(z.end)}`);
 const streamName = (id) => streamById(id)?.name || '';
 const workspaceStreams = (workspaceId = state.workspaceId) => state.streams.filter(l => l.workspace_id === workspaceId);
 const nextStreamId = () => takeId('streams', () => String(Math.max(0, ...state.streams.map(l => +l.id || 0)) + 1));
@@ -7969,7 +8376,7 @@ async function dashGo(go) {
   switch (go.k) {
     case 'gantt':
       clearGanttFilters();
-      Object.assign(ganttFilter, { stream: go.stream || '', owner: go.owner || '', type: go.type || '', rag: go.rag || [], late: !!go.late });
+      Object.assign(ganttFilter, { streams: go.stream ? [go.stream] : [], owner: go.owner || '', type: go.type || '', rag: go.rag || [], late: !!go.late });
       return switchView('gantt');
     case 'item': return showItemOnGantt(go.id);
     case 'raid': {
@@ -8169,7 +8576,7 @@ async function deleteUpdate() {
 // Show one stream (by id) on the Gantt chart.
 function openStreamOnGantt(id) {
   clearGanttFilters();
-  ganttFilter.stream = id;
+  ganttFilter.streams = [id];
   switchView('gantt');
 }
 
@@ -8202,7 +8609,6 @@ function wireOverview() {
   document.getElementById('up-cancel').onclick = () => dlg.close();
   document.getElementById('up-close').onclick = () => dlg.close();
   document.getElementById('up-delete').onclick = deleteUpdate;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
 }
 
 /* ================= risks, issues and dependencies ================= */
@@ -8952,6 +9358,83 @@ function wirePgStreams() {
   };
 }
 
+/* ---- Change freezes dialog ---- */
+// Company wide, so edited apart from any workspace. fzRows is the list being edited:
+// { id (null for a new one), name, start, end, color }.
+let fzRows = [];
+
+function openFreezeDialog() {
+  fzRows = allFreezes().map(z => ({ ...z }));
+  renderFreezeRows();
+  document.getElementById('fz-error').textContent = '';
+  document.getElementById('freeze-dialog').showModal();
+  if (!fzRows.length) document.getElementById('fz-add').click();
+}
+function renderFreezeRows() {
+  document.getElementById('fz-body').innerHTML = fzRows.map((z, i) => `
+    <tr data-idx="${i}">
+      <td><input data-zf="name" value="${escAttr(z.name)}" placeholder="e.g. Year-end freeze" aria-label="Name" /></td>
+      <td><input data-zf="start" type="date" value="${escAttr(z.start)}" aria-label="From" /></td>
+      <td><input data-zf="end" type="date" value="${escAttr(z.end)}" aria-label="To" /></td>
+      <td><input data-zf="color" type="color" value="${escAttr(z.color)}" aria-label="Colour" /></td>
+      <td><button type="button" class="btn btn-sm btn-ghost" data-zremove="${i}" title="Remove">✕</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">No change freezes.</td></tr>';
+}
+// An error message, or null when the list is sound. A freeze with no end is one day.
+function checkFreezes() {
+  for (const z of fzRows) {
+    z.name = z.name.trim();
+    if (!z.start) return `Give ${z.name ? `“${z.name}”` : 'every change freeze'} a start date.`;
+    if (!z.end) z.end = z.start;
+    if (z.end < z.start) return `${z.name ? `“${z.name}”` : 'A change freeze'} ends before it starts.`;
+  }
+  return null;
+}
+async function submitFreezeDialog(e) {
+  e.preventDefault();
+  const err = checkFreezes();
+  if (err) return (document.getElementById('fz-error').textContent = err);
+  document.getElementById('freeze-dialog').close();
+  const key = (l) => JSON.stringify(l.map(z => [z.id, z.name, z.start, z.end, z.color]));
+  for (const z of fzRows) if (!z.id) z.id = nextFreezeId();
+  const next = fzRows.map(z => ({ id: z.id, name: z.name, start: z.start, end: z.end, color: z.color }))
+    .sort((a, b) => a.start.localeCompare(b.start));
+  if (key(next) === key(allFreezes())) return;
+  const snap = snapshotData();
+  state.freezes = next;
+  rerenderCurrentView();
+  offerUndo(snap, 'Change freezes saved');
+  await saveFreezes('Change freezes saved');
+}
+function wireFreezes() {
+  const body = document.getElementById('fz-body');
+  body.addEventListener('input', (e) => {
+    const f = e.target.dataset.zf;
+    if (!f) return;
+    const z = fzRows[+e.target.closest('tr').dataset.idx];
+    z[f] = e.target.value;
+    if (f === 'start' && z.start && (!z.end || z.end < z.start)) { z.end = z.start; e.target.closest('tr').querySelector('[data-zf="end"]').value = z.start; }
+  });
+  body.addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-zremove]');
+    if (!rm) return;
+    const i = +rm.dataset.zremove;
+    fzRows.splice(i, 1);
+    renderFreezeRows();
+    (body.querySelector(`[data-idx="${Math.min(i, fzRows.length - 1)}"] [data-zremove]`) || document.getElementById('fz-add')).focus();
+  });
+  document.getElementById('fz-add').onclick = () => {
+    // a new one takes the last one's colour, so the freezes match unless changed
+    fzRows.push({ id: null, name: '', start: '', end: '', color: fzRows.at(-1)?.color || FREEZE_COLOR });
+    renderFreezeRows();
+    document.querySelector('#fz-body tr:last-child input').focus();
+  };
+  document.getElementById('freeze-form').addEventListener('submit', submitFreezeDialog);
+  const dlg = document.getElementById('freeze-dialog');
+  document.getElementById('fz-close').onclick = () => dlg.close();
+  document.getElementById('fz-cancel').onclick = () => dlg.close();
+}
+
 function wireRaid() {
   document.getElementById('raid-kind').addEventListener('change', (e) => { raidFilter.kind = e.target.value; renderRaid(); });
   document.getElementById('raid-status').onchange = (e) => { raidFilter.status = e.target.value; renderRaid(); };
@@ -8993,9 +9476,9 @@ function wireRaid() {
   document.getElementById('rd-close').onclick = () => dlg.close();
   document.getElementById('rd-delete').onclick = deleteRaid;
   document.getElementById('rd-issue').onclick = riskToIssue;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   wirePgDepLists();
   wirePgStreams();
+  wireFreezes();
   wireDash();
 }
 
@@ -9713,7 +10196,6 @@ function wireRaidImport() {
   document.getElementById('btn-raid-import').onclick = openRaidImport;
   document.getElementById('ri-close').onclick = close;
   document.getElementById('ri-cancel').onclick = close;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
   document.getElementById('ri-change').onclick = () => { document.getElementById('ri-file').value = ''; showRaidImportStep('source'); };
   document.getElementById('ri-file').addEventListener('change', (e) => { if (e.target.files[0]) readRaidImportFile(e.target.files[0]); });
   const drop = document.getElementById('ri-drop');
@@ -10094,7 +10576,8 @@ function downloadPNG() {
 const SERIES_COLUMNS = ['id', 'workspace_id', 'name', 'cadence', 'start', 'attendees', 'notes', 'created', 'updated'];
 const MEETING_CADENCES = ['Weekly', 'Fortnightly', 'Monthly'];
 const MEETING_COLUMNS = ['id', 'workspace_id', 'title', 'date', 'series_id', 'attendees', 'link', 'minutes', 'created', 'updated'];
-const ACTION_COLUMNS = ['id', 'workspace_id', 'meeting_id', 'ref', 'text', 'owner', 'due', 'status', 'links', 'done_at', 'created', 'updated'];
+// An action's `text` is its title (the column keeps its first name, so older files still load).
+const ACTION_COLUMNS = ['id', 'workspace_id', 'meeting_id', 'ref', 'text', 'description', 'owner', 'due', 'status', 'links', 'done_at', 'created', 'updated'];
 const ACTION_STATUSES = ['Open', 'Done'];
 
 // Rows as records, by column name; ids that aren't positive integers, or repeat, are replaced.
@@ -10172,15 +10655,268 @@ function seriesFromNames() {
 
 function rowsToMeetings(rows) {
   const ids = new Set(state.workspaces.map(p => p.id));
-  return readRecords(rows, [...MEETING_COLUMNS, 'series']).map(({ series, ...m }) => ({ ...m, date: fileDate(m.date), minutes: m.minutes.replace(/\r\n?/g, '\n'), ...(series && !m.series_id ? { _series: series } : {}) }))
+  return readRecords(rows, [...MEETING_COLUMNS, 'series']).map(({ series, ...m }) => ({ ...m, date: fileDate(m.date), minutes: tidyMinutes(m.minutes), ...(series && !m.series_id ? { _series: series } : {}) }))
     .filter(m => ids.has(m.workspace_id));
+}
+
+/* ---- minutes from Copilot, Teams, Word and Outlook ---- */
+// Minutes are kept as Markdown, but as often as not they come from somewhere that writes rich
+// text. Pasted, the browser offers that as HTML (and sometimes RTF); as plain text, Word and
+// Copilot separate lines with U+2028 / U+2029 or vertical tabs and mark bullets with Symbol-font
+// glyphs and a tab, none of which read as lines or lists. All of it is turned into Markdown here,
+// so the minutes show formatted and Extract actions can find the Actions section and its table.
+
+// Bullet glyphs Word, Outlook and Copilot write in plain text. o and § are Word's second and third
+// levels; they (and letters) only count when a tab follows, as Word writes them.
+const GLYPH_BULLET = /^([ \t]*)(?:([·•●○◦▪■□▫‣⁃∙➢➤►▶✓✔\uf0b7\uf0a7\uf076\uf0d8\uf0fc\uf0a8–—])[ \t]+|([o§]|[a-z][.)]|[ivx]+[.)])\t+)(.*)$/;
+function tidyMinutes(s) {
+  if (/^\s*\{\\rtf/.test(s ?? '')) return rtfToMinutes(s); // RTF pasted (or imported) as its code
+  const lines = String(s ?? '').replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n').replace(/[\u200b\u200e\u200f\ufeff]/g, '').replace(/\u00a0/g, ' ').split('\n');
+  return lines.map(line => {
+    let m = line.match(/^([ \t]*)([☐☑☒✅⬜])\s*(.*)$/);
+    if (m) return `${m[1].replace(/\t/g, '  ')}- [${m[2] === '☐' || m[2] === '⬜' ? ' ' : 'x'}] ${m[3]}`;
+    if ((m = line.match(GLYPH_BULLET))) {
+      const level = m[3] === 'o' ? 1 : m[3] === '§' ? 2 : 0;
+      return `${m[1].replace(/\t/g, '  ')}${'  '.repeat(level)}- ${m[4].trim()}`;
+    }
+    if ((m = line.match(/^([ \t]*)(\d+[.)])\t+(.*)$/))) return `${m[1].replace(/\t/g, '  ')}${m[2]} ${m[3].trim()}`;
+    // "Action items" / "Next steps" on a line of its own is a heading, whatever it was formatted as
+    const t = line.trim();
+    if (t.length <= 40 && !/\t/.test(line) && !/[.,;]$|:./.test(t) && t.split(/\s+/).length <= 5 && ACTION_HEAD.test(t.replace(/:$/, '')) && !/^(#|\*\*|__|[-*+] |\d+[.)] |\|)/.test(t)) return `### ${t.replace(/:$/, '')}`;
+    return line;
+  }).join('\n').replace(/\n{3,}/g, '\n\n').replace(TAB_TABLE, (rows) => '\n' + mdTableOf(rows.trim().split('\n').map(r => r.split('\t').map(c => c.trim()))) + '\n').trim();
+}
+// Two or more lines in a row of cells separated by tabs: a table copied as plain text (Word, Copilot, Excel).
+const TAB_TABLE = /(?:^|\n)(?:[^\t\n]*\t[^\n]*(?:\n|$)){2,}/g;
+
+// Markdown round a run of text, inside any spaces at its ends: **  bold ** would not read as bold.
+const wrapMd = (s, mark) => s.split('\n').map(l => { const x = l.match(/^(\s*)(.*?)(\s*)$/); return x[2] ? `${x[1]}${mark}${x[2]}${mark}${x[3]}` : l; }).join('\n');
+// Blocks of Markdown: list items run on one after another, anything else has a blank line between.
+const joinMdBlocks = (blocks) => blocks.reduce((out, b, i) => out + (i ? (b.list && blocks[i - 1].list ? '\n' : '\n\n') : '') + b.text, '');
+// One row of a Markdown table. A | in a cell would split it, so it becomes a /.
+const mdRow = (cells) => `| ${cells.map(c => c.replace(/\s*\n\s*/g, ' ').replace(/\|/g, '/').trim()).join(' | ')} |`;
+const mdTableOf = (rows) => {
+  const n = Math.max(...rows.map(r => r.length));
+  const pad = (r) => [...r, ...Array(n - r.length).fill('')];
+  return [mdRow(pad(rows[0])), mdRow(Array(n).fill('---')), ...rows.slice(1).map(r => mdRow(pad(r)))].join('\n');
+};
+
+// Rich text as the clipboard has it from Copilot, Teams, Word, Outlook or a web page.
+function htmlToMinutes(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('style, script, meta, title, link, xml, head, template').forEach(n => n.remove());
+  const BLOCK = /^(P|DIV|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|SECTION|ARTICLE|MAIN|HEADER|FOOTER|NAV|ASIDE|BODY|DL|DT|DD|PRE|FIGURE|HR)$/;
+  const isBlock = (n) => n.nodeType === 1 && (BLOCK.test(n.nodeName) || n.getAttribute('role') === 'heading');
+  const styleOf = (n) => n.getAttribute?.('style') || '';
+  const inline = (node) => {
+    let out = '';
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) { out += n.nodeValue.replace(/\s+/g, ' '); continue; }
+      if (n.nodeType !== 1) continue; // comments, such as Word's <!--[if !supportLists]-->
+      const tag = n.nodeName, st = styleOf(n);
+      if (/mso-list:\s*Ignore/i.test(st) || /^(UL|OL|TABLE)$/.test(tag)) continue; // Word's own bullet; lists and tables are blocks
+      if (tag === 'BR') { out += '\n'; continue; }
+      if (tag === 'INPUT') { if (n.type === 'checkbox') out += n.checked ? '[x] ' : '[ ] '; continue; }
+      let t = inline(n);
+      if (isBlock(n) && out.trim() && !/\s$/.test(out)) t = ' ' + t;
+      const href = tag === 'A' ? n.getAttribute('href') || '' : '';
+      if (href && MD_URL.test(href) && t.trim() && t.trim() !== href) t = `[${t.trim()}](${href.replace(/[()\s]/g, encodeURIComponent)})`;
+      const weight = st.match(/font-weight:\s*([\w]+)/i)?.[1]; // Google Docs wraps everything in <b style="font-weight:normal">
+      if (weight ? /bold|[6-9]00/.test(weight) : /^(B|STRONG)$/.test(tag)) t = wrapMd(t, '**');
+      const style = st.match(/font-style:\s*(\w+)/i)?.[1];
+      if (style ? style === 'italic' : /^(I|EM)$/.test(tag)) t = wrapMd(t, '*');
+      out += t;
+    }
+    return out.replace(/\*\*\*\*/g, '');
+  };
+  const lineOf = (s) => s.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+  const blocks = [];
+  const push = (text, list = false) => { if (text.trim()) blocks.push({ text, list }); };
+  const list = (node, depth) => {
+    let i = 0;
+    for (const c of node.children) {
+      if (c.nodeName === 'LI') {
+        const marker = node.nodeName === 'OL' ? `${(+node.getAttribute('start') || 1) + i++}.` : '-';
+        const box = c.getAttribute('data-checked') ?? c.getAttribute('aria-checked');
+        push(`${'  '.repeat(depth)}${marker} ${box === 'true' ? '[x] ' : box === 'false' ? '[ ] ' : ''}${inline(c).replace(/\s+/g, ' ').trim()}`, true);
+        for (const sub of c.querySelectorAll('ul, ol')) if (sub.parentElement.closest('li') === c) list(sub, depth + 1);
+      } else if (c.nodeName === 'UL' || c.nodeName === 'OL') list(c, depth + 1);
+    }
+  };
+  const table = (node) => {
+    const rows = [...node.querySelectorAll('tr')].filter(r => r.closest('table') === node).map(r => [...r.children].filter(c => /^T[DH]$/.test(c.nodeName)));
+    if (rows.every(r => r.length <= 1)) return rows.forEach(r => r[0] && walk(r[0])); // a layout table, not a table of anything
+    push(mdTableOf(rows.map(r => r.map(c => inline(c).replace(/\s+/g, ' ').trim()))));
+  };
+  let loose = null;
+  const flush = () => { if (loose) push(lineOf(loose)); loose = null; };
+  function walk(parent) {
+    for (const n of parent.childNodes) {
+      if (!isBlock(n)) {
+        if (n.nodeType === 1 && [...n.querySelectorAll('*')].some(isBlock)) { flush(); walk(n); continue; } // a span or <b> round whole paragraphs
+        if (n.nodeType === 1 || n.nodeType === 3) loose = (loose || '') + inline({ childNodes: [n] });
+        continue;
+      }
+      flush();
+      const tag = n.nodeName, st = styleOf(n), cls = n.getAttribute('class') || '';
+      const level = /^H[1-6]$/.test(tag) ? +tag[1] : n.getAttribute('role') === 'heading' ? +n.getAttribute('aria-level') || 2 : /MsoTitle/.test(cls) ? 1 : 0;
+      if (level) { const t = inline(n).replace(/\s+/g, ' ').trim(); if (t) push(`${'#'.repeat(Math.min(3, level))} ${t.replace(/^\*\*(.*)\*\*$/, '$1')}`); }
+      else if (tag === 'UL' || tag === 'OL') list(n, 0);
+      else if (tag === 'TABLE') table(n);
+      else if (tag === 'BLOCKQUOTE') { const t = htmlToMinutes(n.innerHTML); if (t) push(t.split('\n').map(l => `> ${l}`).join('\n')); }
+      else if (tag === 'PRE') push(n.textContent.replace(/\n+$/, ''));
+      else if (/mso-list/i.test(st) || /MsoListParagraph/.test(cls)) { // a Word list paragraph: the bullet is in a span of its own
+        const depth = Math.max(0, (+st.match(/level(\d+)/i)?.[1] || 1) - 1);
+        const mark = n.querySelector('[style*="mso-list"]')?.textContent.trim() || '';
+        push(`${'  '.repeat(depth)}${/^\(?\w{1,3}[.)]$/.test(mark) && /\d/.test(mark) ? '1.' : '-'} ${inline(n).replace(/\s+/g, ' ').trim()}`, true);
+      } else if ([...n.children].some(isBlock)) walk(n); // a wrapper round other blocks
+      else push(lineOf(inline(n)));
+    }
+    flush();
+  }
+  walk(doc.body);
+  return tidyMinutes(joinMdBlocks(blocks));
+}
+
+// An RTF document (a Copilot or Word export, or RTF on the clipboard): its paragraphs, bold and
+// italic, lists, tables and headings (by style name or outline level).
+function rtfToMinutes(rtf) {
+  const headingStyles = {};
+  for (const m of rtf.matchAll(/\\s(\d+)(?!\d)[^{}]*?\b(?:heading\s*(\d)|(title))\s*;/gi)) headingStyles[m[1]] = m[3] ? 1 : +m[2];
+  const SKIP = new Set(['fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'object', 'header', 'footer', 'headerl', 'headerr', 'footerl', 'footerr', 'listtable',
+    'listoverridetable', 'rsidtbl', 'generator', 'themedata', 'colorschememapping', 'latentstyles', 'datastore', 'xmlnstbl', 'mmathPr', 'fldinst', 'footnote',
+    'annotation', 'revtbl', 'filetbl', 'pgdsctbl', 'expandedcolortbl', 'shp', 'nonshppict', 'bkmkstart', 'bkmkend', 'protusertbl']);
+  const CHARS = { emdash: '—', endash: '–', bullet: '•', lquote: '‘', rquote: '’', ldblquote: '“', rdblquote: '”', tab: '\t', line: '\n', emspace: ' ', enspace: ' ' };
+  const cp1252 = new TextDecoder('windows-1252');
+  const blocks = [];
+  let g = { skip: false, marker: false, b: false, i: false, uc: 1 }; // the group's state
+  const stack = [];
+  let para = { style: 0, ilvl: 0, list: false, intbl: false, outline: -1 };
+  let runs = [], marker = '', cell = [], row = [], rows = [];
+  const add = (text) => {
+    if (g.skip) return;
+    if (g.marker) { marker += text; return; }
+    const last = runs.at(-1);
+    if (last && last.b === g.b && last.i === g.i) last.text += text; else runs.push({ text, b: g.b, i: g.i });
+  };
+  const runsText = () => runs.map(r => { let t = r.text; if (r.b) t = wrapMd(t, '**'); if (r.i) t = wrapMd(t, '*'); return t; }).join('');
+  const flushTable = () => { if (rows.length) blocks.push({ text: mdTableOf(rows) }); rows = []; };
+  const endPara = () => {
+    const text = runsText().replace(/[ \t]+$/gm, '');
+    runs = [];
+    if (para.intbl) { if (text.trim()) cell.push(text.trim()); marker = ''; return; }
+    flushTable();
+    const plain = text.trim(), level = headingStyles[para.style] || (para.outline >= 0 ? para.outline + 1 : 0);
+    if (plain && level) blocks.push({ text: `${'#'.repeat(Math.min(3, level))} ${plain.replace(/^\*\*(.*)\*\*$/, '$1')}` });
+    else if (plain && (para.list || marker.trim())) blocks.push({ text: `${'  '.repeat(para.ilvl)}${/\d/.test(marker) ? '1.' : '-'} ${plain.replace(/\n/g, ' ')}`, list: true });
+    else if (plain) blocks.push({ text: plain.split('\n').map(l => l.trim()).join('\n') });
+    marker = '';
+  };
+  let pendingSkip = 0; // characters still to pass over after a \u (its fallback for old readers)
+  const re = /\\([a-z]+)(-?\d+)? ?|\\'([0-9a-f]{2})|\\([^a-z])|([{}])|([\r\n]+)|([^\\{}\r\n]+)/gi;
+  let m, first = false; // first: the next control word is the group's first, and may name a destination
+  while ((m = re.exec(rtf))) {
+    const [, word, arg, hex, sym, brace, , text] = m;
+    if (brace === '{') { stack.push(g); g = { ...g }; first = true; continue; }
+    if (brace === '}') { g = stack.pop() || g; first = false; continue; }
+    const wasFirst = first;
+    first = false;
+    if (m[6]) continue; // line breaks in the file mean nothing
+    if (pendingSkip && (text || hex || sym)) {
+      if (text) { const n = Math.min(pendingSkip, text.length); pendingSkip -= n; if (text.length > n) add(text.slice(n)); } else pendingSkip--;
+      continue;
+    }
+    if (text) { add(text); continue; }
+    if (hex) { add(cp1252.decode(new Uint8Array([parseInt(hex, 16)]))); continue; }
+    if (sym) {
+      if (sym === '*') g.skip = true;
+      else if (sym === '~') add(' ');
+      else if (sym === '_') add('-');
+      else if (sym === '\n' || sym === '\r') endPara();
+      else if ('\\{}'.includes(sym)) add(sym);
+      continue;
+    }
+    const n = arg === undefined ? null : +arg;
+    if (g.marker && /^(pard|s|ls|ilvl|outlinelevel|intbl)$/.test(word)) continue; // Word repeats the paragraph's settings inside its bullet
+    if (SKIP.has(word)) { g.skip = true; continue; }
+    if (word === 'listtext' || word === 'pntext') { g.marker = true; para.list = true; continue; }
+    if (wasFirst && /^(pn|pnseclvl|pntxta|pntxtb)$/.test(word)) { g.skip = true; continue; }
+    switch (word) {
+      case 'par': case 'sect': case 'page': endPara(); break;
+      case 'pard': para = { style: 0, ilvl: 0, list: false, intbl: false, outline: -1 }; break;
+      case 's': para.style = n; break;
+      case 'ls': para.list = true; break;
+      case 'ilvl': para.ilvl = n || 0; break;
+      case 'outlinelevel': para.outline = n; break;
+      case 'intbl': para.intbl = true; break;
+      case 'cell': case 'nestcell': endPara(); row.push(cell.join(' ')); cell = []; break;
+      case 'row': case 'nestrow': if (row.length) rows.push(row); row = []; break;
+      case 'b': g.b = n !== 0; break;
+      case 'i': g.i = n !== 0; break;
+      case 'plain': g.b = g.i = false; break;
+      case 'uc': g.uc = n ?? 1; break;
+      case 'u': add(String.fromCharCode(n < 0 ? n + 65536 : n)); pendingSkip = g.uc; break;
+      default: if (CHARS[word]) add(CHARS[word]);
+    }
+  }
+  endPara();
+  flushTable();
+  return tidyMinutes(joinMdBlocks(blocks));
+}
+
+// Text from a file or the clipboard, as minutes: HTML and RTF converted, plain text tidied.
+const minutesFrom = (text, kind = '') => (kind === 'rtf' || /^\s*\{\\rtf/.test(text) ? rtfToMinutes(text)
+  : kind === 'html' ? htmlToMinutes(text) : tidyMinutes(text));
+// Plain text that is Markdown already (an LLM's, or copied from these minutes) is pasted as it is.
+const looksLikeMd = (s) => /^(#{1,6}\s|\s*\|.*\|\s*$|\s*[-*+]\s|\s*\d+[.)]\s)|\*\*\S/m.test(s);
+
+function insertMinutes(t, text) {
+  const ed = t._ed;
+  if (ed && !ed.wrap.classList.contains('source')) { // the formatted editor
+    if (!ed.body.contains(document.activeElement) && document.activeElement !== ed.body) focusText(t);
+    document.execCommand('insertHTML', false, mdToHtml(text));
+    return edCommit(ed);
+  }
+  t.focus();
+  if (!document.execCommand('insertText', false, text)) t.setRangeText(text, t.selectionStart, t.selectionEnd, 'end'); // execCommand keeps undo working
+  t.dispatchEvent(new Event('input', { bubbles: true }));
+}
+// The clipboard as minutes, or null to let it paste as it is. Rich text (headings, lists, tables)
+// wins over the plain copy, unless the plain copy is Markdown already and the rich one has no
+// structure; a conversion that loses the lines (all on one) gives way to the plain text.
+function clipboardMinutes(cd) {
+  const plain = cd.getData('text/plain'), html = cd.getData('text/html'), rtf = cd.getData('text/rtf');
+  if (/^\s*\{\\rtf/.test(plain)) return rtfToMinutes(plain);
+  if (!/\n|\u2028|\u2029|\v/.test(plain.trim()) && !/<(table|ul|ol|h[1-6])\b/i.test(html)) return null; // a word or a line
+  const structured = /<(h[1-6]|ul|ol|li|table)\b|class="?Mso/i.test(html);
+  if (looksLikeMd(plain) && !structured) return tidyMinutes(plain);
+  let md = html && (structured || /<(p|div|br|b|strong)\b/i.test(html)) ? htmlToMinutes(html) : rtf ? rtfToMinutes(rtf) : '';
+  const lines = (x) => x.split('\n').filter(l => l.trim()).length;
+  const fallback = tidyMinutes(plain);
+  if (!md || lines(md) < lines(fallback) / 2) md = fallback;
+  return md || null;
+}
+function pasteMinutes(e) {
+  const md = clipboardMinutes(e.clipboardData);
+  if (!md) return;
+  e.preventDefault();
+  insertMinutes(e.target, md);
+}
+async function readMinutesFile(t, file) {
+  const err = document.getElementById('mt-error');
+  err.textContent = '';
+  const ext = (file.name.match(/\.(\w+)$/)?.[1] || '').toLowerCase();
+  if (!['rtf', 'txt', 'md', 'markdown', 'html', 'htm'].includes(ext)) return (err.textContent = `${file.name} can't be read here. Open it, copy the minutes and paste them, or save it as RTF or plain text.`);
+  const md = minutesFrom(await file.text(), ext === 'rtf' ? 'rtf' : /^html?$/.test(ext) ? 'html' : '');
+  if (!md) return (err.textContent = `There's no text in ${file.name}.`);
+  insertMinutes(t, t.value.trim() && t.selectionStart !== t.selectionEnd ? md : (t.value.trim() ? '\n\n' : '') + md);
 }
 const meetingsToCSV = (list) => [MEETING_COLUMNS.join(','), ...list.map(m => MEETING_COLUMNS.map(k => csvEscape(m[k])).join(','))].join('\n') + '\n';
 const DONE_WORDS = /^(done|complete|completed|closed|finished|yes|y|x|✓)$/i;
 function rowsToActions(rows) {
   const ids = new Set(state.workspaces.map(p => p.id));
   return readRecords(rows, ACTION_COLUMNS).map(a => ({
-    ...a, due: fileDate(a.due), status: DONE_WORDS.test(a.status) ? 'Done' : 'Open',
+    ...a, due: fileDate(a.due), status: DONE_WORDS.test(a.status) ? 'Done' : 'Open', description: a.description.replace(/\r\n?/g, '\n'),
     links: [...new Set(a.links.split(';').map(raidLink).filter(Boolean))],
   })).filter(a => ids.has(a.workspace_id) && a.text);
 }
@@ -10220,14 +10956,14 @@ const ACTION_MARK = /^\**\s*(action|ap|todo|to\s*do|action\s*(item|point))\s*\**
 const CHECKBOX = /^\[([ xX])\]\s*/;
 
 function actionCandidates(minutes, meetingDate, people = []) {
-  const lines = String(minutes ?? '').replace(/\r\n?/g, '\n').split('\n');
+  const lines = tidyMinutes(minutes).replace(/\\([\\`*_~[\]#>+\-.)•|])/g, '$1').split('\n'); // the editor's escapes: \[ \] is a checkbox all the same
   const found = [];
   let section = 0;  // the level of the actions heading we're under (a bold or "Actions:" line counts as 7); 0 outside one
   let table = null; // the columns of the table being read: { text, owner, due }
   let groupOwner = ''; // a name on a bullet of its own, owning the bullets indented under it
   for (const raw of lines) {
     const line = raw.trim();
-    if (!line) { table = null; continue; }
+    if (!line) { if (table && section) section = 0; table = null; continue; }
     const h = line.match(/^(#{1,6})\s+(.*?)\s*#*$/) || line.match(/^(?:\*\*|__)(.+?)(?:\*\*|__):?$/) || line.match(/^([A-Za-z][\w &/-]{1,40}):$/);
     if (h) {
       const level = h[2] !== undefined ? h[1].length : 7, text = (h[2] !== undefined ? h[2] : h[1]).replace(/[*_`]/g, '').trim();
@@ -10253,6 +10989,7 @@ function actionCandidates(minutes, meetingDate, people = []) {
       if (cell(table.text)) found.push({ raw: cell(table.text), owner: cell(table.owner), dueText: cell(table.due) });
       continue;
     }
+    if (table && section) section = 0; // an actions table is the section: what follows it is something else
     table = null;
     const bullet = line.match(/^(?:[-*+•]|\d+[.)])\s+(.*)$/);
     const body = bullet ? bullet[1] : line;
@@ -10268,7 +11005,7 @@ function actionCandidates(minutes, meetingDate, people = []) {
     // A bullet that is only a name, with the actions indented under it: "- Jane" / "  - Send the plan".
     if (bullet && !indented && !flagged) {
       const name = plainText(body).replace(/:$/, '').trim();
-      groupOwner = name.split(/\s+/).length <= 4 && !DATE_PHRASE.test(name) && plausibleName(name, people) || '';
+      groupOwner = name.split(/\s+/).length <= 4 && !/:/.test(name) && !DATE_PHRASE.test(name) && plausibleName(name, people) || '';
       if (groupOwner) continue;
     }
     found.push({ raw: body, open: true, owner: indented && groupOwner || '' });
@@ -10385,6 +11122,13 @@ function readActionLine(f, meetingDate, people) {
   let due = f.dueText ? readDatePhrase(f.dueText, base) || (f.dueText.match(DATE_PHRASE) && readDatePhrase(f.dueText.match(DATE_PHRASE)[1], base)) || fileDate(f.dueText) : '';
   if (!due) ({ text, due } = takeDue(text, base));
   let owner = f.owner ? plainText(f.owner).trim() : '';
+  // Copilot leads each task with a bold topic: "**Send plan:** Priya to send the plan by Friday".
+  // The owner is in what follows; only when nothing there names anyone is the bold word the owner.
+  const label = !owner && f.raw.trim().match(/^(?:\*\*|__)[^*_]{1,60}?(?:\*\*|__)?:\s*(?:\*\*|__)?\s+/);
+  if (label && text.startsWith(plainText(label[0]).trim())) {
+    const r = takeOwner(text.slice(plainText(label[0]).trim().length).trim(), people);
+    if (r.owner) ({ text, owner } = r);
+  }
   if (!owner) ({ text, owner } = takeOwner(text, people));
   text = text.replace(/\s+/g, ' ').replace(/\(\s*\)|\[\s*\]/g, '').replace(/^[\s\-–—:;,.]+|[\s\-–—:;,(]+$/g, '').trim();
   if (text && /^[a-z]/.test(text)) text = text[0].toUpperCase() + text.slice(1);
@@ -10410,7 +11154,7 @@ function setMeetingsMode(mode) {
   saveAppPrefs({ meetingsMode: mtMode });
 }
 const searchWords = (q) => q.toLowerCase().split(/\s+/).filter(Boolean);
-const meetingHay = (m) => [m.title, seriesName(m.series_id), m.attendees, m.date, m.date && fmtNice(m.date), m.link, mdToText(m.minutes), ...actionsFor(m.id).flatMap(a => [a.ref, a.text, a.owner])].join(' ').toLowerCase();
+const meetingHay = (m) => [m.title, seriesName(m.series_id), m.attendees, m.date, m.date && fmtNice(m.date), m.link, mdToText(m.minutes), ...actionsFor(m.id).flatMap(a => [a.ref, a.text, a.description, a.owner])].join(' ').toLowerCase();
 function meetingMatches(m, words) {
   if (mtFilter.series && m.series_id !== mtFilter.series) return false;
   if (!words.length) return true;
@@ -10437,6 +11181,7 @@ function renderMeetings() {
   seg.hidden = !open.length;
   seg.classList.toggle('seg-count-late', open.some(actionOverdue));
   if (actions) renderActions(); else renderMeetingList();
+  renderSelBar(actions ? SEL.mt : SEL.act); // the other tab's bar is put away
   updateMeetingsBadge();
 }
 
@@ -10486,33 +11231,36 @@ function renderMeetingList() {
   if (!mtRows.some(m => m.id === mtSelId)) mtSelId = mtRows[0]?.id || null; // the newest is open unless one was chosen
   // Series whose latest meeting has no minutes yet, with a way to record them.
   const due = series.filter(x => (!mtFilter.series || x.id === mtFilter.series) && seriesDue(x));
-  const rows = due.map(x => `<tr class="mt-due"><td colspan="3"><div><span class="mt-due-what"><b>${escAttr(x.name)}</b> · ${fmtNice(seriesDue(x))} — no minutes yet</span>
+  const rows = due.map(x => `<tr class="mt-due"><td colspan="4"><div><span class="mt-due-what"><b>${escAttr(x.name)}</b> · ${fmtNice(seriesDue(x))} — no minutes yet</span>
       <button type="button" class="btn btn-sm" data-mt-record="${x.id}">Record minutes</button></div></td></tr>`);
   let month = null;
   for (const m of mtRows) {
     const mo = m.date ? m.date.slice(0, 7) : '';
     if (mo !== month) {
       month = mo;
-      rows.push(`<tr class="mt-month"><td colspan="3">${mo ? parseDate(m.date).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'No date'}</td></tr>`);
+      rows.push(`<tr class="mt-month"><td colspan="4">${mo ? parseDate(m.date).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'No date'}</td></tr>`);
     }
     const acts = actionsFor(m.id), openN = acts.filter(a => !isActionDone(a)).length, late = acts.some(actionOverdue);
     const snippet = words.length ? searchSnippet(mdToText(m.minutes), words) : '';
     const d = m.date && parseDate(m.date);
-    rows.push(`<tr data-mid="${m.id}" class="mt-row${m.id === mtSelId ? ' selected' : ''}" tabindex="0">
+    const ticked = SEL.mt.ids.has(m.id);
+    rows.push(`<tr data-mid="${m.id}" class="mt-row${m.id === mtSelId ? ' selected' : ''}${ticked ? ' ticked' : ''}" tabindex="0">
+      <td class="col-sel"><input type="checkbox" data-mt-sel="${m.id}" ${ticked ? 'checked' : ''} aria-label="Select ${escAttr(m.title)}" /></td>
       <td class="mt-date">${d ? `<b>${d.getDate()}</b><small>${d.toLocaleDateString('en-GB', { weekday: 'short' })}</small>` : '<span class="muted">—</span>'}</td>
       <td class="mt-title"><b>${escAttr(m.title) || '<span class="muted">(untitled)</span>'}</b>${seriesName(m.series_id) ? `<span class="mt-series">${escAttr(seriesName(m.series_id))}</span>` : ''}
         ${m.attendees ? `<div class="mt-sub">${escAttr(m.attendees)}</div>` : ''}${snippet ? `<div class="mt-snip">${snippet}</div>` : ''}</td>
       <td class="mt-acts">${acts.length ? `<span class="mt-act-n${openN ? (late ? ' late' : ' open') : ''}" title="${count(openN, 'open action', 'open actions')} of ${acts.length}">${openN}<small>/${acts.length}</small></span>` : ''}</td></tr>`);
   }
   document.getElementById('mt-body').innerHTML = rows.join('')
-    || `<tr><td colspan="3" class="grid-empty">${all.length ? 'Nothing matches.' : 'No meetings yet. <b>+ New meeting</b> records one with its minutes.'}</td></tr>`;
+    || `<tr><td colspan="4" class="grid-empty">${all.length ? 'Nothing matches.' : 'No meetings yet. <b>+ New meeting</b> records one with its minutes.'}</td></tr>`;
   document.getElementById('mt-count').textContent = count(mtRows.length, 'meeting', 'meetings');
+  pruneSel(SEL.mt, mtRows.map(m => m.id));
   renderMeetingPane(words);
 }
 
 const actionLine = (a) => `<li class="mt-act${isActionDone(a) ? ' done' : ''}${actionOverdue(a) ? ' late' : ''}">
     <label class="mt-act-tick" title="${isActionDone(a) ? 'Done — untick to reopen' : 'Tick when done'}"><input type="checkbox" data-act-done="${a.id}" ${isActionDone(a) ? 'checked' : ''} /></label>
-    <button type="button" class="mt-act-text" data-act-edit="${a.id}" title="Edit this action">${a.ref ? `<b>${escAttr(a.ref)}</b> ` : ''}${escAttr(a.text)}</button>
+    <button type="button" class="mt-act-text" data-act-edit="${a.id}" title="Edit this action">${a.ref ? `<b>${escAttr(a.ref)}</b> ` : ''}${escAttr(a.text)}${a.description ? `<span class="mt-act-desc">${escAttr(a.description)}</span>` : ''}</button>
     <span class="mt-act-meta">${escAttr(a.owner) || '<i>no owner</i>'}${a.due ? ` · <span class="mt-due">${actionOverdue(a) ? 'overdue' : 'due'} ${fmtShort(a.due)}</span>` : ''}</span></li>`;
 
 function renderMeetingPane(words = []) {
@@ -10594,8 +11342,9 @@ function updateMeetingsBadge() {
 // A spreadsheet-style table like Items and the Reports list: sort, filter, move and size the
 // columns from their headings (see makeTable). It starts filtered to open actions.
 const ACT_COLS = [
+  { key: 'sel', label: '', w: 36, fixed: true, head: () => '<input type="checkbox" id="act-sel-all" title="Select all shown" />' },
   { key: 'ref', label: 'Ref', w: 84 },
-  { key: 'text', label: 'Action', w: 380 },
+  { key: 'text', label: 'Title', w: 380 },
   { key: 'owner', label: 'Owner', w: 140, blank: '(No owner)' },
   { key: 'due', label: 'Due', w: 110, kind: 'date', show: fmtNice, blank: '(No date)' },
   { key: 'meeting_id', label: 'From', w: 210, vals: (a) => actionSource(a), sort: (a) => meetingById(a.meeting_id)?.date || '', title: 'The meeting the action was taken from' },
@@ -10620,8 +11369,9 @@ function actionDueNote(a) {
   return d <= 7 ? `<small class="soon">In ${daysText(d)}</small>` : '';
 }
 const ACT_CELLS = {
+  sel: (a) => `<td class="col-sel"><input type="checkbox" data-act-sel="${a.id}" ${SEL.act.ids.has(a.id) ? 'checked' : ''} aria-label="Select ${escAttr(a.ref || a.text)}" /></td>`,
   ref: (a) => `<td class="act-ref">${a.ref ? escAttr(a.ref) : dash}</td>`,
-  text: (a) => `<td class="act-text">${escAttr(a.text)}${a.links.length ? `<div class="act-links">${a.links.map(l => linkChip(l)).join('')}</div>` : ''}</td>`,
+  text: (a) => `<td class="act-text">${escAttr(a.text)}${a.description ? `<div class="act-desc">${escAttr(a.description)}</div>` : ''}${a.links.length ? `<div class="act-links">${a.links.map(l => linkChip(l)).join('')}</div>` : ''}</td>`,
   owner: (a) => `<td>${ownerChip(a.owner)}</td>`,
   due: (a) => `<td class="act-due">${a.due ? `<span class="${actionOverdue(a) ? 'late' : ''}" ${actionOverdue(a) ? 'title="Overdue"' : ''}>${fmtShort(a.due)}</span>${actionDueNote(a)}` : dash}</td>`,
   meeting_id: (a) => { const m = meetingById(a.meeting_id); return `<td class="act-from">${m ? `<button type="button" class="link-btn" data-mt-open="${m.id}" title="Read the minutes">${escAttr(m.title) || '(untitled)'}</button>${m.date ? `<small>${fmtShort(m.date)}</small>` : ''}` : `<span class="muted">${a.meeting_id ? 'A deleted meeting' : 'Added by hand'}</span>`}</td>`; },
@@ -10630,7 +11380,7 @@ const ACT_CELLS = {
 };
 function actionMatches(a, words) {
   if (!words.length) return true;
-  const hay = [a.ref, a.text, a.owner, a.status, a.due, actionSource(a), ...a.links.map(l => linkInfo(l).label)].join(' ').toLowerCase();
+  const hay = [a.ref, a.text, a.description, a.owner, a.status, a.due, actionSource(a), ...a.links.map(l => linkInfo(l).label)].join(' ').toLowerCase();
   return words.every(w => hay.includes(w));
 }
 function renderActions() {
@@ -10643,12 +11393,13 @@ function renderActions() {
   const valueOf = (a, key) => { const c = ACT_COLS.find(x => x.key === key); return c.sort ? c.sort(a) : a[key]; };
   actRows = sortRows(actTable, all.filter(a => passesFilters(actTable, a) && actionMatches(a, words)), valueOf, actionOrder);
   const cols = actTable.cols();
-  document.getElementById('act-body').innerHTML = actRows.map(a => `<tr data-act="${a.id}" class="act-row${isActionDone(a) ? ' done' : actionOverdue(a) ? ' late' : ''}">${cols.map(c => ACT_CELLS[c.key](a)).join('')}</tr>`).join('')
+  document.getElementById('act-body').innerHTML = actRows.map(a => `<tr data-act="${a.id}" class="act-row${isActionDone(a) ? ' done' : actionOverdue(a) ? ' late' : ''}${SEL.act.ids.has(a.id) ? ' ticked' : ''}">${cols.map(c => ACT_CELLS[c.key](a)).join('')}</tr>`).join('')
     || `<tr><td colspan="${cols.length}" class="grid-empty">${all.length ? 'No actions match the filters.' : 'No actions yet. They come from a meeting’s minutes (<b>Extract actions</b> on the Minutes tab) or <b>+ Add action</b>.'}</td></tr>`;
   const filtered = Object.keys(actTable.filters).length > 0 || !!words.length;
   const late = actRows.filter(actionOverdue).length;
   document.getElementById('mt-count').textContent = `${filtered ? `Showing ${actRows.length} of ${all.length}` : count(actRows.length, 'action', 'actions')}${late ? ` · ${late} overdue` : ''}`;
   document.getElementById('act-clear').hidden = !filtered;
+  pruneSel(SEL.act, actRows.map(a => a.id));
 }
 
 async function setActionDone(id, done) {
@@ -10660,26 +11411,232 @@ async function setActionDone(id, done) {
   await saveActions(`Action ${a.ref} ${done ? 'done' : 'reopened'}`);
 }
 
-function downloadMeetingsCSV() {
-  renderMeetings();
+// The two downloads read back in through Import with their links intact: each meeting carries its
+// Meeting ID, and each action the Meeting ID of the meeting it came from, so an action finds its
+// meeting again even when two meetings share a title and date, or the meetings are given new ids
+// in another workspace. A meeting's series goes by name with its cadence and first date, so it can
+// be set up again; an action's links go by the item's ref and title, or "Stream: name".
+const MEETINGS_CSV_HEAD = ['Meeting ID', 'Date', 'Title', 'Series', 'Series cadence', 'Series start', 'Attendees', 'Link', 'Minutes', 'Open actions', 'Actions'];
+const ACTIONS_CSV_HEAD = ['Ref', 'Title', 'Description', 'Owner', 'Due', 'Status', 'Done on', 'Meeting ID', 'Meeting', 'Meeting date', 'Linked to'];
+// An action as a line of a meeting's Actions cell: "A3 Send the plan (Jane) due 2026-11-20 — Open".
+const actionCellLine = (a) => `${a.ref} ${a.text}${a.owner ? ` (${a.owner})` : ''}${a.due ? ` due ${a.due}` : ''} — ${a.status}`;
+const meetingCSVRow = (m) => {
+  const acts = actionsFor(m.id), x = seriesById(m.series_id);
+  return [m.id, m.date, m.title, x?.name || '', x?.cadence || '', x?.start || '', m.attendees, m.link, m.minutes, acts.filter(a => !isActionDone(a)).length, acts.map(actionCellLine).join('\n')];
+};
+const actionCSVRow = (a) => {
+  const m = meetingById(a.meeting_id);
+  return [a.ref, a.text, a.description, a.owner, a.due, a.status, a.done_at.slice(0, 10), a.meeting_id, m?.title || '', m?.date || '', a.links.map(l => linkInfo(l).title).join('; ')];
+};
+function downloadCSVFile(name, head, lines) {
   const p = currentWorkspace();
   const slug = (p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace';
-  let head, lines, name;
-  if (mtMode === 'actions') {
-    head = ['Ref', 'Action', 'Owner', 'Due', 'Status', 'Done on', 'Meeting', 'Meeting date', 'Linked to'];
-    lines = actRows.map(a => [a.ref, a.text, a.owner, a.due, a.status, a.done_at.slice(0, 10), meetingById(a.meeting_id)?.title || '', meetingById(a.meeting_id)?.date || '', a.links.map(l => linkInfo(l).title).join('; ')]);
-    name = 'meeting-actions';
-  } else {
-    head = ['Date', 'Title', 'Series', 'Attendees', 'Link', 'Minutes', 'Open actions', 'Actions'];
-    lines = mtRows.map(m => { const acts = actionsFor(m.id); return [m.date, m.title, seriesName(m.series_id), m.attendees, m.link, m.minutes, acts.filter(a => !isActionDone(a)).length, acts.map(a => `${a.ref} ${a.text}${a.owner ? ` (${a.owner})` : ''}${a.due ? ` due ${a.due}` : ''} — ${a.status}`).join('\n')]; });
-    name = 'meetings';
-  }
   const blob = new Blob(['﻿' + [head, ...lines].map(r => r.map(csvEscape).join(',')).join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.download = `${slug}-${name}-${fmtISO(new Date())}.csv`;
   a.href = URL.createObjectURL(blob);
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+// What's shown, filters applied.
+function downloadMeetingsCSV() {
+  renderMeetings();
+  if (mtMode === 'actions') downloadCSVFile('meeting-actions', ACTIONS_CSV_HEAD, actRows.map(actionCSVRow));
+  else downloadCSVFile('meetings', MEETINGS_CSV_HEAD, mtRows.map(meetingCSVRow));
+}
+// Every meeting and every action of the workspace, whatever the filters: the pair to import elsewhere.
+function downloadAllMeetingsCSV() {
+  downloadCSVFile('meetings', MEETINGS_CSV_HEAD, meetingsOf().map(meetingCSVRow));
+  setTimeout(() => downloadCSVFile('meeting-actions', ACTIONS_CSV_HEAD, actionsOf().sort(cmpRef).map(actionCSVRow)), 300); // two at once can be taken for one
+  flashStatus(`Downloaded ${count(meetingsOf().length, 'meeting', 'meetings')} and ${count(actionsOf().length, 'action', 'actions')}: import both files together to bring them back`, true);
+}
+
+/* ---- ticking meetings and actions: bulk changes ---- */
+// Tick meetings in the list, or actions in the table (shift-click for a range), to change them all
+// at once or delete them, as on Items. Only rows on screen stay ticked, so a bulk change never
+// reaches something filtered out of view.
+const SEL = {
+  mt: { ids: new Set(), anchor: null, field: 'series_id', body: 'mt-body', attr: 'mtSel', all: 'mt-sel-all', bar: 'mt-bulk', one: 'meeting', many: 'meetings' },
+  act: { ids: new Set(), anchor: null, field: 'status', body: 'act-body', attr: 'actSel', all: 'act-sel-all', bar: 'act-bulk', one: 'action', many: 'actions' },
+};
+const MT_BULK_FIELDS = [['series_id', 'Series'], ['attendees', 'Attendees'], ['shift', 'Date — move by'], ['close', 'Their open actions']];
+const ACT_BULK_FIELDS = [['status', 'Status'], ['owner', 'Owner'], ['due', 'Due date'], ['shift', 'Due date — move by'], ['meeting_id', 'Meeting']];
+const selBoxes = (s) => [...document.querySelectorAll(`#${s.body} [data-${s.attr === 'mtSel' ? 'mt-sel' : 'act-sel'}]`)];
+const selBoxId = (s, box) => box.dataset[s.attr];
+
+function tickRow(s, box, range) {
+  const boxes = selBoxes(s);
+  const from = boxes.findIndex(b => selBoxId(s, b) === s.anchor), to = boxes.indexOf(box);
+  for (const b of range && from >= 0 ? boxes.slice(Math.min(from, to), Math.max(from, to) + 1) : [box]) setTicked(s, b, box.checked);
+  s.anchor = selBoxId(s, box);
+  renderSelBar(s);
+}
+function setTicked(s, box, on) {
+  box.checked = on;
+  if (on) s.ids.add(selBoxId(s, box)); else s.ids.delete(selBoxId(s, box));
+  box.closest('tr').classList.toggle('ticked', on);
+}
+function tickAllShown(s, on) {
+  selBoxes(s).forEach(b => setTicked(s, b, on));
+  s.anchor = null;
+  renderSelBar(s);
+}
+// After the rows are drawn: forget what's no longer shown.
+function pruneSel(s, shownIds) {
+  const shown = new Set(shownIds);
+  for (const id of s.ids) if (!shown.has(id)) s.ids.delete(id);
+  renderSelBar(s);
+}
+
+function selValueControl(s) {
+  const k = s.field;
+  if (s === SEL.mt) {
+    switch (k) {
+      case 'series_id': return `<span>to</span><select id="mt-bulk-input"><option value="">One-off meeting</option>${seriesOf().map(x => `<option value="${x.id}">${escAttr(x.name)}</option>`).join('')}</select>`;
+      case 'attendees': return '<span>to</span><input id="mt-bulk-input" placeholder="Leave blank to clear" />';
+      case 'shift': return '<input id="mt-bulk-input" type="number" step="1" value="7" /><span>days (negative for earlier)</span>';
+      case 'close': return '<span>to Done</span>';
+    }
+  }
+  switch (k) {
+    case 'status': return `<span>to</span><select id="act-bulk-input">${optionList(ACTION_STATUSES, 'Done')}</select>`;
+    case 'owner': return '<span>to</span><input id="act-bulk-input" list="people-list" placeholder="Leave blank to clear" />';
+    case 'due': return '<span>to</span><input id="act-bulk-input" type="date" /><span>(blank clears it)</span>';
+    case 'shift': return '<input id="act-bulk-input" type="number" step="1" value="7" /><span>days (negative for earlier)</span>';
+    case 'meeting_id': return `<span>to</span><select id="act-bulk-input"><option value="">— none (added by hand) —</option>${meetingsOf().map(m => `<option value="${m.id}">${escAttr(`${m.date ? `${fmtShort(m.date)} · ` : ''}${m.title || '(untitled)'}`)}</option>`).join('')}</select>`;
+  }
+}
+
+function renderSelBar(s) {
+  const n = s.ids.size, shown = selBoxes(s).length;
+  const all = document.getElementById(s.all);
+  if (all) {
+    all.checked = n > 0 && n === shown;
+    all.indeterminate = n > 0 && n < shown;
+  }
+  const bar = document.getElementById(s.bar);
+  const wasHidden = bar.hidden;
+  bar.hidden = !n || (s === SEL.mt) === (mtMode === 'actions');
+  if (bar.hidden) return;
+  document.getElementById(`${s.bar}-count`).textContent = `${count(n, s.one, s.many)} selected`;
+  document.getElementById(`${s.bar}-field`).innerHTML = (s === SEL.mt ? MT_BULK_FIELDS : ACT_BULK_FIELDS)
+    .map(([k, label]) => `<option value="${k}" ${k === s.field ? 'selected' : ''}>${label}</option>`).join('');
+  if (wasHidden) document.getElementById(`${s.bar}-value`).innerHTML = selValueControl(s);
+  if (wasHidden) refreshDatalists();
+}
+
+async function applyMeetingBulk() {
+  const s = SEL.mt;
+  const list = meetingsOf().filter(m => s.ids.has(m.id));
+  if (!list.length) return;
+  const v = document.getElementById('mt-bulk-input')?.value.trim() ?? '';
+  const snap = snapshotData();
+  const now = new Date().toISOString();
+  const what = count(list.length, 'meeting', 'meetings');
+  if (s.field === 'close') {
+    const open = state.actions.filter(a => s.ids.has(a.meeting_id) && !isActionDone(a));
+    if (!open.length) return flashStatus(`The actions from the ${list.length === 1 ? 'meeting' : 'meetings'} selected are all done already`, false);
+    for (const a of open) Object.assign(a, { status: 'Done', done_at: now, updated: now });
+    const label = `${count(open.length, 'action', 'actions')} from ${what} marked done`;
+    rerenderCurrentView();
+    offerUndo(snap, label);
+    return saveActions(label);
+  }
+  const n = Math.round(+v);
+  if (s.field === 'shift' && !n) return flashStatus('Enter a number of days to move by, e.g. 7 or -3', false);
+  let done = 0;
+  for (const m of list) {
+    const was = m[s.field === 'shift' ? 'date' : s.field];
+    if (s.field === 'shift') { if (m.date) m.date = addDays(m.date, n); } else m[s.field] = v;
+    if (m[s.field === 'shift' ? 'date' : s.field] !== was) { m.updated = now; done++; }
+  }
+  if (!done) return flashStatus('Nothing to change', false);
+  const label = s.field === 'shift' ? `Moved ${count(done, 'meeting', 'meetings')} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}`
+    : `${MT_BULK_FIELDS.find(([k]) => k === s.field)[1]} updated on ${count(done, 'meeting', 'meetings')}`;
+  rerenderCurrentView();
+  offerUndo(snap, label);
+  await saveMeetings(label);
+}
+
+async function deleteSelectedMeetings() {
+  const s = SEL.mt;
+  const list = meetingsOf().filter(m => s.ids.has(m.id));
+  if (!list.length) return;
+  const withActs = document.getElementById('mt-bulk-with-acts').checked;
+  const gone = withActs ? state.actions.filter(a => s.ids.has(a.meeting_id)) : [];
+  const snap = snapshotData();
+  state.meetings = state.meetings.filter(m => !s.ids.has(m.id));
+  if (gone.length) state.actions = state.actions.filter(a => !gone.includes(a));
+  if (s.ids.has(mtSelId)) mtSelId = null;
+  s.ids.clear();
+  const label = `Deleted ${count(list.length, 'meeting', 'meetings')}${gone.length ? ` and ${count(gone.length, 'action', 'actions')}` : ''}`;
+  rerenderCurrentView();
+  offerUndo(snap, label);
+  await Promise.all([saveMeetings(label), gone.length && saveActions(label)]);
+}
+
+async function applyActionBulk() {
+  const s = SEL.act;
+  const list = actionsOf().filter(a => s.ids.has(a.id));
+  if (!list.length) return;
+  const v = document.getElementById('act-bulk-input')?.value.trim() ?? '';
+  if (s.field === 'due' && v && !parseDate(v)) return flashStatus('That isn’t a date', false);
+  const n = Math.round(+v);
+  if (s.field === 'shift' && !n) return flashStatus('Enter a number of days to move by, e.g. 7 or -3', false);
+  const snap = snapshotData();
+  const now = new Date().toISOString();
+  let done = 0;
+  for (const a of list) {
+    const was = JSON.stringify(a);
+    if (s.field === 'shift') { if (a.due) a.due = addDays(a.due, n); }
+    else if (s.field === 'status') { if (a.status !== v) Object.assign(a, { status: v, done_at: v === 'Done' ? now : '' }); }
+    else a[s.field] = v;
+    if (JSON.stringify(a) !== was) { a.updated = now; done++; }
+  }
+  if (!done) return flashStatus(s.field === 'shift' ? 'None of them has a due date to move' : 'Nothing to change', false);
+  const label = s.field === 'shift' ? `Moved the due date of ${count(done, 'action', 'actions')} ${Math.abs(n)} day${Math.abs(n) > 1 ? 's' : ''} ${n > 0 ? 'later' : 'earlier'}`
+    : s.field === 'status' ? `${count(done, 'action', 'actions')} ${v === 'Done' ? 'marked done' : 'reopened'}`
+    : `${ACT_BULK_FIELDS.find(([k]) => k === s.field)[1]} updated on ${count(done, 'action', 'actions')}`;
+  rerenderCurrentView();
+  offerUndo(snap, label);
+  await saveActions(label);
+}
+
+async function deleteSelectedActions() {
+  const s = SEL.act;
+  const list = actionsOf().filter(a => s.ids.has(a.id));
+  if (!list.length) return;
+  const snap = snapshotData();
+  state.actions = state.actions.filter(a => !s.ids.has(a.id));
+  s.ids.clear();
+  const label = `Deleted ${count(list.length, 'action', 'actions')}`;
+  rerenderCurrentView();
+  offerUndo(snap, label);
+  await saveActions(label);
+}
+
+function wireSelBars() {
+  for (const s of Object.values(SEL)) {
+    const bar = s.bar;
+    document.getElementById(`${bar}-field`).onchange = (e) => {
+      s.field = e.target.value;
+      document.getElementById(`${bar}-value`).innerHTML = selValueControl(s);
+    };
+    document.getElementById(`${bar}-value`).addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById(`${bar}-apply`).click(); });
+    document.getElementById(`${bar}-clear`).onclick = () => tickAllShown(s, false);
+    // Ticking a row never opens it; shift-click ticks the range from the last one ticked.
+    document.getElementById(s.body).addEventListener('click', (e) => {
+      const box = e.target.closest(`[data-${s === SEL.mt ? 'mt-sel' : 'act-sel'}]`);
+      if (box) { e.stopPropagation(); tickRow(s, box, e.shiftKey); }
+      else if (e.target.closest('td.col-sel')) e.stopPropagation(); // a near miss on the box
+    }, true);
+  }
+  document.getElementById('mt-sel-all').onchange = (e) => tickAllShown(SEL.mt, e.target.checked);
+  document.getElementById('actions-table').querySelector('thead').addEventListener('change', (e) => { if (e.target.id === 'act-sel-all') tickAllShown(SEL.act, e.target.checked); });
+  document.getElementById('mt-bulk-apply').onclick = applyMeetingBulk;
+  document.getElementById('mt-bulk-delete').onclick = deleteSelectedMeetings;
+  document.getElementById('act-bulk-apply').onclick = applyActionBulk;
+  document.getElementById('act-bulk-delete').onclick = deleteSelectedActions;
 }
 
 /* ---- the meeting dialog ---- */
@@ -10696,6 +11653,7 @@ function openMeetingDialog(m, preset = {}) {
   const v = m || { title: '', date: todayISO(), series_id: preset.series_id || '', attendees: '', link: '', minutes: '' };
   fillSeriesSelect(f.series_id, v.series_id);
   for (const k of MT_FIELDS) if (k !== 'series_id') f[k].value = v[k] ?? '';
+  edLoad(f.minutes);
   if (!m && v.series_id) takeSeries(f, seriesById(v.series_id));
   document.getElementById('mt-delete').hidden = !m;
   document.getElementById('mt-error').textContent = '';
@@ -10710,6 +11668,7 @@ async function submitMeeting(e) {
   const f = document.getElementById('meeting-form').elements;
   const err = document.getElementById('mt-error');
   const v = Object.fromEntries(MT_FIELDS.map(k => [k, f[k].value.replace(/\r\n?/g, '\n').trim()]));
+  v.minutes = tidyMinutes(v.minutes);
   if (!v.title) return (err.textContent = 'Give the meeting a title.');
   if (v.date && !parseDate(v.date)) return (err.textContent = 'The date isn’t a date.');
   if (v.series_id === 'new') return (err.textContent = 'Set up the series first, or choose One-off.');
@@ -10885,7 +11844,7 @@ async function submitExtract(e) {
   for (const r of rows) {
     const ref = nextActionRef(m.workspace_id, taken);
     taken.push(ref);
-    state.actions.push({ id: nextActionId(), workspace_id: m.workspace_id, meeting_id: m.id, ref, text: r.text.trim(), owner: r.owner.trim(), due: r.due, status: r.done ? 'Done' : 'Open', links: [], done_at: r.done ? now : '', created: now, updated: now });
+    state.actions.push({ id: nextActionId(), workspace_id: m.workspace_id, meeting_id: m.id, ref, text: r.text.trim(), description: '', owner: r.owner.trim(), due: r.due, status: r.done ? 'Done' : 'Open', links: [], done_at: r.done ? now : '', created: now, updated: now });
   }
   document.getElementById('extract-dialog').close();
   rerenderCurrentView();
@@ -10895,7 +11854,7 @@ async function submitExtract(e) {
 
 /* ---- the action dialog ---- */
 let adEditing = null, adOpened = null, adLinks = [];
-const AD_FIELDS = ['ref', 'text', 'owner', 'due', 'status', 'meeting_id'];
+const AD_FIELDS = ['ref', 'text', 'description', 'owner', 'due', 'status', 'meeting_id'];
 
 function openActionDialog(a, preset = {}) {
   hideQuick();
@@ -10903,14 +11862,15 @@ function openActionDialog(a, preset = {}) {
   adEditing = a;
   adOpened = a && structuredClone(a);
   const f = document.getElementById('action-form').elements;
-  const v = a || { ref: nextActionRef(), text: '', owner: '', due: '', status: 'Open', meeting_id: preset.meeting_id || '', links: [] };
-  f.meeting_id.innerHTML = '<option value="">— none: added by hand</option>'
-    + meetingsOf().map(m => `<option value="${m.id}" ${m.id === v.meeting_id ? 'selected' : ''}>${escAttr(`${m.date ? `${fmtShort(m.date)} · ` : ''}${m.title}`)}</option>`).join('')
-    + (v.meeting_id && !meetingById(v.meeting_id) ? `<option value="${escAttr(v.meeting_id)}" selected>(a deleted meeting)</option>` : '');
+  const v = a || { ref: nextActionRef(), text: '', description: '', owner: '', due: '', status: 'Open', meeting_id: preset.meeting_id || '', links: [] };
+  // Where the action came from is fixed: a link back to that meeting's minutes, not a choice.
+  const from = meetingById(v.meeting_id);
+  document.getElementById('ad-from').innerHTML = from
+    ? `<button type="button" class="link-btn" data-mt-open="${from.id}" title="Read the minutes of this meeting">${escAttr(from.title) || '(untitled)'}</button>${from.date ? ` <small>${fmtNice(from.date)}</small>` : ''}`
+    : `<span class="muted">${v.meeting_id ? 'A deleted meeting' : 'Added by hand'}</span>`;
   f.status.innerHTML = optionList(ACTION_STATUSES, v.status);
-  for (const k of AD_FIELDS) if (k !== 'meeting_id' && k !== 'status') f[k].value = v[k] ?? '';
+  for (const k of AD_FIELDS) if (k !== 'status') f[k].value = v[k] ?? '';
   adLinks = [...v.links];
-  document.getElementById('ad-minutes').hidden = !meetingById(v.meeting_id);
   document.getElementById('ad-delete').hidden = !a;
   document.getElementById('ad-error').textContent = '';
   document.getElementById('ad-heading').textContent = a ? `Edit ${a.ref || 'action'}` : 'New action';
@@ -10941,7 +11901,7 @@ async function submitAction(e) {
   const err = document.getElementById('ad-error');
   const v = Object.fromEntries(AD_FIELDS.map(k => [k, f[k].value.trim()]));
   v.links = [...adLinks];
-  if (!v.text) return (err.textContent = 'Say what is to be done.');
+  if (!v.text) return (err.textContent = 'Give the action a title: what is to be done.');
   if (v.due && !parseDate(v.due)) return (err.textContent = 'The due date isn’t a date.');
   if (v.ref && actionsOf().some(a => a !== adEditing && a.ref.toLowerCase() === v.ref.toLowerCase())) return (err.textContent = `${v.ref} is already used in this workspace.`);
   if (adEditing && !state.actions.includes(adEditing)) return (err.textContent = 'Someone else has just deleted this action.');
@@ -10966,178 +11926,610 @@ async function deleteAction() {
   await saveActions('Action deleted');
 }
 
-/* ---- importing minutes and actions ---- */
-// Headings are matched by name (lower case, letters and digits only), so a file from Download CSV
-// imports as it is, as does a list from elsewhere that says Owner, Due date or Notes.
-const MI_MINUTES = { title: ['title', 'meeting', 'meetingtitle', 'name', 'subject'], date: ['date', 'meetingdate', 'held', 'heldon'], series: ['series', 'meetingseries'],
-  attendees: ['attendees', 'present', 'participants'], link: ['link', 'url', 'recording'], minutes: ['minutes', 'notes', 'summary', 'body', 'meetingminutes'] };
-const MI_ACTIONS = { ref: ['ref', 'reference', 'id', 'no', 'number'], text: ['action', 'text', 'actionitem', 'description', 'task', 'details'], owner: ['owner', 'assignedto', 'assignee', 'who', 'responsible', 'actionowner'],
-  due: ['due', 'duedate', 'dueby', 'deadline', 'targetdate'], status: ['status', 'state'], doneOn: ['doneon', 'completedon', 'closed'], meeting: ['meeting', 'meetingtitle', 'frommeeting'], meetingDate: ['meetingdate'] };
-let mimp = { name: '', rows: [], kind: 'minutes' };
-const miKey = (h) => String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-// Each field's column in the file, or -1.
-function miColumns(header, aliases) {
-  const keys = header.map(miKey), taken = new Set();
-  return Object.fromEntries(Object.entries(aliases).map(([f, names]) => {
-    const i = names.map(n => keys.findIndex((k, j) => k === n && !taken.has(j))).find(j => j >= 0) ?? -1;
-    if (i >= 0) taken.add(i);
-    return [f, i];
-  }));
-}
-const miGuessKind = (header) => (miColumns(header, MI_MINUTES).minutes >= 0 ? 'minutes' : miColumns(header, MI_ACTIONS).text >= 0 ? 'actions' : 'minutes');
+/* ---- importing meetings and actions ---- */
+// A CSV (or pasted cells) of meetings or of actions, into the current workspace. Meetings match an
+// existing one with the same date and title; their series is found by name (a new one is added),
+// and the actions in their minutes can be tracked as Extract actions would. Actions match by ref,
+// else by the same wording, and find their meeting by its title and date. Nothing changes until
+// Import, which offers Undo.
 
-// What importing would do: the rows to add, and those left alone because the workspace has them.
-function planMeetingImport() {
-  const [header = [], ...data] = mimp.rows;
-  const rows = data.filter(r => r.some(v => v.trim()));
-  const date = (v) => fileDate((v ?? '').trim());
-  const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-  const meetings = meetingsOf();
-  const plan = { kind: mimp.kind, add: [], skip: 0, bad: 0, unlinked: 0, newSeries: new Set() };
-  if (mimp.kind === 'minutes') {
-    const c = miColumns(header, MI_MINUTES);
-    if (c.title < 0 && c.minutes < 0) return Object.assign(plan, { error: 'No Title or Minutes column found: the first row needs headings.' });
-    const seen = new Set(meetings.map(m => `${norm(m.title)}|${m.date}`));
-    for (const r of rows) {
-      const get = (f) => (c[f] >= 0 ? (r[c[f]] ?? '').trim() : '');
-      const m = { title: get('title'), date: date(get('date')), series: get('series'), attendees: get('attendees'), link: get('link'), minutes: get('minutes').replace(/\r\n?/g, '\n') };
-      if (!m.title && !m.minutes) { plan.bad++; continue; }
-      m.title = m.title || (m.series ? m.series : 'Meeting') + (m.date ? ` ${fmtShort(m.date)}` : '');
-      const key = `${norm(m.title)}|${m.date}`;
-      if (seen.has(key)) { plan.skip++; continue; }
-      seen.add(key);
-      if (m.series && !seriesOf().some(x => norm(x.name) === norm(m.series))) plan.newSeries.add(m.series);
-      plan.add.push(m);
-    }
-  } else {
-    const c = miColumns(header, MI_ACTIONS);
-    if (c.text < 0) return Object.assign(plan, { error: 'No Action column found: the first row needs headings.' });
-    const batch = [...meetings];
-    const seen = new Set(actionsOf().map(a => `${norm(a.text)}|${a.meeting_id}`));
-    const texts = new Set(actionsOf().map(a => norm(a.text))); // a row naming no meeting matches the wording alone
-    for (const r of rows) {
-      const get = (f) => (c[f] >= 0 ? (r[c[f]] ?? '').trim() : '');
-      const a = { ref: get('ref'), text: get('text'), owner: get('owner'), due: date(get('due')), done: DONE_WORDS.test(get('status')), doneOn: date(get('doneOn')), meetingTitle: get('meeting'), meetingId: '' };
-      if (!a.text) { plan.bad++; continue; }
-      if (a.meetingTitle) {
-        const md = date(get('meetingDate'));
-        const hits = batch.filter(m => norm(m.title) === norm(a.meetingTitle));
-        const m = hits.find(x => md && x.date === md) || (hits.length === 1 || !md ? hits[0] : undefined);
-        if (m) a.meetingId = m.id; else plan.unlinked++;
-      }
-      const key = `${norm(a.text)}|${a.meetingId}`;
-      if (seen.has(key) || (!a.meetingTitle && texts.has(norm(a.text)))) { plan.skip++; continue; }
-      seen.add(key);
-      plan.add.push(a);
+const MI_FIELDS = {
+  meetings: ['file_id', 'title', 'date', 'series', 'series_cadence', 'series_start', 'attendees', 'link', 'minutes', 'actions'],
+  actions: ['ref', 'text', 'description', 'owner', 'due', 'status', 'done_at', 'meeting_file_id', 'meeting', 'meeting_date', 'links'],
+};
+// Several columns can go into these: their text is put together.
+const MI_MULTI = ['attendees', 'minutes', 'actions', 'description', 'links'];
+const MI_DATES = ['date', 'due', 'done_at', 'meeting_date', 'series_start'];
+const miFieldLabel = (k) => ({
+  file_id: 'Meeting ID (from Download CSV)', series_cadence: 'Series cadence', series_start: 'Series first meeting', meeting_file_id: 'Meeting ID (from Download CSV)',
+  title: 'Title', date: 'Date', series: 'Series (found or added by name)', attendees: 'Attendees', link: 'Link (recording or notes)',
+  minutes: 'Minutes', actions: 'Actions (one per line)', ref: 'Ref', text: 'Title', description: 'Description', owner: 'Owner', due: 'Due date', status: 'Status (open or done)',
+  done_at: 'Done on', meeting: 'Meeting (by title)', meeting_date: 'Meeting date', links: `Linked ${T.items} or streams`,
+}[k]);
+// Headings are compared with everything but letters and digits removed; earlier names win.
+const MI_ALIASES = {
+  meetings: {
+    file_id: ['meetingid'],
+    series_cadence: ['seriescadence', 'cadence', 'frequency', 'recurrencepattern'],
+    series_start: ['seriesstart', 'seriesfirstmeeting', 'firstmeeting'],
+    title: ['title', 'meetingtitle', 'meeting', 'meetingname', 'name', 'subject', 'topic'],
+    date: ['date', 'meetingdate', 'dateofmeeting', 'heldon', 'held', 'when', 'startdate', 'start', 'starttime', 'datetime'],
+    series: ['series', 'meetingseries', 'recurring', 'recurrence', 'meetingtype', 'type', 'forum', 'committee', 'board'],
+    attendees: ['attendees', 'attendance', 'participants', 'present', 'invitees', 'people'],
+    link: ['link', 'url', 'recording', 'recordinglink', 'recordingurl', 'meetinglink', 'teamslink', 'noteslink', 'notesurl'],
+    minutes: ['minutes', 'meetingminutes', 'notes', 'meetingnotes', 'summary', 'body', 'content', 'discussion', 'details', 'description', 'text'],
+    actions: ['actions', 'actionitems', 'actionpoints', 'agreedactions', 'nextsteps'],
+  },
+  actions: {
+    ref: ['ref', 'actionref', 'reference', 'actionid', 'actionno', 'actionnumber', 'no', 'number', 'key', 'id'],
+    text: ['title', 'actiontitle', 'action', 'actiontext', 'actionitem', 'actionrequired', 'actions', 'task', 'item', 'what', 'summary', 'nextstep',
+      'subject', 'name', 'text'],
+    description: ['description', 'actiondescription', 'details', 'detail', 'fulldescription', 'longdescription', 'notes', 'comments', 'background',
+      'context', 'more'],
+    owner: ['owner', 'actionowner', 'assignedto', 'assignee', 'who', 'bywhom', 'responsible', 'ownedby', 'lead', 'person'],
+    due: ['due', 'duedate', 'datedue', 'bywhen', 'dueby', 'deadline', 'targetdate', 'target', 'completeby'],
+    status: ['status', 'actionstatus', 'state', 'progress', 'done', 'complete'],
+    done_at: ['doneon', 'donedate', 'datedone', 'doneat', 'completedon', 'completeddate', 'datecompleted', 'completiondate', 'completed',
+      'closedon', 'closeddate', 'dateclosed', 'closed', 'resolvedon'],
+    meeting_file_id: ['meetingid'],
+    meeting: ['meeting', 'meetingtitle', 'frommeeting', 'sourcemeeting', 'raisedat', 'raisedin', 'source', 'forum'],
+    meeting_date: ['meetingdate', 'dateofmeeting', 'dateraised', 'raised', 'raisedon', 'dateopened', 'opened', 'datelogged', 'logged', 'date', 'created'],
+    links: ['linkedto', 'links', 'related', 'relatedto', 'relateditems', 'linkeditems', 'linkedmilestones', 'milestones', 'milestone', 'items'],
+  },
+};
+// Columns never imported: the app's own, Download CSV's counts and SharePoint's.
+const MI_IGNORED = [...RI_IGNORED, 'id', 'workspaceid', 'seriesid', 'meetingid', 'openactions', 'updated', 'modified'];
+const OPEN_WORDS = /^(open|new|not started|in progress|wip|ongoing|active|pending|to do|todo|outstanding|overdue|late|on hold|blocked|re ?opened|no|n)$/i;
+
+const mimp = { name: '', rows: [], headerRow: 0, map: [], order: 'auto', mode: 'merge', kind: 'meetings', extract: true, plan: null, detected: null, queue: [] };
+
+function miHeaderRow(rows) {
+  const known = new Set([...Object.values(MI_ALIASES.meetings), ...Object.values(MI_ALIASES.actions)].flat().concat(MI_IGNORED));
+  let best = 0, bestHits = 0;
+  rows.slice(0, 6).forEach((r, i) => {
+    const hits = r.filter(h => known.has(riNorm(h))).length;
+    if (hits > bestHits) { best = i; bestHits = hits; }
+  });
+  return bestHits >= 2 ? best : 0;
+}
+
+// Meetings or actions: the file name, then the headings, then the tab that's open.
+function guessMeetingImportKind(name, header) {
+  const n = name.toLowerCase(), h = header.map(riNorm);
+  if (/action/.test(n)) return 'actions';
+  if (/meeting|minute/.test(n)) return 'meetings';
+  if (h.some(x => ['minutes', 'meetingminutes', 'attendees', 'participants', 'series'].includes(x))) return 'meetings';
+  if (h.some(x => ['action', 'actionitem', 'owner', 'actionowner', 'assignedto', 'due', 'duedate'].includes(x))) return 'actions';
+  return mtMode === 'actions' ? 'actions' : 'meetings';
+}
+
+function guessMeetingImportMap(header) {
+  const norm = header.map(riNorm);
+  const map = norm.map(() => '');
+  const aliases = MI_ALIASES[mimp.kind];
+  const free = (i) => !map[i] && !MI_IGNORED.includes(norm[i]);
+  for (const k of MI_FIELDS[mimp.kind]) {
+    for (const alias of aliases[k]) {
+      norm.forEach((h, i) => {
+        if (h === alias && !map[i] && (MI_MULTI.includes(k) || !map.includes(k))) map[i] = k; // a heading named for the field beats the ignored list
+      });
     }
   }
-  return plan;
+  // Looser second pass, e.g. "Date of the meeting" or "Action owner name".
+  const take = (i, k) => { if (MI_MULTI.includes(k) || !map.includes(k)) map[i] = k; };
+  norm.forEach((h, i) => {
+    if (!free(i)) return;
+    if (mimp.kind === 'meetings') {
+      if (/minute|notes/.test(h)) take(i, 'minutes');
+      else if (/attend|particip|present/.test(h)) take(i, 'attendees');
+      else if (/series|recurr/.test(h)) take(i, 'series');
+      else if (/date|when/.test(h)) take(i, 'date');
+      else if (/title|subject/.test(h)) take(i, 'title');
+      else if (/link|url|record/.test(h)) take(i, 'link');
+    } else if (/owner|assign|responsib/.test(h)) take(i, 'owner');
+    else if (/due|deadline|target/.test(h)) take(i, 'due');
+    else if (/complet|closed|doneon/.test(h)) take(i, 'done_at');
+    else if (/status/.test(h)) take(i, 'status');
+    else if (/meeting.*date|raised|opened/.test(h)) take(i, 'meeting_date');
+    else if (/meeting/.test(h)) take(i, 'meeting');
+    else if (/milestone|linked|related/.test(h)) take(i, 'links');
+    else if (/descri|detail|note|comment/.test(h)) take(i, 'description');
+    else if (/action|task|title/.test(h)) take(i, 'text');
+  });
+  return map;
 }
 
-function renderMeetingImport() {
-  const plan = planMeetingImport();
-  const actions = mimp.kind === 'actions';
-  document.querySelectorAll('[name="mi-kind"]').forEach(r => { r.checked = r.value === mimp.kind; });
-  document.getElementById('mi-source-name').textContent = `${mimp.name} · ${count(Math.max(0, mimp.rows.length - 1), 'row', 'rows')}`;
-  document.getElementById('mi-preview-head').innerHTML = actions
-    ? '<tr><th>Ref</th><th>Action</th><th>Owner</th><th>Due</th><th>Status</th><th>Meeting</th></tr>'
-    : '<tr><th>Date</th><th>Title</th><th>Series</th><th>Attendees</th><th>Minutes</th></tr>';
-  const cell = (s, n = 90) => escAttr(s.length > n ? s.slice(0, n) + '…' : s);
-  document.getElementById('mi-preview').innerHTML = plan.add.slice(0, 200).map(x => (actions
-    ? `<tr><td>${cell(x.ref || 'new')}</td><td>${cell(x.text)}</td><td>${cell(x.owner)}</td><td>${cell(x.due)}</td><td>${x.done ? 'Done' : 'Open'}</td><td>${cell(x.meetingTitle)}${x.meetingTitle && !x.meetingId ? ' <i>(not found)</i>' : ''}</td></tr>`
-    : `<tr><td>${cell(x.date)}</td><td>${cell(x.title)}</td><td>${cell(x.series)}</td><td>${cell(x.attendees, 50)}</td><td>${cell(x.minutes.replace(/\s+/g, ' '), 120)}</td></tr>`)).join('');
-  const kindWord = actions ? ['action', 'actions'] : ['meeting', 'meetings'];
-  document.getElementById('mi-summary').textContent = plan.error ? '' : [`${count(plan.add.length, ...kindWord)} to add`, plan.skip && `${plan.skip} already there`, plan.bad && `${plan.bad} blank ${plan.bad === 1 ? 'row' : 'rows'} skipped`,
-    plan.newSeries.size && `${count(plan.newSeries.size, 'new series', 'new series')}`, plan.unlinked && `${plan.unlinked} with a meeting not found`].filter(Boolean).join(' · ');
-  document.getElementById('mi-error').textContent = plan.error || (!plan.add.length ? `Nothing new to import${plan.skip ? ': everything in the file is already here' : ''}.` : '');
-  document.getElementById('mi-submit').disabled = !plan.add.length;
+// The lines of an Actions cell, as Download CSV writes them ("A3 Send the plan (Jane) due
+// 2026-11-20 — Open": taken as written, ref and all), or one action a line, read as Extract
+// actions reads the minutes.
+const OWN_ACTION_LINE = /^([A-Za-z]{1,5}-?\d+)\s+(.+?)(?:\s+\(([^()]*)\))?(?:\s+due\s+(\d{4}-\d{2}-\d{2}))?\s+—\s+(Open|Done)$/;
+function actionsFromCell(text, meetingDate, people) {
+  return text.split('\n').map(l => l.trim().replace(/^(?:[-*+•]|\d+[.)])\s+/, '')).filter(Boolean).map(l => {
+    const own = l.match(OWN_ACTION_LINE);
+    if (own) return { ref: own[1], text: own[2].trim(), owner: (own[3] || '').trim(), due: own[4] || '', done: own[5] === 'Done', key: actionKey(own[2]) };
+    let done = false;
+    const st = l.match(/\s+[—–-]\s+(open|done)\s*$/i);
+    if (st) { done = /done/i.test(st[1]); l = l.slice(0, st.index); }
+    l = l.replace(/^A-?\d+\s+/i, '').replace(/\bdue (\d{4}-\d{2}-\d{2})\s*$/i, 'by $1');
+    const a = readActionLine({ raw: l }, meetingDate, people);
+    return { ...a, done: a.done || done };
+  }).filter(a => a.text);
 }
 
-function showMeetingImportStep(step) {
-  document.getElementById('mi-step-source').hidden = step !== 'source';
-  document.getElementById('mi-step-check').hidden = step !== 'check';
-  document.getElementById('mi-error').textContent = '';
-  document.getElementById('mi-submit').disabled = true;
+// The meetings each Meeting ID of a file became when it was imported here, so the actions file
+// imported after it (or the same files imported again) finds them: { workspace: { file id: meeting id } },
+// kept in this browser.
+const MI_IDS_STORE = 'milestone-tracker.meeting-import-ids';
+function importedMeetingId(fileId) {
+  try { return JSON.parse(localStorage.getItem(MI_IDS_STORE) || '{}')[state.workspaceId]?.[fileId] || ''; } catch { return ''; }
 }
-function openMeetingImport() {
-  document.getElementById('mi-workspace').textContent = currentWorkspace().name;
-  document.getElementById('mi-paste').value = '';
-  document.getElementById('mi-file').value = '';
-  showMeetingImportStep('source');
-  document.getElementById('mi-dialog').showModal();
+function rememberMeetingIds(ws, pairs) {
+  if (!pairs.length) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(MI_IDS_STORE) || '{}');
+    all[ws] = { ...(all[ws] || {}), ...Object.fromEntries(pairs) };
+    localStorage.setItem(MI_IDS_STORE, JSON.stringify(all));
+  } catch { /* storage full or blocked: actions then find their meeting by title and date */ }
 }
-function loadMeetingImportText(text, name) {
-  const rows = parseAny(text.replace(/\u0000/g, '').replace(/^﻿?sep=.\r?\n/i, '')).map(r => r.map(v => v.trim()));
-  const err = document.getElementById('mi-error');
-  if (rows.length < 2) return (err.textContent = rows.length ? 'Only the headings were found: include at least one row under them.' : 'Nothing to import.');
-  mimp = { name, rows, kind: mtMode === 'actions' && miGuessKind(rows[0]) === 'minutes' && miColumns(rows[0], MI_ACTIONS).text >= 0 ? 'actions' : miGuessKind(rows[0]) };
-  showMeetingImportStep('check');
-  renderMeetingImport();
+// An action in a meetings file's Actions cell is this one: the same words, or (read as Download
+// CSV writes them) a title ending in brackets taken as "title (owner)".
+const sameAction = (x, a) => actionKey(x.text) === a.key || (!!a.owner && actionKey(x.text) === actionKey(`${a.text} ${a.owner}`));
+
+/* ---- plan ---- */
+// Works out, row by row, what the import will do. Nothing changes until applyMeetingImport.
+function planMeetingImport() {
+  const order = mimp.order === 'auto' ? mimp.detected?.found || localDateOrder() : mimp.order;
+  const data = mimp.rows.slice(mimp.headerRow + 1);
+  const header = mimp.rows[mimp.headerRow];
+  const cols = (k) => mimp.map.map((x, i) => (x === k ? i : -1)).filter(i => i >= 0);
+  const cell = (r, k) => { const c = cols(k); return c.length ? riClean(r[c[0]]) : ''; };
+  const plan = mimp.kind === 'actions' ? planActionRows(data, cell, cols, order) : planMeetingRows(data, header, cell, cols, order);
+  return { ...plan, order };
 }
-async function readMeetingImportFile(file) {
-  const text = await readTextFile(file, document.getElementById('mi-error'));
-  if (text != null) loadMeetingImportText(text, file.name);
+
+function planMeetingRows(data, header, cell, cols, order) {
+  const existing = meetingsOf(), acts = actionsOf();
+  const people = knownPeople();
+  const rows = [], used = new Set(), seen = new Map(), keys = new Set(), refs = new Set(), relinked = new Set();
+  const newSeries = new Map(); // name, lower case → { cadence, start } for a series to add
+  const free = (m) => (m && m.workspace_id === state.workspaceId && !used.has(m) ? m : null);
+  data.forEach((r, i) => {
+    const line = mimp.headerRow + i + 2;
+    if (r.every(v => !String(v).trim())) return;
+    const row = { line, action: 'add', warn: [], fields: {}, target: null, newActions: [], relink: [], fileId: '' };
+    rows.push(row);
+    const f = row.fields;
+
+    const series = cell(r, 'series');
+    let date = cell(r, 'date'), title = cell(r, 'title');
+    const iso = readDate(date, order);
+    if (iso === null) row.warn.push(`Couldn't read the date “${date}”`);
+    date = iso || '';
+    if (!title && series) title = series;
+    if (!title && !date) { row.action = 'skip'; row.warn.push('No title or date'); return; }
+    // A Meeting ID (Download CSV's) names the meeting, so two with the same title on the same day are two.
+    const fileId = row.fileId = cell(r, 'file_id');
+    const key = fileId ? `id:${fileId}` : `${date}|${noteKey(title || '')}`;
+    if (seen.has(key)) { row.action = 'skip'; row.warn.push(`The same meeting as row ${seen.get(key).line}`); return; }
+    seen.set(key, row);
+    // The meeting it was downloaded from (the same id and title), or one it was imported as before;
+    // else the one with the same date and title.
+    // Of several with that date and title, the one whose minutes, then attendees, are the same.
+    const alike = existing.filter(m => !used.has(m) && m.date === date && noteKey(m.title) === noteKey(title || m.title) && (title || m.title));
+    const mins = cols('minutes').map(c => riClean(r[c])).join('\n\n').trim(), present = cols('attendees').map(c => riClean(r[c])).filter(Boolean).join(', ').replace(/\s*\n\s*/g, ', ');
+    const t = mimp.mode === 'add' ? null
+      : (fileId && (free(existing.find(m => m.id === fileId && (!title || noteKey(m.title) === noteKey(title)))) || free(meetingById(importedMeetingId(fileId)))))
+        || alike.find(m => mins && m.minutes.trim() === tidyMinutes(mins)) || alike.find(m => present && m.attendees === present) || alike[0] || null;
+    if (t) { row.target = t; row.action = 'update'; used.add(t); }
+    if (title) f.title = title;
+    else if (!t) f.title = 'Meeting';
+    if (date) f.date = date;
+
+    if (series) {
+      const x = seriesOf().find(s => s.name.toLowerCase() === series.toLowerCase());
+      f.series_id = x ? x.id : `new:${series}`;
+      if (!x) {
+        const k = series.toLowerCase(), cadence = fromList(cell(r, 'series_cadence'), MEETING_CADENCES), start = readDate(cell(r, 'series_start'), order) || '';
+        const was = newSeries.get(k);
+        if (!was) row.warn.push(`Series “${series}” isn't one of this workspace's yet, so it will be added`);
+        newSeries.set(k, { cadence: was?.cadence || (MEETING_CADENCES.includes(cadence) ? cadence : ''), start: was?.start || start });
+      }
+    }
+    const att = cols('attendees').map(c => riClean(r[c])).filter(Boolean).join(', ');
+    if (att) f.attendees = att.replace(/\s*\n\s*/g, ', ');
+    if (cell(r, 'link')) f.link = cell(r, 'link');
+    // Minutes are Markdown, so their text is kept as it is, line breaks and all; rich text (from
+    // SharePoint, say) and RTF are turned into Markdown.
+    const md = (v) => (/<[a-z!/][^>]*>/i.test(v) ? htmlToMinutes(v) : minutesFrom(String(v ?? '')));
+    const parts = cols('minutes').map(c => [header[c], md(r[c])]).filter(([, v]) => v);
+    const minutes = parts.length > 1 ? parts.map(([h, v]) => `## ${h}\n\n${v}`).join('\n\n') : parts[0]?.[1] || '';
+    if (minutes && minutes !== t?.minutes.trim()) f.minutes = minutes;
+
+    // Actions: an Actions column, and (if asked) the minutes, less any already tracked. One with a
+    // ref (as Download CSV writes them) is the action of that ref: tracked already, it's left as it
+    // is, but put back on this meeting if it has lost it (its actions imported first); new, it keeps
+    // its ref unless another action here has it.
+    const on = date || t?.date || todayISO();
+    const found = [...cols('actions').flatMap(c => actionsFromCell(riClean(r[c]), on, people)),
+      ...(mimp.extract && f.minutes && f.minutes !== t?.minutes ? actionCandidates(f.minutes, on, people) : [])]; // only minutes that are new or changed
+    for (const a of found) {
+      if (a.ref) {
+        const low = a.ref.toLowerCase();
+        if (refs.has(low)) continue;
+        refs.add(low);
+        const had = acts.find(x => x.ref.toLowerCase() === low);
+        if (had && sameAction(had, a)) {
+          keys.add(a.key);
+          if (!meetingById(had.meeting_id) && !relinked.has(had)) { relinked.add(had); row.relink.push(had); }
+          continue;
+        }
+        if (had) a.ref = ''; // its ref is another action's here: it gets the next free
+      } else if (keys.has(a.key) || trackedAs(a)) continue;
+      keys.add(a.key);
+      row.newActions.push(a);
+    }
+
+    if (t) for (const k of Object.keys(f)) if (f[k] === (t[k] ?? '')) delete f[k];
+    if (t && !Object.keys(f).length && !row.newActions.length && !row.relink.length) row.action = 'same';
+  });
+  return { rows, newSeries };
+}
+
+function planActionRows(data, cell, cols, order) {
+  const existing = actionsOf();
+  const meetings = meetingsOf();
+  const rows = [], used = new Set(), refRow = new Map();
+  const now = new Date().toISOString();
+  // Download CSV's own file (it has the Meeting ID column) says everything about each action, so a
+  // blank owner, due date, description or meeting there is blank, not unknown.
+  const own = cols('meeting_file_id').length > 0;
+  const blank = (k) => own && cols(k).length > 0;
+  data.forEach((r, i) => {
+    const line = mimp.headerRow + i + 2;
+    if (r.every(v => !String(v).trim())) return;
+    const row = { line, action: 'add', warn: [], fields: {}, target: null, links: [] };
+    rows.push(row);
+    const f = row.fields;
+
+    // Ref: a bare number (SharePoint's ID, say) gets the A.
+    let ref = cell(r, 'ref');
+    const madeRef = /^\d+$/.test(ref);
+    if (madeRef) ref = `A${ref}`;
+    if (ref && refRow.has(ref.toLowerCase())) { row.action = 'skip'; row.warn.push(`Ref ${ref} is already used on row ${refRow.get(ref.toLowerCase()).line}`); return; }
+    if (ref) refRow.set(ref.toLowerCase(), row);
+
+    const text = cell(r, 'text').replace(/\s*\n\s*/g, ' ');
+    const byText = () => text && existing.find(a => !used.has(a) && actionKey(a.text) === actionKey(text));
+    let t = mimp.mode === 'add' ? null : (ref && existing.find(a => a.ref.toLowerCase() === ref.toLowerCase())) || null;
+    // A ref made from a number never takes over an action that's plainly something else.
+    if (t && madeRef && text && actionKey(t.text) !== actionKey(text)) {
+      row.warn.push(`${ref} is already used here by “${t.text}”, so this one gets a new ref`);
+      t = null;
+      ref = '';
+    }
+    if (!t && mimp.mode !== 'add') { t = byText() || null; if (t && ref && t.ref.toLowerCase() !== ref.toLowerCase()) ref = t.ref; }
+    if (!t && ref && existing.some(a => a.ref.toLowerCase() === ref.toLowerCase())) {
+      row.warn.push(`Ref ${ref} is already used in this workspace, so this one gets a new ref`);
+      ref = '';
+    }
+    if (t && used.has(t)) { row.action = 'skip'; row.warn.push(`Matches ${t.ref}, which an earlier row already updates`); return; }
+    if (t) { row.target = t; row.action = 'update'; used.add(t); }
+    // (A title ending in brackets, read from a meetings file as "title (owner)", is the same action.)
+    if (t && ref && text && actionKey(t.text) !== actionKey(text) && actionKey(`${t.text} ${t.owner}`) !== actionKey(text)) row.warn.push(`Matched to ${t.ref} by its ref, but the wording differs: check it's the same action`);
+    row.ref = ref;
+    if (!t && !text) { row.action = 'skip'; row.warn.push('No action'); return; }
+    if (text) f.text = text;
+    if (ref && !t) f.ref = ref;
+    // Several description columns: each under its heading, when more than one has something.
+    const desc = cols('description').map(c => [mimp.rows[mimp.headerRow][c], riClean(r[c])]).filter(([, v]) => v);
+    if (desc.length) f.description = desc.length > 1 ? desc.map(([h, v]) => `${h}: ${v}`).join('\n\n') : desc[0][1];
+    else if (blank('description')) f.description = '';
+    if (cell(r, 'owner') || blank('owner')) f.owner = cell(r, 'owner');
+    const due = readDate(cell(r, 'due'), order);
+    if (due) f.due = due;
+    else if (due === null) row.warn.push(`Couldn't read the date “${cell(r, 'due')}”`);
+    else if (blank('due')) f.due = '';
+
+    // Status: done or open. A date in the Done on column marks it done too.
+    const st = cell(r, 'status'), doneRaw = cell(r, 'done_at');
+    const doneAt = doneRaw && readStamp(doneRaw, order);
+    if (doneRaw && !doneAt && !DONE_WORDS.test(doneRaw) && !OPEN_WORDS.test(doneRaw)) row.warn.push(`Couldn't read the date “${doneRaw}”`);
+    let status = st ? (DONE_WORDS.test(st) ? 'Done' : 'Open') : doneAt || DONE_WORDS.test(doneRaw) ? 'Done' : '';
+    if (st && !DONE_WORDS.test(st) && !OPEN_WORDS.test(st)) {
+      if (/^(cancell?ed|closed?|resolved|superseded|withdrawn|n\/?a|not required|no longer required|duplicate|dropped)$/i.test(st)) status = 'Done';
+      else row.warn.push(`Status “${st}” is taken as open`);
+    }
+    if (!status && !t) status = 'Open';
+    if (status) f.status = status;
+    // A date alone (as Download CSV writes it) keeps the time it was ticked off on that day.
+    const kept = t?.status === 'Done' && t.done_at ? t.done_at : '';
+    if (status === 'Done') f.done_at = (doneAt && kept && kept.slice(0, 10) === readDate(doneRaw, order) ? kept : doneAt) || kept || now;
+    else if (status === 'Open') f.done_at = '';
+
+    // Meeting: by its Meeting ID (the meeting it was imported as, or the same meeting when the file
+    // came from this workspace); else by title and date, by title if only one has it, or by date if
+    // only one was held then. Of several with the title and date, the one it's on already.
+    const mid = cell(r, 'meeting_file_id'), mt = cell(r, 'meeting'), mdRaw = cell(r, 'meeting_date');
+    const md = readDate(mdRaw, order);
+    if (md === null) row.warn.push(`Couldn't read the date “${mdRaw}”`);
+    let m = null;
+    if (mid) m = meetings.find(x => x.id === importedMeetingId(mid)) || meetings.find(x => x.id === mid && (!mt || noteKey(x.title) === noteKey(mt))) || null;
+    if (!m && (mt || md)) {
+      const one = (list) => (list.length === 1 ? list[0] : null);
+      const named = meetings.filter(x => mt && noteKey(x.title) === noteKey(mt));
+      const onDay = md ? named.filter(x => x.date === md) : [];
+      m = onDay.find(x => x.id === t?.meeting_id) || onDay[0] || one(named) || (!mt && md ? one(meetings.filter(x => x.date === md)) : null);
+    }
+    if (m) f.meeting_id = m.id;
+    else if (mt) row.warn.push(`No meeting “${mt}”${md ? ` on ${fmtNice(md)}` : ''} in this workspace, so it isn't linked to one: import the meetings first, or both files together`);
+    else if (own && !mid) f.meeting_id = ''; // added by hand
+
+    for (const c of cols('links')) {
+      const v = riClean(r[c]);
+      if (!v) continue;
+      const [found, missing] = readRaidLinks(v);
+      row.links.push(...found);
+      if (missing.length) row.warn.push(`Linked to ${missing.map(x => `“${x}”`).join(', ')}, not found in this workspace`);
+    }
+    row.links = [...new Set(row.links)].filter(l => !l.startsWith('stream:new:') && !t?.links.includes(l));
+
+    if (t) for (const k of Object.keys(f)) if (f[k] === (t[k] ?? '')) delete f[k];
+    if (t && !Object.keys(f).length && !row.links.length) row.action = 'same';
+  });
+
+  // Refs for new actions that have none: the next free.
+  const taken = rows.map(r => r.ref).filter(Boolean);
+  for (const r of rows) {
+    if (r.action !== 'add' || r.ref) continue;
+    r.ref = r.fields.ref = nextActionRef(state.workspaceId, taken);
+    taken.push(r.ref);
+  }
+  return { rows };
 }
 
 async function applyMeetingImport() {
   const plan = planMeetingImport();
-  if (plan.error || !plan.add.length) return;
   const snap = snapshotData();
   const now = new Date().toISOString();
   const ws = state.workspaceId;
-  const lower = (s) => s.trim().toLowerCase();
-  let madeSeries = 0, saveWhat = [];
-  if (plan.kind === 'minutes') {
-    for (const x of plan.add) {
-      let series = x.series && seriesOf().find(s => lower(s.name) === lower(x.series));
-      if (x.series && !series) {
-        state.meetingSeries.push(series = { id: nextSeriesId(), workspace_id: ws, name: x.series, cadence: '', start: '', attendees: '', notes: '', created: now, updated: now });
-        madeSeries++;
+  let added = 0, updated = 0, acts = 0, series = 0;
+  const taken = [];
+  const newAction = (meetingId, a) => {
+    const free = a.ref && !taken.some(r => r.toLowerCase() === a.ref.toLowerCase()) && !actionsOf(ws).some(x => x.ref.toLowerCase() === a.ref.toLowerCase());
+    const ref = free ? a.ref : nextActionRef(ws, taken);
+    taken.push(ref);
+    state.actions.push({ id: nextActionId(), workspace_id: ws, meeting_id: meetingId, ref, text: a.text, description: '', owner: a.owner, due: a.due, status: a.done ? 'Done' : 'Open', links: [], done_at: a.done ? now : '', created: now, updated: now });
+    acts++;
+  };
+  let relinked = 0;
+  const ids = [];
+  const remember = (row, m) => { if (row.fileId && m) ids.push([row.fileId, m.id]); };
+  for (const row of plan.rows) {
+    if (row.action === 'same') remember(row, row.target);
+    if (row.action === 'skip' || row.action === 'same') continue;
+    if (mimp.kind === 'meetings') {
+      let m = row.target;
+      if (m && !state.meetings.includes(m)) continue; // deleted by someone else meanwhile
+      const f = row.fields;
+      if (f.series_id?.startsWith('new:')) {
+        const name = f.series_id.slice(4);
+        let x = seriesOf(ws).find(s => s.name.toLowerCase() === name.toLowerCase());
+        if (!x) {
+          const { cadence = '', start = '' } = plan.newSeries?.get(name.toLowerCase()) || {};
+          state.meetingSeries.push(x = { id: nextSeriesId(), workspace_id: ws, name, cadence, start, attendees: f.attendees || '', notes: '', created: now, updated: now });
+          series++;
+        }
+        f.series_id = x.id;
       }
-      state.meetings.push({ id: nextMeetingId(), workspace_id: ws, title: x.title, date: x.date, series_id: series ? series.id : '', attendees: x.attendees, link: x.link, minutes: x.minutes, created: now, updated: now });
+      if (!m) {
+        state.meetings.push(m = { id: nextMeetingId(), workspace_id: ws, title: '', date: '', series_id: '', attendees: '', link: '', minutes: '', created: now, updated: now });
+        added++;
+      } else if (Object.keys(f).length) { updated++; m.updated = now; }
+      Object.assign(m, f);
+      remember(row, m);
+      for (const a of row.newActions) newAction(m.id, a);
+      for (const a of row.relink) if (state.actions.includes(a)) { a.meeting_id = m.id; a.updated = now; relinked++; }
+    } else {
+      let a = row.target;
+      if (a && !state.actions.includes(a)) continue;
+      if (!a) {
+        state.actions.push(a = { id: nextActionId(), workspace_id: ws, meeting_id: '', ref: '', text: '', description: '', owner: '', due: '', status: 'Open', links: [], done_at: '', created: now, updated: now });
+        added++;
+      } else { updated++; a.updated = now; }
+      Object.assign(a, row.fields);
+      if (row.links.length) a.links = [...new Set([...a.links, ...row.links])];
     }
-    saveWhat = [saveMeetings, madeSeries && saveSeries];
-  } else {
-    const taken = [];
-    for (const x of plan.add) {
-      const used = (r) => actionsOf().some(a => lower(a.ref) === lower(r)) || taken.some(t => lower(t) === lower(r));
-      const ref = x.ref && !used(x.ref) ? x.ref : nextActionRef(ws, taken);
-      taken.push(ref);
-      state.actions.push({ id: nextActionId(), workspace_id: ws, meeting_id: x.meetingId, ref, text: x.text, owner: x.owner, due: x.due, status: x.done ? 'Done' : 'Open', links: [],
-        done_at: x.done ? (x.doneOn ? `${x.doneOn}T12:00:00.000Z` : now) : '', created: now, updated: now });
-    }
-    saveWhat = [saveActions];
   }
-  document.getElementById('mi-dialog').close();
-  setMeetingsMode(plan.kind);
+  rememberMeetingIds(ws, ids);
+  // A second file chosen with this one (the actions, after their meetings) is read next, now
+  // that the meetings it refers to are here.
+  const next = mimp.queue.shift();
+  if (!next) document.getElementById('meeting-import-dialog').close();
   rerenderCurrentView();
-  const label = `Imported ${count(plan.add.length, ...(plan.kind === 'actions' ? ['action', 'actions'] : ['meeting', 'meetings']))}`;
-  offerUndo(snap, label);
-  await Promise.all(saveWhat.filter(Boolean).map(f => f(label)));
+  const what = mimp.kind === 'meetings' ? ['meeting', 'meetings'] : ['action', 'actions'];
+  const parts = [added && `${count(added, ...what)} added`, updated && `${count(updated, ...what)} updated`,
+    acts && `${count(acts, 'action', 'actions')} from the minutes`, relinked && `${count(relinked, 'action', 'actions')} put back on ${relinked === 1 ? 'its meeting' : 'their meetings'}`,
+    series && `${count(series, 'series', 'series')} added`].filter(Boolean);
+  const label = `Imported: ${parts.join(', ') || 'nothing changed'}`;
+  if (parts.length) offerUndo(snap, label);
+  const meetingsChanged = mimp.kind === 'meetings' && (added || updated);
+  if (next) loadMeetingImportText(next.text, next.name);
+  await Promise.all([series && saveSeries(label), meetingsChanged && saveMeetings(label), (acts || relinked || (mimp.kind === 'actions' && (added || updated))) && saveActions(label)]);
+}
+
+/* ---- dialog ---- */
+function openMeetingImport() {
+  document.getElementById('mi-workspace').textContent = currentWorkspace().name;
+  document.getElementById('mi-paste').value = '';
+  document.getElementById('mi-file').value = '';
+  mimp.queue = [];
+  showMeetingImportStep('source');
+  document.getElementById('meeting-import-dialog').showModal();
+  document.getElementById('mi-file').focus();
+}
+
+function showMeetingImportStep(step) {
+  document.getElementById('mi-step-source').hidden = step !== 'source';
+  document.getElementById('mi-step-map').hidden = step !== 'map';
+  document.getElementById('mi-error').textContent = '';
+  document.getElementById('mi-submit').disabled = step !== 'map';
+  if (document.getElementById('meeting-import-dialog').open) (step === 'map' ? document.querySelector('#mi-kind input:checked') : document.getElementById('mi-file'))?.focus();
+}
+
+function loadMeetingImportText(text, name) {
+  const rows = parseAny(text.replace(/\u0000/g, '').replace(/^﻿?sep=.\r?\n/i, '')).map(r => r.map(v => v.trim()));
+  const err = document.getElementById('mi-error');
+  const headerRow = miHeaderRow(rows);
+  if (rows.length - headerRow < 2) return (err.textContent = rows.length ? 'Only the headings were found: include at least one row under them.' : 'Nothing to import.');
+  const kind = guessMeetingImportKind(name, rows[headerRow]);
+  Object.assign(mimp, { name, rows, headerRow, order: 'auto', mode: 'merge', kind, extract: true });
+  mimp.map = guessMeetingImportMap(rows[headerRow]);
+  // Download CSV's own meetings list their actions: reading the minutes again would add them twice.
+  mimp.extract = !mimp.map.includes('file_id');
+  document.querySelector(`[name="mi-kind"][value="${kind}"]`).checked = true;
+  document.querySelector('[name="mi-mode"][value="merge"]').checked = true;
+  document.getElementById('mi-extract').checked = mimp.extract;
+  showMeetingImportStep('map');
+  renderMeetingImport();
+}
+
+// One file, or several (the meetings and actions downloaded together): the meetings go first,
+// so the actions find them, and each is reviewed in turn.
+async function readMeetingImportFiles(files) {
+  const read = [];
+  for (const file of files) {
+    const text = await readTextFile(file, document.getElementById('mi-error'));
+    if (text == null) return;
+    read.push({ text, name: file.name });
+  }
+  const kindOf = (x) => { const rows = parseAny(x.text.replace(/^﻿?sep=.\r?\n/i, '')); return guessMeetingImportKind(x.name, rows[miHeaderRow(rows)] || []); };
+  read.sort((a, b) => (kindOf(a) === 'actions') - (kindOf(b) === 'actions'));
+  if (!read.length) return;
+  mimp.queue = read.slice(1);
+  loadMeetingImportText(read[0].text, read[0].name);
+}
+
+function renderMeetingImport() {
+  const header = mimp.rows[mimp.headerRow];
+  const data = mimp.rows.slice(mimp.headerRow + 1);
+  const width = Math.max(...mimp.rows.map(r => r.length));
+  const heads = Array.from({ length: width }, (_, i) => header[i] || `Column ${i < 26 ? String.fromCharCode(65 + i) : i + 1}`);
+  while (mimp.map.length < width) mimp.map.push('');
+  const meetings = mimp.kind === 'meetings';
+
+  const dateCols = mimp.map.map((k, i) => (MI_DATES.includes(k) ? i : -1)).filter(i => i >= 0);
+  mimp.detected = riDateOrder(dateCols.flatMap(i => data.map(r => r[i] ?? '')));
+  const d = mimp.detected, local = localDateOrder();
+  const label = { dmy: 'day first (3 April 2026)', mdy: 'month first (4 March 2026)' };
+  document.getElementById('mi-order').innerHTML = [
+    ['auto', d.found ? `Detected: ${label[d.found]}` : `Automatic: ${label[local]}`], ['dmy', 'Day first: 03/04 is 3 April'], ['mdy', 'Month first: 03/04 is 4 March'],
+  ].map(([v, t]) => `<option value="${v}" ${v === mimp.order ? 'selected' : ''}>${t}</option>`).join('');
+  document.getElementById('mi-extract-label').hidden = !meetings;
+  document.getElementById('mi-source-name').textContent = `${mimp.name} · ${count(data.length, 'row', 'rows')}${mimp.headerRow ? ` · headings on row ${mimp.headerRow + 1}` : ''}${mimp.queue.length ? ` · then ${mimp.queue.map(x => x.name).join(', ')}` : ''}`;
+
+  const plan = mimp.plan = planMeetingImport();
+  const opts = (sel) => `<option value="">— don't import —</option>` +
+    MI_FIELDS[mimp.kind].map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${escAttr(miFieldLabel(k))}</option>`).join('');
+  document.getElementById('mi-cols').innerHTML = heads.map((h, i) => {
+    const samples = [...new Set(data.map(r => riClean(r[i]).replace(/\s+/g, ' ')).filter(Boolean))].slice(0, 3);
+    const k = mimp.map[i];
+    const ex = samples.map(v => {
+      const short = v.length > 60 ? `${v.slice(0, 60)}…` : v;
+      if (!MI_DATES.includes(k)) return escAttr(short);
+      const iso = readDate(v, plan.order);
+      return iso ? `${escAttr(short)} <span class="im-date">→ ${fmtNice(iso)}</span>` : `${escAttr(short)} <span class="im-bad">→ can't read</span>`;
+    }).join(' · ');
+    return `<tr><td>${escAttr(h)}</td><td title="${escAttr(samples.join(' · '))}">${ex || '<span class="im-bad">empty</span>'}</td>
+      <td><select data-col="${i}" class="${k ? '' : 'unmapped'}">${opts(k)}</select></td></tr>`;
+  }).join('');
+
+  // Preview
+  const actLabel = { add: 'Add', update: 'Update', same: 'No change', skip: 'Skip' };
+  const head = (row) => `<td>${row.line}</td><td><span class="im-act ${row.action === 'same' ? 'skip' : row.action}">${actLabel[row.action]}</span></td>`;
+  const cellOf = (row) => (k, html, cls = '') => `<td class="${cls} ${row.target && k in row.fields ? 'changed' : ''}">${html}</td>`;
+  const short = (s, n = 80) => (s.length > n ? `${s.slice(0, n)}…` : s);
+  let rowsHtml;
+  if (meetings) {
+    document.getElementById('mi-preview-head').innerHTML = '<tr><th>Row</th><th></th><th>Date</th><th>Title</th><th>Series</th><th>Attendees</th><th>Minutes</th><th>Actions</th><th>Check</th></tr>';
+    rowsHtml = plan.rows.map(row => {
+      const v = { ...(row.target || {}), ...row.fields }, c = cellOf(row);
+      const series = v.series_id?.startsWith('new:') ? v.series_id.slice(4) : seriesName(v.series_id);
+      const mins = (v.minutes || '').replace(/\s+/g, ' ');
+      return `<tr class="${row.action}">${head(row)}${c('date', v.date ? fmtNice(v.date) : '')}${c('title', escAttr(v.title || ''), 'im-title')}
+        ${c('series_id', escAttr(series))}${c('attendees', escAttr(short(v.attendees || '', 50)), '')}
+        <td class="${row.target && 'minutes' in row.fields ? 'changed' : ''}" title="${escAttr(short(v.minutes || '', 600))}">${escAttr(short(mins, 60))}</td>
+        <td class="${(row.newActions.length || row.relink.length) && row.target ? 'changed' : ''}" title="${escAttr(row.newActions.map(a => `${a.text}${a.owner ? ` (${a.owner})` : ''}${a.due ? ` by ${fmtNice(a.due)}` : ''}`).concat(row.relink.map(a => `${a.ref} ${a.text}: put back on this meeting`)).join('\n'))}">${[row.newActions.length && `+${row.newActions.length}`, row.relink.length && `↺${row.relink.length}`].filter(Boolean).join(' ')}</td>
+        <td class="im-notes">${escAttr(row.warn.join('. '))}</td></tr>`;
+    }).join('');
+  } else {
+    document.getElementById('mi-preview-head').innerHTML = '<tr><th>Row</th><th></th><th>Ref</th><th>Title</th><th>Owner</th><th>Due</th><th>Status</th><th>Meeting</th><th>Links</th><th>Check</th></tr>';
+    rowsHtml = plan.rows.map(row => {
+      const t = row.target, v = { ...(t || {}), ...row.fields }, c = cellOf(row);
+      const m = meetingById(v.meeting_id);
+      const links = [...(t?.links || []), ...row.links].map(l => linkInfo(l).label);
+      return `<tr class="${row.action}">${head(row)}${c('ref', escAttr(v.ref || row.ref || ''))}${c('text', `${escAttr(v.text || '')}${v.description ? `<div class="im-desc" title="${escAttr(v.description)}">${escAttr(short(v.description.replace(/\s+/g, ' '), 90))}</div>` : ''}`, 'im-title')}
+        ${c('owner', escAttr(v.owner || ''))}${c('due', v.due ? fmtNice(v.due) : '')}${c('status', escAttr(v.status || ''))}
+        ${c('meeting_id', m ? escAttr(`${m.title}${m.date ? `, ${fmtNice(m.date)}` : ''}`) : '')}
+        <td class="${row.links.length && t ? 'changed' : ''}" title="${escAttr(links.join('\n'))}">${escAttr(links.length > 2 ? `${links.slice(0, 2).join(', ')} +${links.length - 2}` : links.join(', '))}</td>
+        <td class="im-notes">${escAttr(row.warn.join('. '))}</td></tr>`;
+    }).join('');
+  }
+  document.getElementById('mi-preview').innerHTML = rowsHtml;
+
+  const n = (a) => plan.rows.filter(r => r.action === a).length;
+  const actN = meetings ? plan.rows.reduce((s, r) => s + (r.action === 'skip' ? 0 : r.newActions.length), 0) : 0;
+  const warned = plan.rows.filter(r => r.action !== 'skip' && r.warn.length).length;
+  const what = meetings ? ['meeting', 'meetings'] : ['action', 'actions'];
+  document.getElementById('mi-summary').textContent = [n('add') && `${count(n('add'), ...what)} to add`, n('update') && `${n('update')} to update`,
+    n('same') && `${n('same')} unchanged`, actN && `${count(actN, 'action', 'actions')} from the minutes`,
+    n('skip') && `${n('skip')} skipped`, warned && `${count(warned, 'row has', 'rows have')} something to check`].filter(Boolean).join(' · ');
+  const btn = document.getElementById('mi-submit');
+  const does = [n('add') && `add ${count(n('add'), ...what)}`, n('update') && `update ${n('update')}`, actN && `track ${count(actN, 'action', 'actions')}`].filter(Boolean);
+  btn.disabled = !does.length;
+  btn.textContent = does.length ? `Import: ${does.join(', ')}` : 'Import';
+  document.getElementById('mi-error').textContent = d.conflict
+    ? 'Some dates are written day first and others month first: check the dates in the preview.'
+    : meetings && !mimp.map.includes('title') && !mimp.map.includes('date') ? 'No column is imported as the title or the date, so there’s nothing to name the meetings by.'
+    : !meetings && !mimp.map.includes('text') ? 'No column is imported as the action, so only existing actions (matched by ref) can be updated.' : '';
 }
 
 function wireMeetingImport() {
-  const dlg = document.getElementById('mi-dialog');
+  const dlg = document.getElementById('meeting-import-dialog');
   const close = () => dlg.close();
   document.getElementById('btn-mt-import').onclick = openMeetingImport;
   document.getElementById('mi-close').onclick = close;
   document.getElementById('mi-cancel').onclick = close;
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
-  document.getElementById('mi-change').onclick = () => { document.getElementById('mi-file').value = ''; showMeetingImportStep('source'); };
-  document.getElementById('mi-file').addEventListener('change', (e) => { if (e.target.files[0]) readMeetingImportFile(e.target.files[0]); });
+  document.getElementById('mi-change').onclick = () => { document.getElementById('mi-file').value = ''; mimp.queue = []; showMeetingImportStep('source'); };
+  document.getElementById('mi-file').addEventListener('change', (e) => { if (e.target.files.length) readMeetingImportFiles([...e.target.files]); });
   const drop = document.getElementById('mi-drop');
   drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', (e) => {
     e.preventDefault();
     drop.classList.remove('over');
-    if (e.dataTransfer.files[0]) readMeetingImportFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files.length) readMeetingImportFiles([...e.dataTransfer.files]);
   });
   document.getElementById('mi-paste').addEventListener('paste', () => {
     setTimeout(() => { const t = document.getElementById('mi-paste').value; if (t.trim()) loadMeetingImportText(t, 'Pasted rows'); }, 0);
   });
-  document.getElementById('mi-kind').addEventListener('change', (e) => { mimp.kind = e.target.value; renderMeetingImport(); });
-  document.getElementById('mi-form').addEventListener('submit', (e) => { e.preventDefault(); applyMeetingImport(); });
+  document.getElementById('mi-order').onchange = (e) => { mimp.order = e.target.value; renderMeetingImport(); };
+  document.getElementById('mi-kind').addEventListener('change', (e) => {
+    mimp.kind = e.target.value;
+    mimp.map = guessMeetingImportMap(mimp.rows[mimp.headerRow]); // the other kind's fields
+    renderMeetingImport();
+  });
+  document.getElementById('mi-mode').addEventListener('change', (e) => { mimp.mode = e.target.value; renderMeetingImport(); });
+  document.getElementById('mi-extract').onchange = (e) => { mimp.extract = e.target.checked; renderMeetingImport(); };
+  document.getElementById('mi-cols').addEventListener('change', (e) => {
+    const i = +e.target.dataset.col, k = e.target.value;
+    if (k && !MI_MULTI.includes(k)) mimp.map = mimp.map.map(x => (x === k ? '' : x)); // one column per field, except those that join
+    mimp.map[i] = k;
+    renderMeetingImport();
+  });
+  document.getElementById('meeting-import-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    applyMeetingImport();
+  });
 }
 
 function wireMeetings() {
@@ -11158,6 +12550,8 @@ function wireMeetings() {
   document.getElementById('btn-mt-series').onclick = openSeriesList;
   document.getElementById('btn-act-add').onclick = () => openActionDialog(null);
   document.getElementById('btn-mt-csv').onclick = downloadMeetingsCSV;
+  document.getElementById('btn-mt-csv-all').onclick = downloadAllMeetingsCSV;
+  wireSelBars();
 
   // the list
   const body = document.getElementById('mt-body');
@@ -11228,8 +12622,17 @@ function wireMeetings() {
 
   // dialogs
   const close = (id) => () => document.getElementById(id).close();
-  const backdrop = (id) => { const d = document.getElementById(id); d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); };
+  const backdrop = (id) => { const d = document.getElementById(id); d.addEventListener('click', (e) => { if (e.target === d) d.close(); }); }; // read-only lists only: edit dialogs close by ✕, Cancel or Esc, never a stray click outside
   document.getElementById('meeting-form').addEventListener('submit', submitMeeting);
+  const mins = document.getElementById('meeting-form').elements.minutes;
+  mdEditor(mins, { paste: clipboardMinutes }); // edited as formatted text, kept as Markdown
+  mins.addEventListener('paste', pasteMinutes); // the Markdown view
+  for (const box of [mins, mins._ed.body]) {
+    box.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
+    box.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) { e.preventDefault(); readMinutesFile(mins, e.dataTransfer.files[0]); } });
+  }
+  document.getElementById('mt-file').addEventListener('change', (e) => { if (e.target.files[0]) readMinutesFile(mins, e.target.files[0]); e.target.value = ''; });
+  document.getElementById('mt-file-btn').onclick = () => document.getElementById('mt-file').click();
   document.getElementById('meeting-form').elements.series_id.addEventListener('change', (e) => {
     const f = document.getElementById('meeting-form').elements;
     if (e.target.value !== 'new') return takeSeries(f, seriesById(e.target.value));
@@ -11243,7 +12646,6 @@ function wireMeetings() {
   document.getElementById('sr-cancel').onclick = close('series-dialog');
   document.getElementById('sr-close').onclick = close('series-dialog');
   document.getElementById('sr-delete').onclick = deleteSeries;
-  backdrop('series-dialog');
   document.getElementById('sl-close').onclick = close('series-list-dialog');
   document.getElementById('sl-done').onclick = close('series-list-dialog');
   document.getElementById('sl-new').onclick = () => openSeriesDialog(null);
@@ -11257,7 +12659,6 @@ function wireMeetings() {
   document.getElementById('mt-cancel').onclick = close('meeting-dialog');
   document.getElementById('mt-close').onclick = close('meeting-dialog');
   document.getElementById('mt-delete').onclick = deleteMeeting;
-  backdrop('meeting-dialog');
 
   document.getElementById('extract-form').addEventListener('submit', submitExtract);
   document.getElementById('mx-cancel').onclick = close('extract-dialog');
@@ -11281,15 +12682,12 @@ function wireMeetings() {
     document.getElementById('mx-add').textContent = n ? `Add ${count(n, 'action', 'actions')}` : 'Add';
     document.getElementById('mx-add').disabled = !n;
   });
-  backdrop('extract-dialog');
 
   document.getElementById('action-form').addEventListener('submit', submitAction);
+  document.getElementById('ad-from').addEventListener('click', (e) => { const b = e.target.closest('[data-mt-open]'); if (b) showMeeting(b.dataset.mtOpen); });
   document.getElementById('ad-cancel').onclick = close('action-dialog');
   document.getElementById('ad-close').onclick = close('action-dialog');
   document.getElementById('ad-delete').onclick = deleteAction;
-  const adMinutes = document.getElementById('ad-minutes'), adMeeting = document.getElementById('action-form').elements.meeting_id;
-  adMeeting.addEventListener('change', () => { adMinutes.hidden = !meetingById(adMeeting.value); });
-  adMinutes.onclick = () => showMeeting(adMeeting.value);
   document.getElementById('ad-links').addEventListener('change', (e) => {
     if (e.target.id !== 'ad-addlink' || !e.target.value) return;
     adLinks.push(e.target.value);
@@ -11303,7 +12701,6 @@ function wireMeetings() {
     renderAdLinks();
     document.getElementById('ad-addlink').focus();
   });
-  backdrop('action-dialog');
 }
 
 /* ================= find (⌘K) ================= */
@@ -11354,7 +12751,7 @@ function palSearch(q) {
   }
   for (const a of state.actions) {
     const p = workspaceById(a.workspace_id);
-    const s = score(a.ref, a.text, [a.ref, a.text, a.owner, a.status, meetingById(a.meeting_id)?.title, p?.code, p?.name].join(' ').toLowerCase());
+    const s = score(a.ref, a.text, [a.ref, a.text, a.description, a.owner, a.status, meetingById(a.meeting_id)?.title, p?.code, p?.name].join(' ').toLowerCase());
     if (s >= 0) hits.push({ kind: 'action', a, p, s: s + 0.3 });
   }
   return hits.sort((a, b) => a.s - b.s || (a.kind === 'item' && b.kind === 'item' ? (a.p.id === state.workspaceId ? -1 : 0) - (b.p.id === state.workspaceId ? -1 : 0) || cmpRef(a.m, b.m) : 0)).slice(0, 40);
@@ -11488,7 +12885,7 @@ function readHash() {
   const q = new URLSearchParams(m[3] || '');
   const filter = {};
   for (const k of ['q', 'owner']) if (q.has(k)) filter[k] = q.get(k);
-  if (q.has('stream')) filter.streamName = q.get('stream'); // by name, for readable links; matched once the workspace is known
+  if (q.has('stream')) filter.streamNames = q.getAll('stream'); // by name, for readable links; matched once the workspace is known
   if (TYPES.includes(q.get('type'))) filter.type = q.get('type');
   if (q.get('rag')) filter.rag = q.get('rag').split(',').filter(Boolean);
   if (q.get('late') === '1') filter.late = true;
@@ -11505,7 +12902,7 @@ function writeHash() {
   if (view === 'gantt') {
     const f = ganttFilter, q = new URLSearchParams();
     if (f.q.trim()) q.set('q', f.q.trim());
-    if (f.stream) q.set('stream', streamName(f.stream) || f.stream);
+    for (const id of f.streams) q.append('stream', streamName(id) || id);
     if (f.owner) q.set('owner', f.owner);
     if (f.type) q.set('type', f.type);
     if (f.rag.length) q.set('rag', f.rag.join(','));
@@ -11522,6 +12919,13 @@ function writeHash() {
   history.replaceState(null, '', h);
 }
 
+// A link's Gantt filters; its streams are named, and matched to this workspace's.
+function applyLinkFilter(linkFilter) {
+  const { streamNames = [], ...filter } = linkFilter || {};
+  Object.assign(ganttFilter, filter);
+  if (streamNames.length) ganttFilter.streams = streamNames.map(name => streamIdFor(state.workspaceId, name, false) || name);
+}
+
 // An address typed or pasted into this tab.
 async function followHash() {
   const link = readHash();
@@ -11529,9 +12933,7 @@ async function followHash() {
   if (link.ws && link.ws !== state.workspaceId && workspaceById(link.ws)) await switchWorkspace(link.ws, link.view);
   if (link.view === 'gantt') {
     clearGanttFilters();
-    const { streamName: name, ...filter } = link.filter || {};
-    Object.assign(ganttFilter, filter);
-    if (name) ganttFilter.stream = streamIdFor(state.workspaceId, name, false) || name;
+    applyLinkFilter(link.filter);
   }
   if (link.view === 'meetings') { setMeetingsMode(link.tab || 'minutes'); if (link.meeting) mtSelId = link.meeting; }
   switchView(link.view);
@@ -11754,7 +13156,7 @@ function wireEvents() {
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };
   document.getElementById('zoom-out').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay / 1.3); };
-  document.getElementById('zoom-fit').onclick = () => { state.userZoomed = false; fitZoom(); };
+  document.getElementById('zoom-fit').onclick = () => { state.userZoomed = false; fitRange(); }; // the items the filters show, not the whole plan
   document.getElementById('timescale').onclick = (e) => {
     const b = e.target.closest('button[data-scale]');
     if (b) setTimescale(b.dataset.scale);
@@ -11777,6 +13179,8 @@ function wireEvents() {
   document.getElementById('toggle-months').onchange = (e) => { state.showMonths = e.target.checked; renderGantt(); };
   document.getElementById('toggle-quarters').onchange = (e) => { state.showQuarters = e.target.checked; renderGantt(); };
   document.getElementById('toggle-today').onchange = (e) => { state.showToday = e.target.checked; renderGantt(); };
+  document.getElementById('toggle-freezes').onchange = (e) => { state.showFreezes = e.target.checked; renderGantt(); };
+  document.getElementById('edit-freezes').onclick = () => { closeMenus(); openFreezeDialog(); };
   document.getElementById('link-mode').onchange = (e) => { state.linkMode = e.target.value; saveAppPrefs({ linkMode: state.linkMode }); renderGantt(); };
   document.getElementById('toggle-baseline').onchange = (e) => { state.showBaseline = e.target.checked; saveAppPrefs({ showBaseline: state.showBaseline }); renderGantt(); };
   document.getElementById('toggle-critical').onchange = (e) => { state.showCritical = e.target.checked; saveAppPrefs({ showCritical: state.showCritical }); renderGantt(); };
@@ -11826,12 +13230,6 @@ function wireEvents() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && drag?.active) { drag.days = 0; onDragEnd(); }
   });
-  gc.addEventListener('mousemove', (e) => { // a task's ends show the resize cursor
-    if (drag) return;
-    const g = e.target.closest('.gantt-item');
-    const m = g && itemById(g.dataset.id);
-    gc.style.cursor = m && !collapsedStreams().has(m.stream_id) && dragModeAt(g, m, e.clientX) !== 'move' ? 'ew-resize' : '';
-  });
   gc.tabIndex = 0;
   gc.setAttribute('aria-label', 'Chart: use the arrow keys to move between items and Enter to update one');
   gc.addEventListener('keydown', ganttKeyNav);
@@ -11858,6 +13256,10 @@ function wireEvents() {
   });
   form.elements.newstream.addEventListener('blur', (e) => { if (!e.target.value.trim()) closeNewStream(form.elements); });
   form.elements.end.addEventListener('input', updateEdType); // keeps a milestone's hidden start in step
+  form.elements.start.addEventListener('input', showEdDuration);
+  form.elements.duration.addEventListener('input', () => applyEdDuration(false));
+  form.elements.duration.addEventListener('change', () => applyEdDuration(true));
+  form.elements.duration.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyEdDuration(true); } });
   document.getElementById('ed-cancel').onclick = () => dlg.close();
   document.getElementById('ed-close').onclick = () => dlg.close();
   document.getElementById('ed-delete').onclick = deleteFromDialog;
@@ -11865,14 +13267,13 @@ function wireEvents() {
   document.getElementById('ed-history').onclick = () => { const m = editing; dlg.close(); showReportsFor(m.id); };
   document.getElementById('ed-dates').onclick = () => showDatesFor(editing.id);
   document.getElementById('ed-raid').onclick = () => showRaidFor(`item:${editing.id}`);
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); }); // backdrop
   // The list is rebuilt after a change, so the focus goes back to the add box, ready for the next one.
   document.getElementById('ed-deps').addEventListener('click', (e) => {
     const rm = e.target.closest('[data-edrm]');
     if (rm) { edDeps = edDeps.filter(d => d !== rm.dataset.edrm); renderEdDeps(); document.getElementById('ed-adddep').focus(); }
   });
-  document.getElementById('ed-deps').addEventListener('change', (e) => {
-    if (e.target.id === 'ed-adddep' && e.target.value) { edDeps.push(e.target.value); renderEdDeps(); document.getElementById('ed-adddep').focus(); }
+  document.getElementById('ed-deps').addEventListener('deppick', (e) => {
+    edDeps.push(e.detail); renderEdDeps(); document.getElementById('ed-adddep').focus();
   });
 
   // editor table
@@ -11896,6 +13297,7 @@ function wireEvents() {
   };
 
   document.getElementById('editor-body').addEventListener('change', onEditorChange);
+  document.getElementById('editor-body').addEventListener('deppick', onEditorDepPick);
   document.getElementById('editor-body').addEventListener('click', onEditorClick);
   document.getElementById('editor-body').addEventListener('focusout', (e) => { if (pendingDates.has(e.target)) applyDateEdit(e.target); });
   document.getElementById('editor-body').addEventListener('keydown', (e) => { if (e.key === 'Enter' && pendingDates.has(e.target)) applyDateEdit(e.target); });
@@ -12001,7 +13403,7 @@ async function loadConfig() {
   }
   applyWorkspaceChrome();
   const link = readHash();
-  if (link?.filter) Object.assign(ganttFilter, link.filter);
+  if (link?.filter) applyLinkFilter(link.filter);
   if (link?.view === 'meetings') { setMeetingsMode(link.tab || 'minutes'); if (link.meeting) mtSelId = link.meeting; }
   switchView(link?.view || (VIEWS.includes(prefs.view) ? prefs.view : 'dash'));
   setTimescale(prefs.timescale); // Quarters fits; the ResizeObserver keeps it fitted as layout settles

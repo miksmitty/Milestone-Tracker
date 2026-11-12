@@ -22,7 +22,7 @@
   <aside class="sidebar" aria-label="Main menu">
     <div class="brand">
       <img id="brand-logo" class="brand-logo" alt="" hidden />
-      <svg id="brand-mark" class="brand-mark" width="40" height="40" viewBox="0 0 26 26" aria-hidden="true">
+      <svg id="brand-mark" class="brand-mark" width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
         <rect x="1" y="1" width="24" height="24" rx="6" fill="#e60000"/>
         <path d="M13 3.8 L22.2 13 L13 22.2 L3.8 13 Z" fill="#fff"/>
         <path d="M8.9 13.2 L11.8 16 L17.3 10" fill="none" stroke="#e60000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -287,21 +287,41 @@
         <span id="mt-count" class="grid-count"></span>
       </div>
       <div class="toolbar-actions">
-        <button type="button" id="btn-mt-import" class="btn" title="Bring in minutes or actions from a CSV file or cells pasted from a spreadsheet">Import…</button>
         <button id="btn-mt-add" class="btn btn-primary">+ New meeting</button>
         <button id="btn-act-add" class="btn btn-primary" hidden>+ Add action</button>
+        <button id="btn-mt-import" class="btn" title="Bring in meetings (with their minutes) or actions from a CSV file or cells pasted from a spreadsheet">Import…</button>
         <div class="tb-menu">
           <button type="button" class="btn btn-menu" data-menu="ex-meetings" aria-haspopup="true" aria-expanded="false">Export <svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></button>
           <div id="ex-meetings" class="tb-pop tb-pop-right tb-pop-list" hidden>
             <button type="button" id="btn-mt-csv" title="Download what's shown (filters applied) as a CSV"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download CSV</button>
+            <button type="button" id="btn-mt-csv-all" title="Every meeting and every action of the workspace, whatever the filters, as two CSV files that Import reads back with each action on its meeting"><svg class="tb-ico" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16.5h12"/></svg> Download all meetings &amp; actions</button>
           </div>
         </div>
       </div>
     </div>
+    <div id="mt-bulk" class="bulk-bar" hidden>
+      <span id="mt-bulk-count" class="bulk-count"></span>
+      <label class="bulk-set">Set <select id="mt-bulk-field"></select></label>
+      <span id="mt-bulk-value" class="bulk-value"></span>
+      <button type="button" id="mt-bulk-apply" class="btn btn-sm btn-primary">Apply</button>
+      <span class="spacer"></span>
+      <label class="bulk-set" title="Delete the meetings’ actions with them; otherwise the actions stay, marked as from a deleted meeting"><input type="checkbox" id="mt-bulk-with-acts" /> with their actions</label>
+      <button type="button" id="mt-bulk-delete" class="btn btn-sm btn-danger">Delete selected</button>
+      <button type="button" id="mt-bulk-clear" class="btn btn-sm btn-ghost">Clear selection</button>
+    </div>
+    <div id="act-bulk" class="bulk-bar" hidden>
+      <span id="act-bulk-count" class="bulk-count"></span>
+      <label class="bulk-set">Set <select id="act-bulk-field"></select></label>
+      <span id="act-bulk-value" class="bulk-value"></span>
+      <button type="button" id="act-bulk-apply" class="btn btn-sm btn-primary">Apply</button>
+      <span class="spacer"></span>
+      <button type="button" id="act-bulk-delete" class="btn btn-sm btn-danger">Delete selected</button>
+      <button type="button" id="act-bulk-clear" class="btn btn-sm btn-ghost">Clear selection</button>
+    </div>
     <div id="mt-split" class="rp-split mt-split">
       <div class="table-wrap rp-list mt-list">
         <table id="mt-table" class="ov-table">
-          <thead><tr><th class="mt-date">Date</th><th>Meeting</th><th class="mt-acts" title="Open actions / all actions from the meeting">Actions</th></tr></thead>
+          <thead><tr><th class="mt-sel"><input type="checkbox" id="mt-sel-all" title="Select all shown" /></th><th class="mt-date">Date</th><th>Meeting</th><th class="mt-acts" title="Open actions / all actions from the meeting">Actions</th></tr></thead>
           <tbody id="mt-body"></tbody>
         </table>
       </div>
@@ -315,10 +335,11 @@
         <tbody id="act-body"></tbody>
       </table>
     </div>
-    <div class="help" hidden><p><b>Minutes</b> lists the workspace’s meetings newest first; select one to read its minutes beside the list (<b>↑</b> <b>↓</b> move through them). Paste minutes in as they were written — by an LLM or a person — and any Markdown formatting is kept. The search box reads the whole of every meeting: title, series, attendees, the minutes and their actions, and marks the matches.</p>
+    <div class="help" hidden><p><b>Minutes</b> lists the workspace’s meetings newest first; select one to read its minutes beside the list (<b>↑</b> <b>↓</b> move through them). Paste minutes in as they were written — by Copilot, Teams, Word, an LLM or a person: rich text is turned into Markdown, so headings, bullets, tables and bold are kept, and an RTF file can be opened or dropped on the box. The search box reads the whole of every meeting: title, series, attendees, the minutes and their actions, and marks the matches.</p>
       <p><b>Series…</b> is where the workspace’s regular meetings are set up — a name, how often, the date of the first meeting and the usual attendees. A meeting recorded against a series takes its name, attendees and the date due; when a meeting has come round without minutes, the top of the list says so.</p>
       <p><b>Extract actions</b> reads the minutes for actions — an <i>Actions</i>, <i>Action items</i> or <i>Next steps</i> section, a table of actions, lines starting <i>Action:</i>, checkboxes — and works out the owner and due date where it can (<i>by Friday</i>, <i>12 Nov</i>). Nothing is added until you’ve looked them over. Saving new minutes offers this straight away.</p>
-      <p><b>Actions</b> tracks every action across meetings: tick one off when it’s done, click it to change the wording, owner or due date, or link it to <span data-term="items">items</span> on the plan. A due date in red has passed. Headings work like a spreadsheet’s: <b>▾</b> sorts or filters (open actions are shown until the Status filter says otherwise), drag a heading to move the column or its edge to resize it (double-click to fit), right-click for autofit. The dashboard and the menu show how many are open.</p></div>
+      <p><b>Actions</b> tracks every action across meetings: tick one off when it’s done, click it to change the wording, owner or due date, or link it to <span data-term="items">items</span> on the plan. A due date in red has passed. Headings work like a spreadsheet’s: <b>▾</b> sorts or filters (open actions are shown until the Status filter says otherwise), drag a heading to move the column or its edge to resize it (double-click to fit), right-click for autofit. The dashboard and the menu show how many are open.</p>
+      <p><b>Bulk changes</b>: tick meetings in the list, or actions in the table (shift-click for a range), to change their series, attendees, dates, status, owner or meeting all at once, or delete them. <b>Export › Download all meetings &amp; actions</b> saves two files that <b>Import…</b> brings back together, each action on the meeting it came from.</p></div>
   </main>
 
   <!-- ============ WHAT CHANGED ============ -->
@@ -431,7 +452,13 @@
             Filter <span id="gf-badge" class="tb-badge" hidden></span>
           </button>
           <div id="gm-filter" class="tb-pop" hidden>
-            <label class="pop-field"><span>Stream</span><select id="gf-stream"></select></label>
+            <div class="pop-field stream-pick">
+              <div class="sp-head"><span>Streams</span><span id="gf-stream-count" class="sp-count"></span>
+                <button type="button" id="gf-stream-all" class="link-btn" title="Tick every stream (the same as showing them all)">All</button>
+                <button type="button" id="gf-stream-none" class="link-btn" title="Untick every stream: every stream is shown">None</button></div>
+              <input id="gf-stream-q" class="sp-q" type="search" placeholder="Find a stream" autocomplete="off" aria-label="Find a stream" hidden />
+              <div id="gf-stream" class="sp-list" role="group" aria-label="Streams"></div>
+            </div>
             <label class="pop-field"><span>Owner</span><select id="gf-owner"></select></label>
             <div class="pop-field"><span>Type</span><div id="gf-type" class="pop-seg" role="group" aria-label="Type"></div></div>
             <div class="pop-field"><span>RAG</span><div id="gf-rag" class="rag-pick sm" role="group" aria-label="RAG"></div></div>
@@ -483,6 +510,7 @@
               <label class="check"><input type="checkbox" id="toggle-quarters" checked /> Top timescale</label>
               <label class="check"><input type="checkbox" id="toggle-months" checked /> Bottom timescale</label>
               <label class="check"><input type="checkbox" id="toggle-today" checked /> Today line</label>
+              <label class="check" title="Shade each company-wide change freeze across every stream"><input type="checkbox" id="toggle-freezes" checked /> Change freezes <button type="button" id="edit-freezes" class="link-btn" title="Add or change the company’s change freezes, which apply to every workspace">Edit…</button></label>
               <label class="check" title="Show where each item was planned when the baseline was set"><input type="checkbox" id="toggle-baseline" checked /> Baseline</label>
             </div>
             <div class="pop-field"><span>Critical path</span>
@@ -510,7 +538,7 @@
               <input type="range" id="row-slider" min="24" max="60" step="2" value="40" title="Below 40 the dates/owner line is hidden" />
             </label>
             <label class="pop-field"><span>Zoom</span>
-              <input type="range" id="zoom-slider" min="1" max="80" step="0.5" value="6" />
+              <input type="range" id="zoom-slider" min="0.5" max="80" step="0.5" value="6" />
             </label>
           </div>
         </div>
@@ -530,6 +558,7 @@
         </div>
 
         <div id="timescale" class="tb-seg tb-scale" role="group" aria-label="Timescale">
+          <button type="button" data-scale="years" title="Years over quarters">Years</button>
           <button type="button" data-scale="quarters" title="Quarters over months">Quarters</button>
           <button type="button" data-scale="months" title="Months over weeks">Months</button>
           <button type="button" data-scale="weeks" title="Weeks over days">Weeks</button>
@@ -537,7 +566,7 @@
 
         <div class="tb-seg" role="group" aria-label="Zoom">
           <button type="button" id="zoom-out" title="Zoom out">−</button>
-          <button type="button" id="zoom-fit" title="Fit chart to window">Fit</button>
+          <button type="button" id="zoom-fit" title="Fit the items shown (filters applied) to the window">Fit</button>
           <button type="button" id="zoom-in" title="Zoom in">+</button>
         </div>
 
@@ -557,7 +586,7 @@
       <div id="g-outside" class="gbar-chips gbar-note" role="status" hidden></div>
     </div>
     <div class="help" hidden>
-      <p>Hover <span data-term="item">item</span> for its summary; everything it waits on and holds up lights up with it. Click it to change its RAG or dates, write a report or edit its details.</p>
+      <p>Hover <span data-term="item">item</span> for its summary; everything it waits on and holds up lights up with it. Click or right-click it to change its RAG or dates, write a report, edit its details or <b>Duplicate</b> it as a new one.</p>
       <p>Drag <span data-term="item">item</span> to move it, or either end of a bar to change its start or end: whatever depends on it moves too, and <b>Undo</b> takes it back. Click a stream’s name to fold it.</p>
       <p><b>Filter</b>, <b>Sort</b> and <b>View</b> set what’s shown and how; the link button copies this view with its filters, and <b>PNG</b> downloads it as an image.</p>
     </div>
@@ -697,6 +726,7 @@
         <label title="A milestone has one date and is drawn as a diamond; a top level milestone is also under change control. A task has a start and end and is drawn as a bar. Change the type to switch between them.">Type<select name="type"></select></label>
         <label id="ed-start">Start<input name="start" type="date" /></label>
         <label><span id="ed-end-label">End</span><input name="end" type="date" /></label>
+        <label id="ed-dur" title="Working days (Monday to Friday), counting the start and end day. Type a number, or weeks such as 2w, to set the end date from the start.">Duration (working days)<input name="duration" inputmode="numeric" autocomplete="off" placeholder="e.g. 10 or 2w" /></label>
         <label>RAG<select name="status"></select></label>
         <label>Rolls up to<select name="parent"></select></label>
         <div class="span3 field"><span class="field-label">Depends on</span><div id="ed-deps" class="deps"></div></div>
@@ -978,7 +1008,9 @@
         <label>Series<select name="series_id" title="The regular meeting this is one of, or a one-off"></select></label>
         <label class="span2">Attendees<input name="attendees" placeholder="Who was there — separate names with commas" /></label>
         <label class="span3">Link<input name="link" placeholder="Where the recording, transcript or original notes live (optional)" /></label>
-        <label class="span3">Minutes <span class="md-hint">— paste them in as written; Markdown headings, lists and bold are kept</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here"></textarea></label>
+        <!-- not a <label>: a click in the editor would "click" the open-a-file button -->
+        <div class="span3 field"><span class="field-label">Minutes</span><span class="md-hint">— paste them in as written, from Copilot, Teams, Word or an LLM: headings, lists, tables and bold are kept. Or <button type="button" id="mt-file-btn" class="link-btn">open a file</button> (RTF, text, Markdown or HTML).</span><textarea name="minutes" rows="16" placeholder="Paste the minutes here, or drop an RTF file here"></textarea></div>
+        <input type="file" id="mt-file" accept=".rtf,.txt,.md,.markdown,.html,.htm,text/rtf,application/rtf,text/plain,text/markdown,text/html" hidden />
       </div>
       <p id="mt-error" class="dlg-error"></p>
       <footer class="dlg-foot">
@@ -1017,6 +1049,30 @@
     </form>
   </dialog>
 
+  <!-- ============ CHANGE FREEZES DIALOG (company wide) ============ -->
+  <dialog id="freeze-dialog" class="edit-dialog freeze-dialog">
+    <form id="freeze-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge prog">Company wide</span>
+        <h2>Change freezes</h2>
+        <button type="button" id="fz-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <p class="cf-intro">Periods when nothing should go live, anywhere in the company: every workspace’s plan shades them across all its streams, in each one’s colour. The dates are included.</p>
+      <table class="pg-rag-table pg-freezes-table">
+        <thead><tr><th>Name</th><th>From</th><th>To</th><th>Colour</th><th></th></tr></thead>
+        <tbody id="fz-body"></tbody>
+      </table>
+      <div class="pg-rag-actions">
+        <button type="button" id="fz-add" class="btn btn-sm">+ Add change freeze</button>
+      </div>
+      <p id="fz-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" id="fz-cancel" class="btn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
   <dialog id="series-list-dialog" class="edit-dialog series-list-dialog">
     <form method="dialog">
       <header class="dlg-head">
@@ -1076,9 +1132,10 @@
         <label>Ref<input name="ref" placeholder="e.g. A4" /></label>
         <label>Status<select name="status"></select></label>
         <label>Due<input name="due" type="date" /></label>
-        <label class="span3">Action<textarea name="text" rows="2" placeholder="What is to be done"></textarea></label>
+        <label class="span3">Title<input name="text" placeholder="What is to be done, in a line" /></label>
+        <label class="span3">Description<textarea name="description" rows="4" placeholder="More detail: background, what done looks like, who else is involved"></textarea></label>
         <label>Owner<input name="owner" list="people-list" placeholder="Who" /></label>
-        <label class="span2">From meeting<select name="meeting_id"></select><button type="button" id="ad-minutes" class="link-btn" title="Close this and read the minutes it came from" hidden>Read the minutes →</button></label>
+        <div class="span2 field"><span class="field-label">From meeting</span><input type="hidden" name="meeting_id" /><div id="ad-from" class="ad-from"></div></div>
         <div class="span3 field"><span class="field-label">Linked to <small>— <span data-term="items">items</span> or streams it concerns</small></span><div id="ad-links" class="deps"></div></div>
       </div>
       <p id="ad-error" class="dlg-error"></p>
@@ -1277,41 +1334,50 @@
     </form>
   </dialog>
 
-  <!-- ============ MEETINGS IMPORT DIALOG ============ -->
-  <dialog id="mi-dialog" class="edit-dialog import-dialog">
-    <form id="mi-form" novalidate>
+  <dialog id="meeting-import-dialog" class="edit-dialog import-dialog">
+    <form id="meeting-import-form" novalidate>
       <header class="dlg-head">
         <span class="type-badge imp">Import</span>
-        <h2>Import minutes or actions into <span id="mi-workspace"></span></h2>
+        <h2>Import meetings &amp; actions into <span id="mi-workspace"></span></h2>
         <button type="button" id="mi-close" class="dlg-close" title="Close">✕</button>
       </header>
       <div class="im-body">
         <section id="mi-step-source" class="im-source">
           <label id="mi-drop" class="im-drop">
-            <input type="file" id="mi-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" />
+            <input type="file" id="mi-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" multiple />
             <strong>Choose a CSV file</strong> or drop it here
-            <small>A file of meetings (with their minutes) or of actions, with column headings.</small>
+            <small>A list of meetings (with their minutes) or of actions: any comma, semicolon or tab separated file with column headings, such as a SharePoint list export or the page’s own Download CSV. Choose the meetings and actions files together to bring both back with each action on its meeting.</small>
           </label>
           <div class="im-or"><span>or</span></div>
           <div class="form-grid im-paste">
             <div class="span3 field"><span class="field-label">Paste rows from a spreadsheet</span>
               <textarea id="mi-paste" rows="7" placeholder="Copy the cells in Excel or Sheets, headings included, and paste them here"></textarea></div>
           </div>
-          <p class="dlg-hint"><b>Minutes</b> are read from columns headed Title (or Meeting), Date, Series, Attendees, Link and Minutes (or Notes). <b>Actions</b> from Action (or Text), Owner, Due, Status, Ref and Meeting (the title of the meeting it came from, which links it to those minutes). Files downloaded with Download CSV import as they are. Anything already in the workspace — a meeting of the same title and date, an action with the same wording from the same meeting — is left alone, so importing a file twice adds nothing the second time. A series named in the file is set up if the workspace doesn’t have it.</p>
+          <p class="dlg-hint">Columns are matched to fields by their headings (Date, Title, Series, Attendees, Minutes; or Action, Owner, Due date, Status, Meeting) and you can change the matching before anything is imported. Meetings match an existing one with the same date and title; actions match by ref, or else by the same wording, so importing a later copy of the same list updates rather than adds. Actions found in imported minutes can be added too; ones already tracked aren’t added twice. Files from <b>Export › Download all meetings &amp; actions</b> carry each meeting’s ID, so every action goes back on the meeting it came from, keeping its ref, and each series is set up again with its cadence.</p>
         </section>
-        <section id="mi-step-check" class="im-map" hidden>
+        <section id="mi-step-map" class="im-map" hidden>
           <div class="im-bar">
             <span id="mi-source-name" class="im-source-name"></span>
             <button type="button" id="mi-change" class="link-btn">Choose a different file</button>
           </div>
           <div class="form-grid im-options">
-            <div class="span3 field"><span class="field-label">The file holds</span>
+            <div class="field"><span class="field-label">Each row is</span>
               <div class="seg" id="mi-kind">
-                <label><input type="radio" name="mi-kind" value="minutes" checked /><span>Minutes</span></label>
-                <label><input type="radio" name="mi-kind" value="actions" /><span>Actions</span></label>
+                <label title="Each row is a meeting: its date, title, series, attendees and minutes"><input type="radio" name="mi-kind" value="meetings" checked /><span>A meeting</span></label>
+                <label title="Each row is an action: its wording, owner, due date and status, and the meeting it came from"><input type="radio" name="mi-kind" value="actions" /><span>An action</span></label>
               </div>
             </div>
+            <div class="field"><span class="field-label">What to do</span>
+              <div class="seg" id="mi-mode">
+                <label title="Rows that match an existing meeting or action update it; the rest are added"><input type="radio" name="mi-mode" value="merge" checked /><span>Add new, update matching</span></label>
+                <label title="Every row is added"><input type="radio" name="mi-mode" value="add" /><span>Add all as new</span></label>
+              </div>
+            </div>
+            <label>Dates like 03/04/2026<select id="mi-order"></select></label>
+            <label class="check span3" id="mi-extract-label" title="Read each meeting’s minutes for action lines, as Extract actions does, and track the ones not already tracked"><input type="checkbox" id="mi-extract" checked /> Add the actions found in the minutes</label>
           </div>
+          <h3 class="im-h">Columns</h3>
+          <div class="im-scroll im-cols-wrap"><table class="im-table im-cols"><thead><tr><th>Column in file</th><th>Example</th><th>Import as</th></tr></thead><tbody id="mi-cols"></tbody></table></div>
           <h3 class="im-h">Preview <span id="mi-summary" class="im-summary"></span></h3>
           <div class="im-scroll im-preview-wrap"><table class="im-table im-preview"><thead id="mi-preview-head"></thead><tbody id="mi-preview"></tbody></table></div>
         </section>
