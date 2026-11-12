@@ -10910,6 +10910,7 @@ function openActionDialog(a, preset = {}) {
   f.status.innerHTML = optionList(ACTION_STATUSES, v.status);
   for (const k of AD_FIELDS) if (k !== 'meeting_id' && k !== 'status') f[k].value = v[k] ?? '';
   adLinks = [...v.links];
+  document.getElementById('ad-minutes').hidden = !meetingById(v.meeting_id);
   document.getElementById('ad-delete').hidden = !a;
   document.getElementById('ad-error').textContent = '';
   document.getElementById('ad-heading').textContent = a ? `Edit ${a.ref || 'action'}` : 'New action';
@@ -10963,6 +10964,180 @@ async function deleteAction() {
   rerenderCurrentView();
   offerUndo(snap, `Deleted action ${a.ref || a.text}`);
   await saveActions('Action deleted');
+}
+
+/* ---- importing minutes and actions ---- */
+// Headings are matched by name (lower case, letters and digits only), so a file from Download CSV
+// imports as it is, as does a list from elsewhere that says Owner, Due date or Notes.
+const MI_MINUTES = { title: ['title', 'meeting', 'meetingtitle', 'name', 'subject'], date: ['date', 'meetingdate', 'held', 'heldon'], series: ['series', 'meetingseries'],
+  attendees: ['attendees', 'present', 'participants'], link: ['link', 'url', 'recording'], minutes: ['minutes', 'notes', 'summary', 'body', 'meetingminutes'] };
+const MI_ACTIONS = { ref: ['ref', 'reference', 'id', 'no', 'number'], text: ['action', 'text', 'actionitem', 'description', 'task', 'details'], owner: ['owner', 'assignedto', 'assignee', 'who', 'responsible', 'actionowner'],
+  due: ['due', 'duedate', 'dueby', 'deadline', 'targetdate'], status: ['status', 'state'], doneOn: ['doneon', 'completedon', 'closed'], meeting: ['meeting', 'meetingtitle', 'frommeeting'], meetingDate: ['meetingdate'] };
+let mimp = { name: '', rows: [], kind: 'minutes' };
+const miKey = (h) => String(h ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// Each field's column in the file, or -1.
+function miColumns(header, aliases) {
+  const keys = header.map(miKey), taken = new Set();
+  return Object.fromEntries(Object.entries(aliases).map(([f, names]) => {
+    const i = names.map(n => keys.findIndex((k, j) => k === n && !taken.has(j))).find(j => j >= 0) ?? -1;
+    if (i >= 0) taken.add(i);
+    return [f, i];
+  }));
+}
+const miGuessKind = (header) => (miColumns(header, MI_MINUTES).minutes >= 0 ? 'minutes' : miColumns(header, MI_ACTIONS).text >= 0 ? 'actions' : 'minutes');
+
+// What importing would do: the rows to add, and those left alone because the workspace has them.
+function planMeetingImport() {
+  const [header = [], ...data] = mimp.rows;
+  const rows = data.filter(r => r.some(v => v.trim()));
+  const date = (v) => fileDate((v ?? '').trim());
+  const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const meetings = meetingsOf();
+  const plan = { kind: mimp.kind, add: [], skip: 0, bad: 0, unlinked: 0, newSeries: new Set() };
+  if (mimp.kind === 'minutes') {
+    const c = miColumns(header, MI_MINUTES);
+    if (c.title < 0 && c.minutes < 0) return Object.assign(plan, { error: 'No Title or Minutes column found: the first row needs headings.' });
+    const seen = new Set(meetings.map(m => `${norm(m.title)}|${m.date}`));
+    for (const r of rows) {
+      const get = (f) => (c[f] >= 0 ? (r[c[f]] ?? '').trim() : '');
+      const m = { title: get('title'), date: date(get('date')), series: get('series'), attendees: get('attendees'), link: get('link'), minutes: get('minutes').replace(/\r\n?/g, '\n') };
+      if (!m.title && !m.minutes) { plan.bad++; continue; }
+      m.title = m.title || (m.series ? m.series : 'Meeting') + (m.date ? ` ${fmtShort(m.date)}` : '');
+      const key = `${norm(m.title)}|${m.date}`;
+      if (seen.has(key)) { plan.skip++; continue; }
+      seen.add(key);
+      if (m.series && !seriesOf().some(x => norm(x.name) === norm(m.series))) plan.newSeries.add(m.series);
+      plan.add.push(m);
+    }
+  } else {
+    const c = miColumns(header, MI_ACTIONS);
+    if (c.text < 0) return Object.assign(plan, { error: 'No Action column found: the first row needs headings.' });
+    const batch = [...meetings];
+    const seen = new Set(actionsOf().map(a => `${norm(a.text)}|${a.meeting_id}`));
+    const texts = new Set(actionsOf().map(a => norm(a.text))); // a row naming no meeting matches the wording alone
+    for (const r of rows) {
+      const get = (f) => (c[f] >= 0 ? (r[c[f]] ?? '').trim() : '');
+      const a = { ref: get('ref'), text: get('text'), owner: get('owner'), due: date(get('due')), done: DONE_WORDS.test(get('status')), doneOn: date(get('doneOn')), meetingTitle: get('meeting'), meetingId: '' };
+      if (!a.text) { plan.bad++; continue; }
+      if (a.meetingTitle) {
+        const md = date(get('meetingDate'));
+        const hits = batch.filter(m => norm(m.title) === norm(a.meetingTitle));
+        const m = hits.find(x => md && x.date === md) || (hits.length === 1 || !md ? hits[0] : undefined);
+        if (m) a.meetingId = m.id; else plan.unlinked++;
+      }
+      const key = `${norm(a.text)}|${a.meetingId}`;
+      if (seen.has(key) || (!a.meetingTitle && texts.has(norm(a.text)))) { plan.skip++; continue; }
+      seen.add(key);
+      plan.add.push(a);
+    }
+  }
+  return plan;
+}
+
+function renderMeetingImport() {
+  const plan = planMeetingImport();
+  const actions = mimp.kind === 'actions';
+  document.querySelectorAll('[name="mi-kind"]').forEach(r => { r.checked = r.value === mimp.kind; });
+  document.getElementById('mi-source-name').textContent = `${mimp.name} · ${count(Math.max(0, mimp.rows.length - 1), 'row', 'rows')}`;
+  document.getElementById('mi-preview-head').innerHTML = actions
+    ? '<tr><th>Ref</th><th>Action</th><th>Owner</th><th>Due</th><th>Status</th><th>Meeting</th></tr>'
+    : '<tr><th>Date</th><th>Title</th><th>Series</th><th>Attendees</th><th>Minutes</th></tr>';
+  const cell = (s, n = 90) => escAttr(s.length > n ? s.slice(0, n) + '…' : s);
+  document.getElementById('mi-preview').innerHTML = plan.add.slice(0, 200).map(x => (actions
+    ? `<tr><td>${cell(x.ref || 'new')}</td><td>${cell(x.text)}</td><td>${cell(x.owner)}</td><td>${cell(x.due)}</td><td>${x.done ? 'Done' : 'Open'}</td><td>${cell(x.meetingTitle)}${x.meetingTitle && !x.meetingId ? ' <i>(not found)</i>' : ''}</td></tr>`
+    : `<tr><td>${cell(x.date)}</td><td>${cell(x.title)}</td><td>${cell(x.series)}</td><td>${cell(x.attendees, 50)}</td><td>${cell(x.minutes.replace(/\s+/g, ' '), 120)}</td></tr>`)).join('');
+  const kindWord = actions ? ['action', 'actions'] : ['meeting', 'meetings'];
+  document.getElementById('mi-summary').textContent = plan.error ? '' : [`${count(plan.add.length, ...kindWord)} to add`, plan.skip && `${plan.skip} already there`, plan.bad && `${plan.bad} blank ${plan.bad === 1 ? 'row' : 'rows'} skipped`,
+    plan.newSeries.size && `${count(plan.newSeries.size, 'new series', 'new series')}`, plan.unlinked && `${plan.unlinked} with a meeting not found`].filter(Boolean).join(' · ');
+  document.getElementById('mi-error').textContent = plan.error || (!plan.add.length ? `Nothing new to import${plan.skip ? ': everything in the file is already here' : ''}.` : '');
+  document.getElementById('mi-submit').disabled = !plan.add.length;
+}
+
+function showMeetingImportStep(step) {
+  document.getElementById('mi-step-source').hidden = step !== 'source';
+  document.getElementById('mi-step-check').hidden = step !== 'check';
+  document.getElementById('mi-error').textContent = '';
+  document.getElementById('mi-submit').disabled = true;
+}
+function openMeetingImport() {
+  document.getElementById('mi-workspace').textContent = currentWorkspace().name;
+  document.getElementById('mi-paste').value = '';
+  document.getElementById('mi-file').value = '';
+  showMeetingImportStep('source');
+  document.getElementById('mi-dialog').showModal();
+}
+function loadMeetingImportText(text, name) {
+  const rows = parseAny(text.replace(/\u0000/g, '').replace(/^﻿?sep=.\r?\n/i, '')).map(r => r.map(v => v.trim()));
+  const err = document.getElementById('mi-error');
+  if (rows.length < 2) return (err.textContent = rows.length ? 'Only the headings were found: include at least one row under them.' : 'Nothing to import.');
+  mimp = { name, rows, kind: mtMode === 'actions' && miGuessKind(rows[0]) === 'minutes' && miColumns(rows[0], MI_ACTIONS).text >= 0 ? 'actions' : miGuessKind(rows[0]) };
+  showMeetingImportStep('check');
+  renderMeetingImport();
+}
+async function readMeetingImportFile(file) {
+  const text = await readTextFile(file, document.getElementById('mi-error'));
+  if (text != null) loadMeetingImportText(text, file.name);
+}
+
+async function applyMeetingImport() {
+  const plan = planMeetingImport();
+  if (plan.error || !plan.add.length) return;
+  const snap = snapshotData();
+  const now = new Date().toISOString();
+  const ws = state.workspaceId;
+  const lower = (s) => s.trim().toLowerCase();
+  let madeSeries = 0, saveWhat = [];
+  if (plan.kind === 'minutes') {
+    for (const x of plan.add) {
+      let series = x.series && seriesOf().find(s => lower(s.name) === lower(x.series));
+      if (x.series && !series) {
+        state.meetingSeries.push(series = { id: nextSeriesId(), workspace_id: ws, name: x.series, cadence: '', start: '', attendees: '', notes: '', created: now, updated: now });
+        madeSeries++;
+      }
+      state.meetings.push({ id: nextMeetingId(), workspace_id: ws, title: x.title, date: x.date, series_id: series ? series.id : '', attendees: x.attendees, link: x.link, minutes: x.minutes, created: now, updated: now });
+    }
+    saveWhat = [saveMeetings, madeSeries && saveSeries];
+  } else {
+    const taken = [];
+    for (const x of plan.add) {
+      const used = (r) => actionsOf().some(a => lower(a.ref) === lower(r)) || taken.some(t => lower(t) === lower(r));
+      const ref = x.ref && !used(x.ref) ? x.ref : nextActionRef(ws, taken);
+      taken.push(ref);
+      state.actions.push({ id: nextActionId(), workspace_id: ws, meeting_id: x.meetingId, ref, text: x.text, owner: x.owner, due: x.due, status: x.done ? 'Done' : 'Open', links: [],
+        done_at: x.done ? (x.doneOn ? `${x.doneOn}T12:00:00.000Z` : now) : '', created: now, updated: now });
+    }
+    saveWhat = [saveActions];
+  }
+  document.getElementById('mi-dialog').close();
+  setMeetingsMode(plan.kind);
+  rerenderCurrentView();
+  const label = `Imported ${count(plan.add.length, ...(plan.kind === 'actions' ? ['action', 'actions'] : ['meeting', 'meetings']))}`;
+  offerUndo(snap, label);
+  await Promise.all(saveWhat.filter(Boolean).map(f => f(label)));
+}
+
+function wireMeetingImport() {
+  const dlg = document.getElementById('mi-dialog');
+  const close = () => dlg.close();
+  document.getElementById('btn-mt-import').onclick = openMeetingImport;
+  document.getElementById('mi-close').onclick = close;
+  document.getElementById('mi-cancel').onclick = close;
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
+  document.getElementById('mi-change').onclick = () => { document.getElementById('mi-file').value = ''; showMeetingImportStep('source'); };
+  document.getElementById('mi-file').addEventListener('change', (e) => { if (e.target.files[0]) readMeetingImportFile(e.target.files[0]); });
+  const drop = document.getElementById('mi-drop');
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (e.dataTransfer.files[0]) readMeetingImportFile(e.dataTransfer.files[0]);
+  });
+  document.getElementById('mi-paste').addEventListener('paste', () => {
+    setTimeout(() => { const t = document.getElementById('mi-paste').value; if (t.trim()) loadMeetingImportText(t, 'Pasted rows'); }, 0);
+  });
+  document.getElementById('mi-kind').addEventListener('change', (e) => { mimp.kind = e.target.value; renderMeetingImport(); });
+  document.getElementById('mi-form').addEventListener('submit', (e) => { e.preventDefault(); applyMeetingImport(); });
 }
 
 function wireMeetings() {
@@ -11112,6 +11287,9 @@ function wireMeetings() {
   document.getElementById('ad-cancel').onclick = close('action-dialog');
   document.getElementById('ad-close').onclick = close('action-dialog');
   document.getElementById('ad-delete').onclick = deleteAction;
+  const adMinutes = document.getElementById('ad-minutes'), adMeeting = document.getElementById('action-form').elements.meeting_id;
+  adMeeting.addEventListener('change', () => { adMinutes.hidden = !meetingById(adMeeting.value); });
+  adMinutes.onclick = () => showMeeting(adMeeting.value);
   document.getElementById('ad-links').addEventListener('change', (e) => {
     if (e.target.id !== 'ad-addlink' || !e.target.value) return;
     adLinks.push(e.target.value);
@@ -11571,6 +11749,7 @@ function wireEvents() {
   wireOverview();
   wireRaid();
   wireRaidImport();
+  wireMeetingImport();
   wireMeetings();
 
   document.getElementById('zoom-in').onclick = () => { state.userZoomed = true; setZoom(state.pxPerDay * 1.3); };

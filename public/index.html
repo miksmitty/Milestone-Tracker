@@ -22,7 +22,7 @@
   <aside class="sidebar" aria-label="Main menu">
     <div class="brand">
       <img id="brand-logo" class="brand-logo" alt="" hidden />
-      <svg id="brand-mark" class="brand-mark" width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
+      <svg id="brand-mark" class="brand-mark" width="40" height="40" viewBox="0 0 26 26" aria-hidden="true">
         <rect x="1" y="1" width="24" height="24" rx="6" fill="#e60000"/>
         <path d="M13 3.8 L22.2 13 L13 22.2 L3.8 13 Z" fill="#fff"/>
         <path d="M8.9 13.2 L11.8 16 L17.3 10" fill="none" stroke="#e60000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -287,6 +287,7 @@
         <span id="mt-count" class="grid-count"></span>
       </div>
       <div class="toolbar-actions">
+        <button type="button" id="btn-mt-import" class="btn" title="Bring in minutes or actions from a CSV file or cells pasted from a spreadsheet">Import…</button>
         <button id="btn-mt-add" class="btn btn-primary">+ New meeting</button>
         <button id="btn-act-add" class="btn btn-primary" hidden>+ Add action</button>
         <div class="tb-menu">
@@ -1077,7 +1078,7 @@
         <label>Due<input name="due" type="date" /></label>
         <label class="span3">Action<textarea name="text" rows="2" placeholder="What is to be done"></textarea></label>
         <label>Owner<input name="owner" list="people-list" placeholder="Who" /></label>
-        <label class="span2">From meeting<select name="meeting_id"></select></label>
+        <label class="span2">From meeting<select name="meeting_id"></select><button type="button" id="ad-minutes" class="link-btn" title="Close this and read the minutes it came from" hidden>Read the minutes →</button></label>
         <div class="span3 field"><span class="field-label">Linked to <small>— <span data-term="items">items</span> or streams it concerns</small></span><div id="ad-links" class="deps"></div></div>
       </div>
       <p id="ad-error" class="dlg-error"></p>
@@ -1272,6 +1273,54 @@
         <span class="spacer"></span>
         <button type="button" id="ri-cancel" class="btn">Cancel</button>
         <button type="submit" id="ri-submit" class="btn btn-primary" disabled>Import</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ============ MEETINGS IMPORT DIALOG ============ -->
+  <dialog id="mi-dialog" class="edit-dialog import-dialog">
+    <form id="mi-form" novalidate>
+      <header class="dlg-head">
+        <span class="type-badge imp">Import</span>
+        <h2>Import minutes or actions into <span id="mi-workspace"></span></h2>
+        <button type="button" id="mi-close" class="dlg-close" title="Close">✕</button>
+      </header>
+      <div class="im-body">
+        <section id="mi-step-source" class="im-source">
+          <label id="mi-drop" class="im-drop">
+            <input type="file" id="mi-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" />
+            <strong>Choose a CSV file</strong> or drop it here
+            <small>A file of meetings (with their minutes) or of actions, with column headings.</small>
+          </label>
+          <div class="im-or"><span>or</span></div>
+          <div class="form-grid im-paste">
+            <div class="span3 field"><span class="field-label">Paste rows from a spreadsheet</span>
+              <textarea id="mi-paste" rows="7" placeholder="Copy the cells in Excel or Sheets, headings included, and paste them here"></textarea></div>
+          </div>
+          <p class="dlg-hint"><b>Minutes</b> are read from columns headed Title (or Meeting), Date, Series, Attendees, Link and Minutes (or Notes). <b>Actions</b> from Action (or Text), Owner, Due, Status, Ref and Meeting (the title of the meeting it came from, which links it to those minutes). Files downloaded with Download CSV import as they are. Anything already in the workspace — a meeting of the same title and date, an action with the same wording from the same meeting — is left alone, so importing a file twice adds nothing the second time. A series named in the file is set up if the workspace doesn’t have it.</p>
+        </section>
+        <section id="mi-step-check" class="im-map" hidden>
+          <div class="im-bar">
+            <span id="mi-source-name" class="im-source-name"></span>
+            <button type="button" id="mi-change" class="link-btn">Choose a different file</button>
+          </div>
+          <div class="form-grid im-options">
+            <div class="span3 field"><span class="field-label">The file holds</span>
+              <div class="seg" id="mi-kind">
+                <label><input type="radio" name="mi-kind" value="minutes" checked /><span>Minutes</span></label>
+                <label><input type="radio" name="mi-kind" value="actions" /><span>Actions</span></label>
+              </div>
+            </div>
+          </div>
+          <h3 class="im-h">Preview <span id="mi-summary" class="im-summary"></span></h3>
+          <div class="im-scroll im-preview-wrap"><table class="im-table im-preview"><thead id="mi-preview-head"></thead><tbody id="mi-preview"></tbody></table></div>
+        </section>
+      </div>
+      <p id="mi-error" class="dlg-error"></p>
+      <footer class="dlg-foot">
+        <span class="spacer"></span>
+        <button type="button" id="mi-cancel" class="btn">Cancel</button>
+        <button type="submit" id="mi-submit" class="btn btn-primary" disabled>Import</button>
       </footer>
     </form>
   </dialog>
