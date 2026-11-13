@@ -2022,3 +2022,13 @@ mark { background: var(--flash); color: inherit; border-radius: 2px; padding: 0 
 .meeting-dialog .wys textarea { min-height: 300px; }
 .wys-body table { border-collapse: collapse; }
 .wys-body :is(th, td) { border: 1px solid var(--border); padding: 3px 8px; text-align: left; vertical-align: top; }
+
+.tree-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+#editor-table td.tree-child { position: relative; }
+#editor-table td.tree-child::before { content: "↳"; position: absolute; left: var(--tree-x, 0px); color: var(--faint); pointer-events: none; }
+#editor-table tr.tree-parent input[data-k="title"] { font-weight: 700; }
+#editor-table .btn-add-child { border: 1px solid var(--border); background: transparent; color: var(--accent); border-radius: 4px; width: 24px; height: 24px; margin-right: 4px; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; }
+#editor-table .btn-add-child:hover { background: var(--tint-2); }
+#editor-table .col-sel { white-space: nowrap; }
+#editor-table .col-sel .btn-add-child { display: inline-block; vertical-align: middle; margin: 0 0 0 6px; }
+#editor-table .col-sel .btn-add-child.gap { visibility: hidden; }
