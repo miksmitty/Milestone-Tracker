@@ -10632,8 +10632,8 @@ function wireDates() {
 
 /* ================= PNG export ================= */
 
-function downloadPNG() {
-  // Exported in the light colours whatever the theme, so it sits well on a slide.
+async function downloadPNG() {
+  // Exported in the light colours whatever the theme, so it sits well on a slide, with the key below.
   const themed = G !== GANTT_THEMES.light;
   if (themed) { G = GANTT_THEMES.light; renderGantt(); }
   const svg = document.querySelector('#gantt-container svg');
@@ -10641,26 +10641,42 @@ function downloadPNG() {
   if (!svg) return;
   const copy = svg.cloneNode(true); // drop the scroll offsets of the pinned layers
   for (const g of copy.querySelectorAll('.gantt-col, .gantt-head, .gantt-corner')) g.removeAttribute('transform');
-  const xml = new XMLSerializer().serializeToString(copy);
-  const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const img = new Image();
-  img.onload = () => {
-    const scale = 2; // retina-quality export
-    const canvas = document.createElement('canvas');
-    canvas.width = svg.width.baseVal.value * scale;
-    canvas.height = svg.height.baseVal.value * scale;
-    const ctx = canvas.getContext('2d');
-    ctx.scale(scale, scale);
-    ctx.drawImage(img, 0, 0);
-    URL.revokeObjectURL(url);
-    const a = document.createElement('a');
-    const p = currentWorkspace();
-    a.download = `${(p.code || p.name).replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'workspace'}-gantt.png`;
-    a.href = canvas.toDataURL('image/png');
-    a.click();
-  };
-  img.src = url;
+  const w = svg.width.baseVal.value, h = svg.height.baseVal.value;
+  const chart = new XMLSerializer().serializeToString(copy);
+  // the key, drawn as the page shows it (in the light colours) and wrapped to the chart's width
+  const root = document.documentElement;
+  const theme = root.dataset.theme, dark = 'dark' in root.dataset;
+  root.dataset.theme = 'light';
+  delete root.dataset.dark;
+  let keyXml = '', keyH = 0;
+  try {
+    const legend = document.querySelector('#view-gantt .legend') || document.querySelector('.legend');
+    if (legend) {
+      const key = inlineStyles(legend);
+      Object.assign(key.style, { width: w + 'px', height: 'auto', minHeight: '0', maxHeight: 'none', boxSizing: 'border-box', margin: '0', padding: '12px 16px', background: G.bg, borderTop: `1px solid ${G.line}` });
+      document.body.appendChild(key); // measure the height as laid out
+      key.style.position = 'fixed'; key.style.left = '-100000px'; key.style.top = '0';
+      keyH = Math.ceil(key.offsetHeight);
+      key.remove();
+      key.style.position = key.style.left = key.style.top = '';
+      keyXml = new XMLSerializer().serializeToString(key);
+    }
+  } finally {
+    if (theme) root.dataset.theme = theme; else delete root.dataset.theme;
+    if (dark) root.dataset.dark = '';
+  }
+  const H = h + keyH;
+  const whole = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${H}">
+    <rect width="${w}" height="${H}" fill="${GANTT_THEMES.light.bg}"/>
+    <image width="${w}" height="${h}" href="data:image/svg+xml;charset=utf-8,${encodeURIComponent(chart)}"/>
+    ${keyXml ? `<foreignObject y="${h}" width="${w}" height="${keyH}">${keyXml}</foreignObject>` : ''}</svg>`;
+  let png;
+  try { png = await svgToPNG(whole, w, H); } catch (err) { return showToast(err.message); }
+  const a = document.createElement('a');
+  const p = currentWorkspace();
+  a.download = `${pngSlug(p.code || p.name) || 'workspace'}-gantt.png`;
+  a.href = png;
+  a.click();
 }
 
 /* ================= meetings ================= */
@@ -13197,6 +13213,18 @@ function inlineStyles(el, leave = () => false) {
     for (const k of cs) css += `${k}:${cs.getPropertyValue(k)};`;
     to[i].setAttribute('style', css);
     to[i].removeAttribute('class');
+    // ::before / ::after drawn as real elements, as their styles can't be written inline
+    for (const pseudo of ['::before', '::after']) {
+      const ps = getComputedStyle(src, pseudo);
+      if (!ps.content || ps.content === 'none' || ps.content === 'normal') continue;
+      const el = document.createElement('span');
+      let pcss = '';
+      for (const k of ps) pcss += `${k}:${ps.getPropertyValue(k)};`;
+      el.setAttribute('style', pcss);
+      const text = ps.content.match(/^"(.*)"$/);
+      if (text) el.textContent = text[1];
+      if (pseudo === '::before') to[i].prepend(el); else to[i].append(el);
+    }
   });
   for (const x of gone) x.remove();
   return copy;
