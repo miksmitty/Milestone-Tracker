@@ -518,13 +518,15 @@
               <label class="check" title="Pick out the items with no float — any slip moves a top level milestone — and the links between them; everything else fades"><input type="checkbox" id="toggle-critical" /> Pick out on the chart</label>
               <small id="critical-note" class="pop-note"></small>
             </div>
-            <label class="pop-field"><span>Dependency lines</span>
-              <select id="link-mode">
+            <div class="pop-field"><span>Link lines</span>
+              <label class="check" title="Lines from each item to the items it depends on"><input type="checkbox" id="toggle-deps" checked /> Dependencies</label>
+              <label class="check" title="Lines from each item to the item it rolls up to"><input type="checkbox" id="toggle-rollups" checked /> Roll-ups</label>
+              <select id="link-mode" aria-label="When to show the link lines">
                 <option value="all">Always show</option>
                 <option value="hover">Only for the item under the pointer</option>
                 <option value="none">Hide</option>
               </select>
-            </label>
+            </div>
             <div class="pop-field"><span>Streams</span>
               <div class="pop-seg"><button type="button" id="fold-all" title="Fold every stream into one row">Fold all</button><button type="button" id="unfold-all">Unfold all</button></div>
             </div>
@@ -599,8 +601,8 @@
       <span class="legend-set"><span class="legend-title">Key</span>
         <span class="legend-item"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1 L13 7 L7 13 L1 7 Z" fill="#8e8d83"/></svg> <span data-term="Milestone">Milestone</span></span>
         <span class="legend-item"><i class="bar"></i> <span data-term="Task">Task</span></span>
-        <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#0f8b8d" stroke-width="1.5"/><path d="M18 1 L25 5 L18 9 Z" fill="#0f8b8d"/></svg> Depends on</span>
-        <span class="legend-item"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#7c3aed"/></svg> Rolls up to</span>
+        <span class="legend-item" id="legend-deps"><svg width="26" height="10"><path d="M1 5 H19" stroke="#0f8b8d" stroke-width="1.5"/><path d="M18 1 L25 5 L18 9 Z" fill="#0f8b8d"/></svg> Depends on</span>
+        <span class="legend-item" id="legend-rollups"><svg width="26" height="10"><path d="M1 5 H19" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="4 3"/><path d="M18 1 L25 5 L18 9 Z" fill="#7c3aed"/></svg> Rolls up to</span>
         <span class="legend-item" id="legend-baseline" hidden><i class="bar bar-base"></i> Baseline</span>
         <span class="legend-item" id="legend-critical" hidden><svg width="26" height="10"><path d="M1 5 H25" stroke="#e60000" stroke-width="2.4"/></svg> Critical path</span>
         <span class="legend-item"><i class="late-dot"></i> Overdue</span>

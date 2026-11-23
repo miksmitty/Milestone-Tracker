@@ -131,6 +131,8 @@ const state = {
   timescale: 'quarters', // key of TIMESCALES
   showToday: true,
   showFreezes: true,    // change freeze periods shaded across every stream
+  showDeps: true,       // dependency lines on the Gantt
+  showRollups: true,    // roll-up lines on the Gantt
   linkMode: 'all',      // dependency lines: 'all', 'hover' (only the item under the pointer) or 'none'
   showBaseline: true,
   showCritical: false,  // pick out the critical path: items with no float, and the links between them
@@ -2317,8 +2319,8 @@ function renderGantt() {
     for (const m of items) {
       if (m._collapsed) continue;
       const b = pos.get(m.id);
-      for (const d of m.deps) if (shown(d) && (all || critLink(d, m.id))) drawLink(svg, pos.get(d), b, false, rm, false, critLink(d, m.id));
-      if (m.parent && shown(m.parent) && (all || critLink(m.id, m.parent))) drawLink(svg, b, pos.get(m.parent), true, rm, clashed.has(m.id), critLink(m.id, m.parent));
+      for (const d of m.deps) if (shown(d) && ((all && state.showDeps) || critLink(d, m.id))) drawLink(svg, pos.get(d), b, false, rm, false, critLink(d, m.id));
+      if (m.parent && shown(m.parent) && ((all && state.showRollups) || critLink(m.id, m.parent))) drawLink(svg, b, pos.get(m.parent), true, rm, clashed.has(m.id), critLink(m.id, m.parent));
     }
   }
 
@@ -2881,6 +2883,11 @@ function renderGanttFilters() {
   document.getElementById('baseline-clear').disabled = !based.length;
   document.getElementById('legend-baseline').hidden = !(state.showBaseline && moved);
   document.getElementById('link-mode').value = state.linkMode;
+  document.getElementById('toggle-deps').checked = state.showDeps;
+  document.getElementById('toggle-rollups').checked = state.showRollups;
+  document.getElementById('link-mode').disabled = !state.showDeps && !state.showRollups;
+  document.getElementById('legend-deps').hidden = state.linkMode === 'none' || !state.showDeps;
+  document.getElementById('legend-rollups').hidden = state.linkMode === 'none' || !state.showRollups;
   document.getElementById('toggle-baseline').checked = state.showBaseline;
   document.getElementById('toggle-critical').checked = state.showCritical;
   document.getElementById('critical-note').textContent = criticalNote();
@@ -13394,6 +13401,8 @@ function wireEvents() {
   document.getElementById('toggle-today').onchange = (e) => { state.showToday = e.target.checked; renderGantt(); };
   document.getElementById('toggle-freezes').onchange = (e) => { state.showFreezes = e.target.checked; renderGantt(); };
   document.getElementById('edit-freezes').onclick = () => { closeMenus(); openFreezeDialog(); };
+  document.getElementById('toggle-deps').onchange = (e) => { state.showDeps = e.target.checked; saveAppPrefs({ showDeps: state.showDeps }); renderGantt(); };
+  document.getElementById('toggle-rollups').onchange = (e) => { state.showRollups = e.target.checked; saveAppPrefs({ showRollups: state.showRollups }); renderGantt(); };
   document.getElementById('link-mode').onchange = (e) => { state.linkMode = e.target.value; saveAppPrefs({ linkMode: state.linkMode }); renderGantt(); };
   document.getElementById('toggle-baseline').onchange = (e) => { state.showBaseline = e.target.checked; saveAppPrefs({ showBaseline: state.showBaseline }); renderGantt(); };
   document.getElementById('toggle-critical').onchange = (e) => { state.showCritical = e.target.checked; saveAppPrefs({ showCritical: state.showCritical }); renderGantt(); };
@@ -13616,6 +13625,8 @@ async function loadConfig() {
   applyTheme();
   if (['all', 'hover', 'none'].includes(prefs.linkMode)) state.linkMode = prefs.linkMode;
   if (prefs.showBaseline === false) state.showBaseline = false;
+  if (prefs.showDeps === false) state.showDeps = false;
+  if (prefs.showRollups === false) state.showRollups = false;
   if (prefs.showCritical === true) state.showCritical = true;
   wireEvents();
   await loadConfig();
