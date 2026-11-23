@@ -49,7 +49,7 @@ const DATASETS = {
   '/api/workspaces': {
     file: path.join(DATA_DIR, 'workspaces.csv'),
     legacy: path.join(DATA_DIR, 'programs.csv'), // read until workspaces.csv is first saved
-    header: 'id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,dep_priorities,dep_types,risk_statuses,issue_statuses,dep_statuses,raid_levels,hidden,created,updated\n',
+    header: 'id,number,name,code,description,owner,lead,start,end,rag,trend,item_term,milestone_term,task_term,dep_priorities,dep_types,risk_statuses,issue_statuses,dep_statuses,raid_levels,reporting_levels,hidden,created,updated\n',
   },
   '/api/statuses': {
     file: path.join(DATA_DIR, 'statuses.csv'),
@@ -74,7 +74,7 @@ const DATASETS = {
   },
   '/api/raid': {
     file: path.join(DATA_DIR, 'raid.csv'),
-    header: 'id,workspace_id,kind,ref,title,description,stream_id,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,impact_if,mitigation,accountable,links,raised,created,updated\n',
+    header: 'id,workspace_id,kind,ref,title,description,stream_id,owner,status,rag,priority,dep_type,likelihood,impact,due,party,response,impact_if,mitigation,accountable,reporting_level,links,raised,created,updated\n',
   },
   '/api/raid-notes': {
     file: path.join(DATA_DIR, 'raid-notes.csv'),
@@ -100,6 +100,19 @@ const DATASETS = {
     // from (blank for one added without a meeting), `status` Open or Done, `links` the items or
     // streams it concerns (item:<id>;stream:<id>, as in raid.csv). `text` is its title.
     header: 'id,workspace_id,meeting_id,ref,text,description,owner,due,status,links,done_at,created,updated\n',
+  },
+  '/api/action-notes': {
+    file: path.join(DATA_DIR, 'action-notes.csv'),
+    // Status updates on an action, only ever added to (as raid-notes.csv is for the register).
+    header: 'id,workspace_id,action_id,at,by,text\n',
+    stampBy: true,
+  },
+  '/api/meeting-attachments': {
+    file: path.join(DATA_DIR, 'meeting-attachments.csv'),
+    // A file attached to a meeting: `name` as it was uploaded, `file` what it's stored as in
+    // attachments/ (see serveFiles), `size` in bytes, `type` its media type.
+    header: 'id,workspace_id,meeting_id,name,file,size,type,at,by\n',
+    stampBy: true,
   },
   '/api/report-comments': {
     file: path.join(DATA_DIR, 'report-comments.csv'),
@@ -463,7 +476,7 @@ setInterval(checkFiles, 2000).unref();
 // next number. A browser reserves a few at a time (POST /api/ids?file=milestones&n=20). The last
 // id given out per file is kept in ids.json; the next is always above every id in the file too.
 const IDS_FILE = path.join(DATA_DIR, 'ids.json');
-const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'streams', 'raid', 'raid-notes', 'meeting-series', 'meetings', 'meeting-actions', 'report-comments', 'freezes'];
+const ID_FILES = ['workspaces', 'milestones', 'reports', 'updates', 'streams', 'raid', 'raid-notes', 'meeting-series', 'meetings', 'meeting-actions', 'action-notes', 'meeting-attachments', 'report-comments', 'freezes'];
 function reserveIds(file, n) {
   let issued = {};
   try { issued = JSON.parse(fs.readFileSync(IDS_FILE, 'utf8')); } catch { /* none issued yet */ }
@@ -672,6 +685,49 @@ function serveLogo(req, res) {
   });
 }
 
+// Attached files live in attachments/ beside the data, each under a name of its own (a random prefix
+// and the name it was uploaded as), so two files called minutes.pdf don't collide. POST
+// /api/files?name=<name> stores the request body and answers { ok, file, size }; GET
+// /api/files/<file> sends it back. The record of which meeting has which file is
+// meeting-attachments.csv. Files aren't deleted when their record is, so Undo can bring one back.
+const FILES_DIR = path.join(DATA_DIR, 'attachments');
+const MAX_FILE = 25 * 1024 * 1024;
+// Shown in the browser; anything else (HTML and SVG included, which could run script) is downloaded.
+const INLINE_TYPES = { '.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.txt': 'text/plain; charset=utf-8' };
+const safeFileName = (name) => path.basename(String(name || 'file')).replace(/[^\w.\- ()]+/g, '_').replace(/^\.+/, '').slice(0, 120) || 'file';
+function serveFiles(req, res, pathname) {
+  if (req.method === 'POST') {
+    const name = safeFileName(new URL(req.url, 'http://x').searchParams.get('name'));
+    const file = `${crypto.randomBytes(6).toString('hex')}-${name}`;
+    const chunks = [];
+    let size = 0, tooBig = false;
+    req.on('data', (c) => { size += c.length; if (size > MAX_FILE) tooBig = true; else chunks.push(c); });
+    req.on('end', () => {
+      if (tooBig) return sendJSON(res, 413, { ok: false, error: `Files can be up to ${MAX_FILE / 1024 / 1024} MB.` });
+      fs.mkdir(FILES_DIR, { recursive: true }, () => fs.writeFile(path.join(FILES_DIR, file), Buffer.concat(chunks), (err) => {
+        if (err) return sendJSON(res, 500, { ok: false, error: err.message });
+        sendJSON(res, 200, { ok: true, file, size });
+      }));
+    });
+    return;
+  }
+  if (req.method !== 'GET') { res.writeHead(405); return res.end('Method not allowed'); }
+  let file;
+  try { file = decodeURIComponent(pathname.slice(pathname.lastIndexOf('/') + 1)); } catch { file = ''; }
+  if (!file || file !== path.basename(file) || file.startsWith('.')) { res.writeHead(404); return res.end('Not found'); }
+  fs.readFile(path.join(FILES_DIR, file), (err, data) => {
+    if (err) { res.writeHead(404); return res.end('Not found'); }
+    const shown = file.replace(/^[0-9a-f]{12}-/, '');
+    const type = INLINE_TYPES[path.extname(file).toLowerCase()];
+    res.writeHead(200, {
+      'Content-Type': type || 'application/octet-stream',
+      'Content-Disposition': `${type ? 'inline' : 'attachment'}; filename="${shown.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(shown)}`,
+      'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=3600',
+    });
+    res.end(data);
+  });
+}
+
 const server = http.createServer((req, res) => {
   const pathname = new URL(req.url, 'http://x').pathname;
   if (req.method === 'GET' && pathname.endsWith('/api/config')) return serveConfig(req, res);
@@ -682,6 +738,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname.endsWith('/api/versions')) return sendJSON(res, 200, currentVersions());
   if (req.method === 'POST' && pathname.endsWith('/api/ids')) return serveIds(req, res);
   if (req.method === 'POST' && pathname.endsWith('/api/clear-history')) return serveClearHistory(req, res);
+  if (/\/api\/files(\/[^/]+)?$/.test(pathname)) return serveFiles(req, res, pathname);
   const ds = datasetFor(pathname);
   if (ds) {
     if (req.method === 'GET') {

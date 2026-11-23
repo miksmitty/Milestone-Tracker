@@ -327,6 +327,7 @@
       </div>
       <div id="mt-divider" class="rp-divider" title="Drag to resize · double-click to reset"></div>
       <section id="mt-pane" class="rp-pane mt-pane" aria-label="Selected meeting"></section>
+      <input type="file" id="mt-att-file" multiple hidden />
     </div>
     <div id="mt-actions" class="table-wrap" hidden>
       <table id="actions-table" class="act-table">
@@ -728,7 +729,7 @@
         <label><span id="ed-end-label">End</span><input name="end" type="date" /></label>
         <label id="ed-dur" title="Working days (Monday to Friday), counting the start and end day. Type a number, or weeks such as 2w, to set the end date from the start.">Duration (working days)<input name="duration" inputmode="numeric" autocomplete="off" placeholder="e.g. 10 or 2w" /></label>
         <label>RAG<select name="status"></select></label>
-        <label>Rolls up to<select name="parent"></select></label>
+        <div class="field"><span class="field-label">Rolls up to</span><input type="hidden" name="parent" /><div id="ed-parent" class="deps"></div></div>
         <div class="span3 field"><span class="field-label">Depends on</span><div id="ed-deps" class="deps"></div></div>
         <label class="span3">GitLab URL<input name="gitlab_url" type="url" placeholder="https://gitlab.example.com/group/project" /></label>
         <label class="span3">Use case URL<input name="use_case_url" type="url" placeholder="https://…" /></label>
@@ -856,7 +857,7 @@
       <div id="pg-panel-deps" class="pg-deps" role="tabpanel" hidden>
         <p class="pg-rag-intro">The choices risks, issues and dependencies offer, in order. The last status in each list closes the entry; levels run lowest first and priorities highest first. Renaming a value renames it on every entry that has it.</p>
         <input type="hidden" name="dep_priorities" /><input type="hidden" name="dep_types" />
-        <input type="hidden" name="risk_statuses" /><input type="hidden" name="issue_statuses" /><input type="hidden" name="dep_statuses" /><input type="hidden" name="raid_levels" />
+        <input type="hidden" name="risk_statuses" /><input type="hidden" name="issue_statuses" /><input type="hidden" name="dep_statuses" /><input type="hidden" name="raid_levels" /><input type="hidden" name="reporting_levels" />
         <div class="pg-deps-lists">
           <section>
             <h3>Risk status <small>last closes</small></h3>
@@ -887,6 +888,11 @@
             <h3>Dependency type</h3>
             <ul id="pg-dep_types" class="pg-dep-list"></ul>
             <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="dep_types">+ Add type</button><button type="button" class="link-btn" data-dl-reset="dep_types">Reset</button></div>
+          </section>
+          <section>
+            <h3>Reporting level <small>where risks, issues and dependencies are reported</small></h3>
+            <ul id="pg-reporting_levels" class="pg-dep-list"></ul>
+            <div class="pg-rag-actions"><button type="button" class="btn btn-sm" data-dl-add="reporting_levels">+ Add level</button><button type="button" class="link-btn" data-dl-reset="reporting_levels">Reset</button></div>
           </section>
         </div>
       </div>
@@ -957,6 +963,7 @@
         <label>RAG<select name="rag"></select></label>
         <label>Due<input name="due" type="date" /></label>
         <label>Raised<input name="raised" type="date" /></label>
+        <label>Reporting level<select name="reporting_level"></select></label>
 
         <h3 class="rd-sec" id="rd-sec-rating">Rating</h3>
         <label>Likelihood<select name="likelihood"></select></label>
@@ -1137,6 +1144,10 @@
         <label>Owner<input name="owner" list="people-list" placeholder="Who" /></label>
         <div class="span2 field"><span class="field-label">From meeting</span><input type="hidden" name="meeting_id" /><div id="ad-from" class="ad-from"></div></div>
         <div class="span3 field"><span class="field-label">Linked to <small>— <span data-term="items">items</span> or streams it concerns</small></span><div id="ad-links" class="deps"></div></div>
+        <div class="span3 field rd-notes-field"><span class="field-label">Status updates</span>
+          <textarea name="note" rows="2" placeholder="Add an update — it’s kept with today’s date and time, and earlier updates stay as they are"></textarea>
+          <ul id="ad-notes" class="rd-notes"></ul>
+        </div>
       </div>
       <p id="ad-error" class="dlg-error"></p>
       <footer class="dlg-foot">

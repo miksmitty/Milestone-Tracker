@@ -110,6 +110,8 @@ const state = {
   meetingSeries: [],    // regular meetings, every workspace: {id, workspace_id, name, cadence, start, attendees, notes, created, updated}
   meetings: [],         // meetings, every workspace: {id, workspace_id, title, date, series_id, attendees, link, minutes (Markdown), created, updated}
   actions: [],          // actions from meetings, every workspace: {id, workspace_id, meeting_id, ref, text, owner, due, status, links, done_at, created, updated}
+  actionNotes: [],      // status updates on actions, only ever added to: {id, workspace_id, action_id, at, by, text}
+  attachments: [],      // files attached to meetings: {id, workspace_id, meeting_id, name, file, size, type, at, by}
   freezes: [],          // change freeze periods, company wide (every workspace): {id, name, start, end, color}
   reportComments: [],   // comments on passages of reports, every workspace: {id, workspace_id, report_id, field, quote, start, end, parent_id, at, by, text, resolved}
   lastWorkspaceId: 0,
@@ -367,7 +369,7 @@ async function loadData() {
     synced[file] = { version: r.headers.get('X-Version'), text };
     return text;
   }));
-  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, meetingSeries, meetings, actions, reportComments, freezes] = texts;
+  const [workspaces, statuses, streams, items, reports, updates, raid, raidNotes, meetingSeries, meetings, actions, reportComments, freezes, actionNotes, attachments] = texts;
   state.workspaces = rowsToWorkspaces(parseAny(workspaces));
   state.statuses = rowsToStatuses(parseAny(statuses));
   for (const p of state.workspaces) p.status = normaliseStatus(p.status, p.id);
@@ -384,6 +386,8 @@ async function loadData() {
   state.actions = rowsToActions(parseAny(actions));
   state.reportComments = rowsToComments(parseAny(reportComments));
   state.freezes = rowsToFreezes(parseAny(freezes));
+  state.actionNotes = rowsToActionNotes(parseAny(actionNotes));
+  state.attachments = rowsToAttachments(parseAny(attachments));
   dataLoaded = true;
   if (created) await saveWorkspaces();
   if (seriesFromNames()) await Promise.all([saveSeries('Meeting series created from names'), saveMeetings()]);
@@ -461,6 +465,8 @@ const saveMeetings = (msg) => saveCSV('meetings', msg);
 const saveActions = (msg) => saveCSV('meeting-actions', msg);
 const saveComments = (msg) => saveCSV('report-comments', msg);
 const saveFreezes = (msg) => saveCSV('freezes', msg);
+const saveActionNotes = (msg) => saveCSV('action-notes', msg);
+const saveAttachments = (msg) => saveCSV('meeting-attachments', msg);
 
 /* ---- working together ---- */
 // Several people can have the app open at once. Each file is held with the version it was read
@@ -535,6 +541,15 @@ const FILES = {
   freezes: {
     parse: (t) => rowsToFreezes(parseAny(t)), all: () => state.freezes, set: (l) => { state.freezes = l; },
     csv: () => freezesToCSV(state.freezes), key: (z) => z.id, name: (z) => `Change freeze ${z.name}`,
+  },
+  'action-notes': {
+    parse: (t) => rowsToActionNotes(parseAny(t)), all: () => state.actionNotes, set: (l) => { state.actionNotes = l; },
+    csv: () => actionNotesToCSV(state.actionNotes), key: (n) => n.id,
+    name: (n) => `Update on action ${state.actions.find(a => a.id === n.action_id)?.ref || ''}, ${fmtStamp(n.at)}`,
+  },
+  'meeting-attachments': {
+    parse: (t) => rowsToAttachments(parseAny(t)), all: () => state.attachments, set: (l) => { state.attachments = l; },
+    csv: () => attachmentsToCSV(state.attachments), key: (x) => x.id, name: (x) => `Attachment ${x.name}`,
   },
 };
 const FILE_NAMES = Object.keys(FILES); // in the order they depend on each other
@@ -742,7 +757,7 @@ const FIELD_NAMES = {
   exec_summary: 'Executive summary', next_steps: 'Next steps', get_to_green: 'Get to green plan', period_end: 'Period ending',
   week_ending: 'Week ending', lead: 'Area lead', author: 'Author', number: 'Program number', rows: 'RAG options',
   likelihood: 'Likelihood', impact: 'Impact', priority: 'Priority', dep_type: 'Dependency type', dep_priorities: 'Dependency priorities', dep_types: 'Dependency types',
-  risk_statuses: 'Risk statuses', issue_statuses: 'Issue statuses', dep_statuses: 'Dependency statuses', raid_levels: 'Likelihood and impact levels', text: 'Status update', due: 'Due', party: 'Other party', response: 'Response', links: 'Linked to', kind: 'Type',
+  risk_statuses: 'Risk statuses', issue_statuses: 'Issue statuses', dep_statuses: 'Dependency statuses', raid_levels: 'Likelihood and impact levels', reporting_level: 'Reporting level', reporting_levels: 'Reporting levels', text: 'Status update', due: 'Due', party: 'Other party', response: 'Response', links: 'Linked to', kind: 'Type',
   impact_if: 'Impact if delayed or blocked', accountable: 'Accountable people',
   item_term: 'Word for an item', milestone_term: 'Word for a milestone', task_term: 'Word for a task', hidden: 'Hidden fields and features',
 };
@@ -825,7 +840,7 @@ function wireConflicts() {
 // import, a block is fetched so the rest come straight from hand. Ids still in hand when the page
 // closes are never used, so a burst can leave a gap in the numbers. If the server can't be reached,
 // the next number after the highest seen is used.
-const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'meeting-series': [], meetings: [], 'meeting-actions': [], 'report-comments': [], freezes: [] };
+const idPool = { workspaces: [], milestones: [], reports: [], updates: [], streams: [], raid: [], 'raid-notes': [], 'meeting-series': [], meetings: [], 'meeting-actions': [], 'report-comments': [], freezes: [], 'action-notes': [], 'meeting-attachments': [] };
 const idLastTaken = {};
 function takeId(file, fallback) {
   const burst = Date.now() - (idLastTaken[file] || 0) < 2000;
@@ -872,8 +887,8 @@ function flashStatus(msg, ok, sticky) {
 // to take back). Undo puts the snapshot back and saves what it changes.
 
 const undoStack = []; // [{ label, snap }], newest last
-const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'meetingSeries', 'meetings', 'actions', 'reportComments', 'freezes'];
-const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', meetingSeries: 'meeting-series', meetings: 'meetings', actions: 'meeting-actions', reportComments: 'report-comments', freezes: 'freezes' };
+const UNDO_KEYS = ['items', 'reports', 'updates', 'workspaces', 'statuses', 'streams', 'raid', 'raidNotes', 'meetingSeries', 'meetings', 'actions', 'reportComments', 'freezes', 'actionNotes', 'attachments'];
+const UNDO_FILES = { items: 'milestones', reports: 'reports', updates: 'updates', workspaces: 'workspaces', statuses: 'statuses', streams: 'streams', raid: 'raid', raidNotes: 'raid-notes', meetingSeries: 'meeting-series', meetings: 'meetings', actions: 'meeting-actions', reportComments: 'report-comments', freezes: 'freezes', actionNotes: 'action-notes', attachments: 'meeting-attachments' };
 
 function snapshotData() {
   syncEditorToState();
@@ -882,6 +897,7 @@ function snapshotData() {
     workspaces: JSON.stringify(state.workspaces), statuses: JSON.stringify(state.statuses), streams: JSON.stringify(state.streams),
     raid: JSON.stringify(state.raid), raidNotes: JSON.stringify(state.raidNotes), meetingSeries: JSON.stringify(state.meetingSeries), meetings: JSON.stringify(state.meetings), actions: JSON.stringify(state.actions),
     reportComments: JSON.stringify(state.reportComments), freezes: JSON.stringify(state.freezes), workspaceId: state.workspaceId,
+    actionNotes: JSON.stringify(state.actionNotes), attachments: JSON.stringify(state.attachments),
   };
 }
 
@@ -934,6 +950,8 @@ async function undoLast() {
   state.actions = back.actions;
   state.reportComments = back.reportComments;
   state.freezes = back.freezes;
+  state.actionNotes = back.actionNotes;
+  state.attachments = back.attachments;
   state.items = []; state.reports = [];
   state.otherItems = back.items;
   state.otherReports = back.reports;
@@ -947,7 +965,7 @@ async function undoLast() {
   showToast(`Undone: ${u.label}${kept ? ' · anything changed again since was left as it is' : ''}`);
   knockOn.clear();
   directEdits.clear();
-  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, meetingSeries: saveSeries, meetings: saveMeetings, actions: saveActions, reportComments: saveComments, freezes: saveFreezes };
+  const save = { items: () => saveData(`Undone: ${u.label}`, 'Undo'), reports: saveReports, updates: saveUpdates, workspaces: saveWorkspaces, statuses: saveStatuses, streams: saveStreams, raid: saveRaid, raidNotes: saveRaidNotes, meetingSeries: saveSeries, meetings: saveMeetings, actions: saveActions, reportComments: saveComments, freezes: saveFreezes, actionNotes: saveActionNotes, attachments: saveAttachments };
   await Promise.all(changed.map(k => save[k]('Undone')));
 }
 
@@ -3075,10 +3093,6 @@ function openEditDialog(m, copy) {
   };
   f.type.innerHTML = typeOptions(v.type);
   f.status.innerHTML = statusOptions(v.status);
-  const parents = state.items.filter(p => !isTask(p) && p !== m).sort(cmpRef);
-  if (v.parent && !parents.some(p => p.id === v.parent)) parents.push(state.items.find(p => p.id === v.parent));
-  f.parent.innerHTML = '<option value="">— none —</option>' +
-    parents.map(p => `<option value="${p.id}">${escAttr(fullLabel(p))}</option>`).join('');
   f.stream_id.innerHTML = streamOptions(v.stream_id);
   for (const k of EDIT_FIELDS) f[k].value = v[k] ?? '';
   for (const k of LINK_FIELDS) f[k].closest('label').hidden = linkHidden(k);
@@ -3103,6 +3117,7 @@ function openEditDialog(m, copy) {
   document.getElementById('ed-error').textContent = '';
   refreshDatalists();
   renderEdDeps();
+  renderEdParent();
   updateEdType();
   document.getElementById('edit-dialog').showModal();
   f.title.focus();
@@ -3140,11 +3155,21 @@ function renderEdDeps() {
     `<input id="ed-adddep" class="add-dep" placeholder="+ add dependency…" autocomplete="off" />`;
 }
 
+// What the item rolls up to: a chip once chosen, otherwise a box that opens the same searchable list.
+function renderEdParent() {
+  const id = document.getElementById('edit-form').elements.parent.value;
+  const p = id && state.items.find(x => x.id === id);
+  document.getElementById('ed-parent').innerHTML = id
+    ? `<span class="chip" title="${escAttr(p?.title)}">${escAttr(p ? itemLabel(p) : '(deleted)')}<button type="button" data-edrm="${escAttr(id)}" title="Clear">×</button></span>`
+    : `<input id="ed-addparent" class="add-dep" placeholder="+ choose ${T.milestone}…" autocomplete="off" />`;
+}
+
 /* A dependency is picked from a searchable list rather than a plain dropdown: type to narrow it by
    ref, title, stream or sub-stream, and each entry shows where it sits (stream › sub-stream).
    The box fires a `deppick` event carrying the chosen item's id. */
 function depCandidates(input) {
   if (input.id === 'ed-adddep') return state.items.filter(p => p !== editing && !edDeps.includes(p.id));
+  if (input.id === 'ed-addparent') return state.items.filter(p => !isTask(p) && p !== editing);
   const m = state.items[+input.dataset.adddep];
   return m ? state.items.filter(p => p.id !== m.id && !m.deps.includes(p.id)) : [];
 }
@@ -3228,6 +3253,7 @@ function updateEdType() {
   document.getElementById('ed-start').classList.toggle('invisible', !task);
   document.getElementById('ed-end-label').textContent = task ? 'End' : 'Date';
   if (!task) f.start.value = f.end.value;
+  f.end.min = task ? f.start.value : '';
   document.getElementById('ed-dur').classList.toggle('invisible', !task);
   showEdDuration();
 }
@@ -4685,6 +4711,7 @@ function showQuick(m, e) {
   quickMsg = '';
   renderQuick();
   const el = document.getElementById('quick');
+  el.classList.remove('nudge');
   el.hidden = false;
   // Beside the item rather than on top of it: right of it, else left, else below or above.
   const g = document.querySelector(`#gantt-container .gantt-item[data-id="${m.id}"]`);
@@ -6491,6 +6518,8 @@ function wireReports() {
     void quick.offsetWidth; // restart the animation
     quick.classList.add('nudge');
   });
+  // Drop the class once it has played: left on, the shake would replay every time the panel is shown again.
+  quick.addEventListener('animationend', () => quick.classList.remove('nudge'));
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !quick.hidden) hideQuick(); });
   const hideIfClean = () => { if (!quickDirty()) hideQuick(); };
   document.getElementById('gantt-scroll').addEventListener('scroll', hideIfClean);
@@ -7046,9 +7075,15 @@ function renderImport() {
   const does = [n('add') && `add ${n('add')}`, n('update') && `update ${n('update')}`, plan.deletes.length && `delete ${plan.deletes.length}`].filter(Boolean);
   btn.disabled = !does.length;
   btn.textContent = does.length ? `Import: ${does.join(', ')}` : 'Import';
+  // Nothing to do: say why rather than leave a disabled button, as the reasons are off in the Notes column.
+  const undated = plan.rows.filter(r => r.notes.includes('No date')).length;
+  const noDateCol = !imp.map.some(k => k === 'start' || k === 'end');
   document.getElementById('im-error').textContent = d.conflict
     ? 'Some dates are written day first and others month first: check the dates in the preview.'
-    : !imp.map.includes('title') ? `No column is imported as the title, so only existing ${T.items} (matched by ref) can be updated.` : '';
+    : !imp.map.includes('title') ? `No column is imported as the title, so only existing ${T.items} (matched by ref) can be updated.`
+    : !does.length && undated ? `Nothing to import: new ${T.items} need a start or end date, and ${undated === plan.rows.length ? 'none of the rows has one'
+      : `${count(undated, 'row has', 'rows have')} none`}${noDateCol ? ' (no column is imported as a date)' : ''}.`
+    : !does.length && n('skip') ? `Nothing to import: every row is skipped. The Notes column says why.` : '';
 }
 
 function wireImport() {
@@ -7094,7 +7129,7 @@ function wireImport() {
 // with a summary of each; the one being viewed drives the Gantt chart, Items and Reports.
 
 const WORKSPACE_COLUMNS = ['id', 'number', 'name', 'code', 'description', 'owner', 'lead', 'start', 'end', 'status', 'trend',
-  'item_term', 'milestone_term', 'task_term', 'dep_priorities', 'dep_types', 'risk_statuses', 'issue_statuses', 'dep_statuses', 'raid_levels', 'hidden', 'created', 'updated'];
+  'item_term', 'milestone_term', 'task_term', 'dep_priorities', 'dep_types', 'risk_statuses', 'issue_statuses', 'dep_statuses', 'raid_levels', 'reporting_levels', 'hidden', 'created', 'updated'];
 const WORKSPACE_FIELDS = WORKSPACE_COLUMNS.slice(1, -2);
 
 function rowsToWorkspaces(rows) {
@@ -7557,7 +7592,7 @@ function applyPgStatuses(workspaceId) {
 }
 
 function newWorkspaceDefaults() {
-  return { number: '', name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', trend: '', dep_priorities: '', dep_types: '', risk_statuses: '', issue_statuses: '', dep_statuses: '', raid_levels: '', ...DEFAULT_TERMS };
+  return { number: '', name: '', code: '', description: '', owner: '', lead: '', start: '', end: '', status: 'Not Started', trend: '', dep_priorities: '', dep_types: '', risk_statuses: '', issue_statuses: '', dep_statuses: '', raid_levels: '', reporting_levels: '', ...DEFAULT_TERMS };
 }
 
 function updateTermPreview() {
@@ -7719,10 +7754,14 @@ async function deleteWorkspace() {
   state.actions = state.actions.filter(a => a.workspace_id !== p.id);
   const hadComments = state.reportComments.some(c => c.workspace_id === p.id);
   state.reportComments = state.reportComments.filter(c => c.workspace_id !== p.id);
+  const hadActNotes = state.actionNotes.some(n => n.workspace_id === p.id);
+  state.actionNotes = state.actionNotes.filter(n => n.workspace_id !== p.id);
+  const hadFiles = state.attachments.some(x => x.workspace_id === p.id);
+  state.attachments = state.attachments.filter(x => x.workspace_id !== p.id);
   applyWorkspaceChrome();
   rerenderCurrentView();
   offerUndo(snap, `Deleted the workspace ${p.name}${lost.length ? ` and its ${lost.join(' and ')}` : ''}`);
-  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadStreams && saveStreams(), hadRaid && saveRaid(), hadNotes && saveRaidNotes(), hadSeries && saveSeries(), hadMeetings && saveMeetings(), hadActions && saveActions(), hadComments && saveComments()]);
+  await Promise.all([saveData(`Workspace deleted: ${p.name}`, 'Workspace deleted'), saveReports(), saveWorkspaces('Workspace deleted'), hadStatuses && saveStatuses(), hadUpdates && saveUpdates(), hadStreams && saveStreams(), hadRaid && saveRaid(), hadNotes && saveRaidNotes(), hadSeries && saveSeries(), hadMeetings && saveMeetings(), hadActions && saveActions(), hadComments && saveComments(), hadActNotes && saveActionNotes(), hadFiles && saveAttachments()]);
 }
 
 function wireWorkspaces() {
@@ -8642,15 +8681,16 @@ const RAID_KINDS = {
   },
 };
 const RAID_COLUMNS = ['id', 'workspace_id', 'kind', 'ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type',
-  'likelihood', 'impact', 'due', 'party', 'response', 'impact_if', 'mitigation', 'accountable', 'links', 'raised', 'created', 'updated'];
+  'likelihood', 'impact', 'due', 'party', 'response', 'impact_if', 'mitigation', 'accountable', 'reporting_level', 'links', 'raised', 'created', 'updated'];
 const NOTE_COLUMNS = ['id', 'workspace_id', 'raid_id', 'at', 'by', 'text'];
 // The lists the register offers, until a workspace sets its own (Workspace settings → Register):
 // each kind's statuses (the last closes the entry), the likelihood / impact levels (lowest first),
-// and a dependency's priorities (highest first) and types.
+// a dependency's priorities (highest first) and types, and the levels entries are reported at.
 const DEFAULT_LISTS = {
   risk_statuses: ['Open', 'In progress', 'Closed'], issue_statuses: ['Open', 'In progress', 'Closed'],
   dep_statuses: ['Not started', 'At risk', 'Blocked', 'Complete'], raid_levels: ['Low', 'Medium', 'High'],
   dep_priorities: ['Critical', 'Major', 'Medium', 'Minor'], dep_types: ['External', 'Vendor', 'Resource', 'Technology', 'Governance', 'Operational'],
+  reporting_levels: ['Workstream', 'Program'],
 };
 const wsList = (workspaceId, key) => {
   const own = (workspaceById(workspaceId)?.[key] || '').split(';').map(x => x.trim()).filter(Boolean);
@@ -8686,6 +8726,7 @@ function rowsToRaid(rows) {
       ...o, kind, status: status || sts[0], rag: o.rag && normaliseStatus(o.rag, o.workspace_id),
       likelihood: fromList(o.likelihood, raidLevels(o.workspace_id)), impact: fromList(o.impact, raidLevels(o.workspace_id)),
       priority: fromList(o.priority, wsList(o.workspace_id, 'dep_priorities')), dep_type: fromList(o.dep_type, wsList(o.workspace_id, 'dep_types')),
+      reporting_level: fromList(o.reporting_level, wsList(o.workspace_id, 'reporting_levels')),
       links: [...new Set(o.links.split(';').map(raidLink).filter(Boolean))],
     };
   }).filter(r => ids.has(r.workspace_id) && r.kind);
@@ -8785,7 +8826,7 @@ function raidMatches(r, ignoreKind, ignoreQ) {
   if (ignoreQ) return true;
   const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
-  const hay = [r.ref, r.title, r.description, r.owner, r.party, r.response, r.impact_if, r.mitigation, r.accountable, streamName(r.stream_id), r.rag, r.priority, r.dep_type, RAID_KINDS[r.kind].one, r.status,
+  const hay = [r.ref, r.title, r.description, r.owner, r.party, r.response, r.impact_if, r.mitigation, r.accountable, streamName(r.stream_id), r.rag, r.priority, r.dep_type, r.reporting_level, RAID_KINDS[r.kind].one, r.status,
     ...notesOf(r).map(n => n.text), ...r.links.map(l => { const x = linkInfo(l); return `${x.label} ${x.title}`; })].join(' ').toLowerCase();
   return words.every(w => hay.includes(w));
 }
@@ -8801,6 +8842,7 @@ const cellOr = (v) => (v ? escAttr(v) : dash);
 const kindRank = (label) => Object.values(RAID_KINDS).findIndex(d => d.one === label);
 const levelRank = (v) => { const i = ['High', 'Medium', 'Low'].indexOf(v); return i < 0 ? 3 + prioRank(v) : i; };
 const prioRank = (v) => { const i = wsList(state.workspaceId, 'dep_priorities').indexOf(v); return i < 0 ? 99 : i; };
+const repRank = (v) => { const i = wsList(state.workspaceId, 'reporting_levels').indexOf(v); return i < 0 ? 99 : i; };
 // Blocked and at risk, then in progress, then open; closed after everything.
 const statusRank = (v) => (closesAny(v) ? 10 : 0) + (STATUS_ORDER[v] ?? 3);
 const linkLabels = (r) => r.links.map(l => linkInfo(l).label);
@@ -8816,14 +8858,15 @@ const RAID_COLS = {
   rating: { key: 'rating', label: 'Rating', w: 92, title: 'Risks: likelihood × impact. Issues: impact. Dependencies: priority', vals: (r) => raidRating(r).label, sort: (r) => (raidRating(r).label ? raidRating(r).score : ''), order: (a, b) => levelRank(a) - levelRank(b), words: ['Sort lowest to highest', 'Sort highest to lowest'], blank: '(Not rated)' },
   priority: { key: 'priority', label: 'Priority', w: 100, sort: (r) => (r.priority ? prioRank(r.priority) : ''), order: (a, b) => prioRank(a) - prioRank(b), words: ['Sort highest to lowest', 'Sort lowest to highest'], blank: '(No priority)' },
   rag: { key: 'rag', label: 'RAG', w: 110, kind: 'status', blank: '(No RAG)' },
+  reporting_level: { key: 'reporting_level', label: 'Reporting level', w: 120, sort: (r) => (r.reporting_level ? repRank(r.reporting_level) : ''), order: (a, b) => repRank(a) - repRank(b), words: ['Sort in list order', 'Sort in reverse order'], blank: '(Not set)' },
   status: { key: 'status', label: 'Status', w: 112, sort: (r) => statusRank(r.status), order: (a, b) => statusRank(a) - statusRank(b), words: ['Sort open to closed', 'Sort closed to open'] },
   due: { key: 'due', label: 'Due', w: 100, kind: 'date', show: fmtNice, blank: '(No date)' },
   response: { key: 'response', label: 'Response', w: 260, blank: '(None)' },
   latest: { key: 'latest', label: 'Latest update', w: 280, vals: (r) => notesOf(r)[0]?.text || '', sort: (r) => notesOf(r)[0]?.at || '', words: ['Sort oldest to newest', 'Sort newest to oldest'], blank: '(No updates)' },
 };
 const RAID_SETS = {
-  all: ['ref', 'kind', 'title', 'links', 'owner', 'rating', 'status', 'due', 'response'],
-  dependency: ['ref', 'title', 'dep_type', 'stream_id', 'links', 'owner', 'accountable', 'priority', 'rag', 'status', 'due', 'latest'],
+  all: ['ref', 'kind', 'title', 'links', 'owner', 'rating', 'reporting_level', 'status', 'due', 'response'],
+  dependency: ['ref', 'title', 'dep_type', 'stream_id', 'links', 'owner', 'accountable', 'priority', 'reporting_level', 'rag', 'status', 'due', 'latest'],
 };
 const raidMode = () => (raidFilter.kind === 'dependency' ? 'dependency' : 'all');
 const raidTable = makeTable({
@@ -8837,6 +8880,7 @@ const RAID_CELLS = {
   kind: (r) => `<td><span class="raid-kind raid-kind-${r.kind}">${RAID_KINDS[r.kind].one}</span></td>`,
   title: (r) => `<td class="raid-title">${raidTitleCell(r)}</td>`,
   dep_type: (r) => `<td>${cellOr(r.dep_type)}</td>`,
+  reporting_level: (r) => `<td>${cellOr(r.reporting_level)}</td>`,
   stream_id: (r) => `<td>${streamGo(r.stream_id)}</td>`,
   links: (r) => `<td class="raid-links">${r.links.map(l => linkChip(l)).join('') || dash}</td>`,
   owner: (r) => `<td>${cellOr(r.owner)}</td>`,
@@ -8919,10 +8963,10 @@ function goToLink(link) {
 
 function downloadRaidCSV() {
   renderRaid();
-  const head = ['Ref', 'Type', 'Title', 'Description', 'Stream', 'Linked to', 'Owner', 'Status', 'RAG', 'Priority', 'Dependency type', 'Likelihood', 'Impact', 'Rating',
+  const head = ['Ref', 'Type', 'Title', 'Description', 'Stream', 'Linked to', 'Owner', 'Status', 'RAG', 'Priority', 'Dependency type', 'Likelihood', 'Impact', 'Rating', 'Reporting level',
     'Due', 'Raised', 'Other party', 'Response', 'Impact if delayed', 'Mitigation', 'Accountable people', 'Status updates'];
   const lines = raidRows.map(r => [r.ref, RAID_KINDS[r.kind].one, r.title, r.description, streamName(r.stream_id), r.links.map(l => linkInfo(l).title).join('; '), r.owner,
-    r.status, r.rag, r.priority, r.dep_type, r.likelihood, r.impact, raidRating(r).label, r.due, r.raised, r.party, r.response, r.impact_if, r.mitigation, r.accountable,
+    r.status, r.rag, r.priority, r.dep_type, r.likelihood, r.impact, raidRating(r).label, r.reporting_level, r.due, r.raised, r.party, r.response, r.impact_if, r.mitigation, r.accountable,
     notesOf(r).map(n => `${fmtStamp(n.at)}${n.by ? ` (${n.by})` : ''}: ${n.text}`).join('\n')].map(csvEscape).join(','));
   const blob = new Blob(['﻿' + [head.map(csvEscape).join(','), ...lines].join('\n') + '\n'], { type: 'text/csv;charset=utf-8' });
   const p = currentWorkspace();
@@ -8938,7 +8982,7 @@ function downloadRaidCSV() {
 let rdEditing = null; // entry being edited; null for a new one
 let rdOpened = null;  // it as the dialog showed it, so only what's changed here is saved
 let rdLinks = [];
-const RD_FIELDS = ['ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact', 'due', 'raised', 'party', 'response', 'impact_if', 'mitigation', 'accountable'];
+const RD_FIELDS = ['ref', 'title', 'description', 'stream_id', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact', 'due', 'raised', 'party', 'response', 'impact_if', 'mitigation', 'accountable', 'reporting_level'];
 // Fields only some kinds have: cleared on saving any other kind.
 const RD_ONLY = { likelihood: ['risk'], impact: ['risk', 'issue'], stream_id: ['dependency'], rag: ['dependency'], priority: ['dependency'], dep_type: ['dependency'], party: ['dependency'],
   impact_if: ['dependency'], mitigation: ['dependency'], accountable: ['dependency'] };
@@ -8958,7 +9002,7 @@ function openRaidDialog(r, preset = {}) {
   const linkedStream = preset.links?.find(l => l.startsWith('stream:'))?.slice(7) || '';
   const v = r || {
     kind, ref: nextRaidRef(state.workspaceId, kind), title: '', description: '', stream_id: linkedStream, owner: '', status: '', rag: ragOf(state.workspaceId).def,
-    priority: '', dep_type: '', likelihood: midLevel(), impact: midLevel(), due: '', raised: fmtISO(new Date()), party: '', response: '', impact_if: '', mitigation: '', accountable: '',
+    priority: '', dep_type: '', likelihood: midLevel(), impact: midLevel(), due: '', raised: fmtISO(new Date()), party: '', response: '', impact_if: '', mitigation: '', accountable: '', reporting_level: '',
     links: preset.links || [],
   };
   document.getElementById('rd-kind').innerHTML = Object.entries(RAID_KINDS).map(([k, d]) =>
@@ -8971,6 +9015,7 @@ function openRaidDialog(r, preset = {}) {
   f.rag.innerHTML = keepOptions(ragOf(state.workspaceId).names, v.rag);
   f.priority.innerHTML = keepOptions(wsList(state.workspaceId, 'dep_priorities'), v.priority);
   f.dep_type.innerHTML = keepOptions(wsList(state.workspaceId, 'dep_types'), v.dep_type);
+  f.reporting_level.innerHTML = keepOptions(wsList(state.workspaceId, 'reporting_levels'), v.reporting_level);
   for (const k of RD_FIELDS) if (k !== 'status') f[k].value = v[k] ?? '';
   f.note.value = '';
   rdLinks = [...v.links];
@@ -9081,7 +9126,7 @@ async function riskToIssue() {
   const issue = {
     id: nextRaidId(), workspace_id: r.workspace_id, kind: 'issue', ref, title: v.title, description: v.description, stream_id: '', owner: v.owner,
     status: raidStatuses('issue', r.workspace_id)[0], rag: '', priority: '', dep_type: '', likelihood: '', impact: v.impact, due: v.due, raised: fmtISO(new Date()),
-    party: '', response: '', impact_if: '', mitigation: '', accountable: '', links: [...rdLinks], created: now, updated: now,
+    party: '', response: '', impact_if: '', mitigation: '', accountable: '', reporting_level: v.reporting_level, links: [...rdLinks], created: now, updated: now,
   };
   state.raid.push(issue);
   const note = (raidId, text) => state.raidNotes.push({ id: nextNoteId(), workspace_id: r.workspace_id, raid_id: raidId, at: now, by: '', text });
@@ -9122,8 +9167,8 @@ function raidTipLine(m) {
 /* ---- settings: the register’s lists ---- */
 // Workspace settings → Register edits the lists the register offers (kept in workspaces.csv,
 // ;-separated; blank means the standard list): the statuses of each kind (the last one closes the
-// entry), the likelihood / impact levels (lowest first), and a dependency's priorities (highest
-// first) and types. Renaming a value renames it on the workspace's entries that have it.
+// entry), the likelihood / impact levels (lowest first), a dependency's priorities (highest
+// first) and types, and the levels entries are reported at. Renaming a value renames it on the workspace's entries that have it.
 const PG_LISTS = {
   risk_statuses: { fields: ['status'], kinds: ['risk'], word: 'risk status', words: 'risk statuses', min: 2 },
   issue_statuses: { fields: ['status'], kinds: ['issue'], word: 'issue status', words: 'issue statuses', min: 2 },
@@ -9131,6 +9176,7 @@ const PG_LISTS = {
   raid_levels: { fields: ['likelihood', 'impact'], kinds: ['risk', 'issue'], word: 'level', words: 'levels', min: 2 },
   dep_priorities: { fields: ['priority'], kinds: ['dependency'], word: 'priority', words: 'priorities', min: 1 },
   dep_types: { fields: ['dep_type'], kinds: ['dependency'], word: 'dependency type', words: 'dependency types', min: 1 },
+  reporting_levels: { fields: ['reporting_level'], kinds: ['risk', 'issue', 'dependency'], word: 'reporting level', words: 'reporting levels', min: 1 },
 };
 const LIST_KEYS = Object.keys(PG_LISTS);
 let pgDepLists = {}; // key → [{ orig (name when the dialog opened, null if new), name }]
@@ -9505,7 +9551,7 @@ function wireRaid() {
 // name items by ref or title, or a stream by name; a risk or issue's stream becomes a link.
 
 const RI_FIELDS = ['kind', 'ref', 'spid', 'title', 'description', 'stream', 'owner', 'status', 'rag', 'priority', 'dep_type', 'likelihood', 'impact',
-  'due', 'raised', 'party', 'response', 'impact_if', 'mitigation', 'accountable', 'links', 'notes', 'modified'];
+  'due', 'raised', 'party', 'response', 'impact_if', 'mitigation', 'accountable', 'reporting_level', 'links', 'notes', 'modified'];
 // Several columns can go into these: their text is put together, each under its heading.
 const RI_MULTI = ['description', 'response', 'impact_if', 'mitigation', 'links', 'notes'];
 const RI_DATES = ['due', 'raised', 'modified'];
@@ -9514,7 +9560,7 @@ const riFieldLabel = (k) => ({
   description: 'Description', stream: 'Stream', owner: 'Owner', status: 'Status', rag: 'RAG (dependencies)', priority: 'Priority (dependencies)',
   dep_type: 'Dependency type', likelihood: 'Likelihood (risks)', impact: 'Impact (risks and issues)', due: 'Due date', raised: 'Date raised',
   party: 'Other party (dependencies)', response: 'Mitigation / resolution / next action', impact_if: 'Impact if delayed or blocked (dependencies)',
-  mitigation: 'Mitigation (dependencies)', accountable: 'Accountable people (dependencies)', links: `Linked ${T.items} or streams`,
+  mitigation: 'Mitigation (dependencies)', accountable: 'Accountable people (dependencies)', reporting_level: 'Reporting level', links: `Linked ${T.items} or streams`,
   notes: 'Status updates', modified: 'Last modified (dates updates that have no date)',
 }[k]);
 // Headings are compared with everything but letters and digits removed; earlier names win.
@@ -9550,6 +9596,7 @@ const RI_ALIASES = {
   mitigation: ['dependencymitigation', 'mitigationifdelayed', 'mitigationifblocked', 'fallback', 'fallbackplan', 'workaround'],
   accountable: ['accountablepeople', 'accountableperson', 'accountablepersons', 'accountableparty', 'accountableparties', 'accountablestakeholders',
     'accountability', 'accountableexec', 'accountableexecutive', 'escalationcontact', 'escalateto'],
+  reporting_level: ['reportinglevel', 'reportlevel', 'reportedat', 'reportingtier', 'escalationlevel', 'governancelevel'],
   links: ['links', 'linkedto', 'linkeditems', 'linkedmilestones', 'relatedmilestones', 'relatedmilestone', 'affectedmilestones',
     'impactedmilestones', 'relateditems', 'relatedto', 'milestones', 'milestone', 'deliverables', 'deliverable', 'relatedtasks', 'tasks', 'items'],
   notes: ['summarynotes', 'notes', 'comments', 'comment', 'updates', 'update', 'latestupdate', 'statusupdate', 'progressupdate', 'commentary',
@@ -9949,6 +9996,11 @@ function planRaidImport() {
         if (!x) row.warn.push(`“${v}” isn't one of this workspace's ${word === 'priority' ? 'priorities' : 'dependency types'}, so it's kept as it is`);
       }
     }
+    if (cell('reporting_level')) {
+      const v = cell('reporting_level'), x = readFromDepList(v, wsList(ws, 'reporting_levels'));
+      f.reporting_level = x || v;
+      if (!x) row.warn.push(`“${v}” isn't one of this workspace's reporting levels, so it's kept as it is`);
+    }
     const levels = kind === 'risk' ? ['likelihood', 'impact'] : kind === 'issue' ? ['impact'] : [];
     // Low / medium / high as read become the workspace's own levels (its bottom, middle and top).
     const lv = raidLevels(ws);
@@ -10032,7 +10084,7 @@ async function applyRaidImport() {
       r = {
         id: nextRaidId(), workspace_id: state.workspaceId, kind: row.kind, ref: '', title: '', description: '', stream_id: '', owner: '', status: '',
         rag: '', priority: '', dep_type: '', likelihood: '', impact: '', due: '', raised: '', party: '', response: '', impact_if: '', mitigation: '', accountable: '',
-        links: [], created: now, updated: now,
+        reporting_level: '', links: [], created: now, updated: now,
       };
       state.raid.push(r);
       added++;
@@ -10922,6 +10974,26 @@ function rowsToActions(rows) {
 }
 const actionsToCSV = (list) => [ACTION_COLUMNS.join(','), ...list.map(a => ACTION_COLUMNS.map(k => csvEscape(k === 'links' ? a.links.join(';') : a[k])).join(','))].join('\n') + '\n';
 
+// An action's status updates (action-notes.csv), newest first, and the files attached to meetings
+// (meeting-attachments.csv; the files themselves are kept by the server, see api/files). Neither is
+// removed with what it belongs to, so Undo of a delete brings them back with it.
+const ACTION_NOTE_COLUMNS = ['id', 'workspace_id', 'action_id', 'at', 'by', 'text'];
+const ATTACHMENT_COLUMNS = ['id', 'workspace_id', 'meeting_id', 'name', 'file', 'size', 'type', 'at', 'by'];
+function rowsToActionNotes(rows) {
+  const ids = new Set(state.workspaces.map(p => p.id));
+  return readRecords(rows, ACTION_NOTE_COLUMNS).map(n => ({ ...n, text: n.text.replace(/\r\n?/g, '\n') })).filter(n => ids.has(n.workspace_id) && n.action_id && n.text);
+}
+const actionNotesToCSV = (list) => [ACTION_NOTE_COLUMNS.join(','), ...list.map(n => ACTION_NOTE_COLUMNS.map(k => csvEscape(n[k])).join(','))].join('\n') + '\n';
+function rowsToAttachments(rows) {
+  const ids = new Set(state.workspaces.map(p => p.id));
+  return readRecords(rows, ATTACHMENT_COLUMNS).filter(x => ids.has(x.workspace_id) && x.meeting_id && x.file);
+}
+const attachmentsToCSV = (list) => [ATTACHMENT_COLUMNS.join(','), ...list.map(x => ATTACHMENT_COLUMNS.map(k => csvEscape(x[k])).join(','))].join('\n') + '\n';
+const nextActionNoteId = () => takeId('action-notes', () => String(Math.max(0, ...state.actionNotes.map(n => +n.id || 0)) + 1));
+const nextAttachmentId = () => takeId('meeting-attachments', () => String(Math.max(0, ...state.attachments.map(x => +x.id || 0)) + 1));
+const actionNotesOf = (a) => state.actionNotes.filter(n => n.action_id === a.id).sort((x, y) => y.at.localeCompare(x.at) || +y.id - +x.id);
+const attachmentsOf = (m) => state.attachments.filter(x => x.meeting_id === m.id).sort((x, y) => x.at.localeCompare(y.at) || +x.id - +y.id);
+
 const nextMeetingId = () => takeId('meetings', () => String(Math.max(0, ...state.meetings.map(m => +m.id || 0)) + 1));
 const nextActionId = () => takeId('meeting-actions', () => String(Math.max(0, ...state.actions.map(a => +a.id || 0)) + 1));
 // The next free action ref in a workspace: A1, A2… (`taken`: refs given out but not yet saved).
@@ -11261,7 +11333,43 @@ function renderMeetingList() {
 const actionLine = (a) => `<li class="mt-act${isActionDone(a) ? ' done' : ''}${actionOverdue(a) ? ' late' : ''}">
     <label class="mt-act-tick" title="${isActionDone(a) ? 'Done — untick to reopen' : 'Tick when done'}"><input type="checkbox" data-act-done="${a.id}" ${isActionDone(a) ? 'checked' : ''} /></label>
     <button type="button" class="mt-act-text" data-act-edit="${a.id}" title="Edit this action">${a.ref ? `<b>${escAttr(a.ref)}</b> ` : ''}${escAttr(a.text)}${a.description ? `<span class="mt-act-desc">${escAttr(a.description)}</span>` : ''}</button>
-    <span class="mt-act-meta">${escAttr(a.owner) || '<i>no owner</i>'}${a.due ? ` · <span class="mt-due">${actionOverdue(a) ? 'overdue' : 'due'} ${fmtShort(a.due)}</span>` : ''}</span></li>`;
+    <span class="mt-act-meta">${escAttr(a.owner) || '<i>no owner</i>'}${a.due ? ` · <span class="mt-due">${actionOverdue(a) ? 'overdue' : 'due'} ${fmtShort(a.due)}</span>` : ''}</span>${actionNotesOf(a)[0] ? `<span class="mt-act-note">${noteLine(actionNotesOf(a)[0])}</span>` : ''}</li>`;
+
+const fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+const attachmentLine = (x) => `<li class="mt-att"><a href="api/files/${encodeURIComponent(x.file)}" target="_blank" rel="noopener" title="Open ${escAttr(x.name)}">${escAttr(x.name)}</a>
+    <small class="muted">${fmtBytes(+x.size || 0)} · ${fmtStamp(x.at)}${x.by ? ` · ${escAttr(x.by)}` : ''}</small>
+    <button type="button" class="btn btn-sm btn-ghost" data-att-del="${x.id}" title="Remove ${escAttr(x.name)}" aria-label="Remove ${escAttr(x.name)}">✕</button></li>`;
+
+// Files go to the server first (api/files), then each gets a record on the meeting.
+async function attachFiles(m, files) {
+  files = [...files];
+  if (!m || !files.length) return;
+  const now = new Date().toISOString();
+  const added = [], failed = [];
+  flashStatus(`Uploading ${count(files.length, 'file', 'files')}…`, null);
+  for (const file of files) {
+    try {
+      const res = await fetch(`api/files?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
+      const o = await res.json().catch(() => ({}));
+      if (!res.ok || !o.ok) { failed.push(`${file.name}${o.error ? ` (${o.error})` : ''}`); continue; }
+      added.push({ id: nextAttachmentId(), workspace_id: m.workspace_id, meeting_id: m.id, name: file.name, file: o.file, size: String(o.size), type: file.type || '', at: now, by: '' });
+    } catch { failed.push(file.name); }
+  }
+  if (failed.length) flashStatus(`Couldn't upload ${failed.join(', ')}`, false, true);
+  if (!added.length) return;
+  state.attachments.push(...added);
+  rerenderCurrentView();
+  await saveAttachments(`${count(added.length, 'file', 'files')} attached to ${m.title}`);
+}
+async function removeAttachment(id) {
+  const x = state.attachments.find(a => a.id === id);
+  if (!x) return;
+  const snap = snapshotData();
+  state.attachments = state.attachments.filter(a => a !== x);
+  rerenderCurrentView();
+  offerUndo(snap, `Removed ${x.name}`);
+  await saveAttachments(`Removed ${x.name}`);
+}
 
 function renderMeetingPane(words = []) {
   const pane = document.getElementById('mt-pane');
@@ -11288,6 +11396,10 @@ function renderMeetingPane(words = []) {
         ${m.attendees ? `<div class="mt-meta mt-attendees"><b>Attendees</b> ${escAttr(m.attendees)}</div>` : ''}
       </header>
       <section class="pane-sec"><h3>Minutes</h3>${m.minutes.trim() ? `<div class="md mt-minutes">${mdToHtml(m.minutes)}</div>` : '<p class="muted">No minutes recorded. <button type="button" class="link-btn" data-mt-edit>Add them</button></p>'}</section>
+      <section class="pane-sec mt-att-sec"><h3>Attachments ${attachmentsOf(m).length ? `<small>${attachmentsOf(m).length}</small>` : ''}</h3>
+        ${attachmentsOf(m).length ? `<ul class="mt-att-list">${attachmentsOf(m).map(attachmentLine).join('')}</ul>` : ''}
+        <p class="mt-hint"><button type="button" class="link-btn" data-att-add>+ Attach files</button> <span class="muted">or drop them here · up to 25 MB each</span></p>
+      </section>
       <section class="pane-sec mt-act-sec"><h3>Actions ${acts.length ? `<small>${openN} open of ${acts.length}</small>` : ''}</h3>
         ${acts.length ? `<ul class="mt-act-list">${acts.map(actionLine).join('')}</ul>` : '<p class="muted mt-none">No actions tracked from this meeting yet.</p>'}
         ${fresh ? `<p class="mt-hint mt-fresh">${count(fresh, 'possible action', 'possible actions')} in the minutes ${fresh === 1 ? 'isn’t' : 'aren’t'} tracked yet. <button type="button" class="link-btn" data-mt-extract>Review and add</button></p>` : ''}
@@ -11350,6 +11462,7 @@ const ACT_COLS = [
   { key: 'meeting_id', label: 'From', w: 210, vals: (a) => actionSource(a), sort: (a) => meetingById(a.meeting_id)?.date || '', title: 'The meeting the action was taken from' },
   { key: 'status', label: 'Status', w: 96, sort: (a) => ACTION_STATUSES.indexOf(a.status), order: (x, y) => ACTION_STATUSES.indexOf(x) - ACTION_STATUSES.indexOf(y) },
   { key: 'done_at', label: 'Done on', w: 110, kind: 'date', vals: (a) => a.done_at.slice(0, 10), show: fmtNice, blank: '(Not done)' },
+  { key: 'latest', label: 'Latest update', w: 280, vals: (a) => actionNotesOf(a)[0]?.text || '', sort: (a) => actionNotesOf(a)[0]?.at || '', words: ['Sort oldest to newest', 'Sort newest to oldest'], blank: '(No updates)' },
 ];
 const actionSource = (a) => meetingById(a.meeting_id)?.title || (a.meeting_id ? '(Deleted meeting)' : '(Added by hand)');
 const actTable = makeTable({ table: 'actions-table', store: 'milestone-tracker.actions-grid', cols: () => ACT_COLS, rows: () => actionsOf(), onChange: () => renderMeetings() });
@@ -11377,10 +11490,11 @@ const ACT_CELLS = {
   meeting_id: (a) => { const m = meetingById(a.meeting_id); return `<td class="act-from">${m ? `<button type="button" class="link-btn" data-mt-open="${m.id}" title="Read the minutes">${escAttr(m.title) || '(untitled)'}</button>${m.date ? `<small>${fmtShort(m.date)}</small>` : ''}` : `<span class="muted">${a.meeting_id ? 'A deleted meeting' : 'Added by hand'}</span>`}</td>`; },
   status: (a) => `<td class="act-done"><label class="mt-act-tick" title="${isActionDone(a) ? 'Done — untick to reopen' : 'Tick when done'}"><input type="checkbox" data-act-done="${a.id}" ${isActionDone(a) ? 'checked' : ''} /> <span class="act-status ${isActionDone(a) ? 'done' : actionOverdue(a) ? 'late' : 'open'}">${actionOverdue(a) ? 'Overdue' : a.status}</span></label></td>`,
   done_at: (a) => `<td class="act-due">${a.done_at ? fmtShort(a.done_at.slice(0, 10)) : dash}</td>`,
+  latest: (a) => { const n = actionNotesOf(a); return `<td class="raid-resp raid-note">${n[0] ? `${noteLine(n[0])}${n.length > 1 ? `<small class="muted"> · ${n.length - 1} earlier</small>` : ''}` : dash}</td>`; },
 };
 function actionMatches(a, words) {
   if (!words.length) return true;
-  const hay = [a.ref, a.text, a.description, a.owner, a.status, a.due, actionSource(a), ...a.links.map(l => linkInfo(l).label)].join(' ').toLowerCase();
+  const hay = [a.ref, a.text, a.description, a.owner, a.status, a.due, actionSource(a), ...a.links.map(l => linkInfo(l).label), ...actionNotesOf(a).map(n => n.text)].join(' ').toLowerCase();
   return words.every(w => hay.includes(w));
 }
 function renderActions() {
@@ -11871,6 +11985,11 @@ function openActionDialog(a, preset = {}) {
   f.status.innerHTML = optionList(ACTION_STATUSES, v.status);
   for (const k of AD_FIELDS) if (k !== 'status') f[k].value = v[k] ?? '';
   adLinks = [...v.links];
+  f.note.value = '';
+  const notes = a ? actionNotesOf(a) : [];
+  document.getElementById('ad-notes').innerHTML = notes.length
+    ? notes.map(n => `<li><div class="note-when">${fmtStamp(n.at)}${n.by ? ` · ${escAttr(n.by)}` : ''}</div><div class="note-text">${escAttr(n.text)}</div></li>`).join('')
+    : '<li class="muted">No updates yet.</li>';
   document.getElementById('ad-delete').hidden = !a;
   document.getElementById('ad-error').textContent = '';
   document.getElementById('ad-heading').textContent = a ? `Edit ${a.ref || 'action'}` : 'New action';
@@ -11911,9 +12030,12 @@ async function submitAction(e) {
   let a = adEditing;
   if (a) Object.assign(a, changedFrom(v, adOpened), { updated: now });
   else state.actions.push(a = { id: nextActionId(), workspace_id: state.workspaceId, ...v, created: now, updated: now });
+  const note = f.note.value.replace(/\r\n?/g, '\n').trim();
+  if (note) state.actionNotes.push({ id: nextActionNoteId(), workspace_id: a.workspace_id, action_id: a.id, at: now, by: '', text: note });
   document.getElementById('action-dialog').close();
   rerenderCurrentView();
-  if (!adEditing || !same(a, adOpened)) await saveActions(`Action ${adEditing ? 'saved' : 'added'}`);
+  const changed = !adEditing || !same(a, adOpened);
+  await Promise.all([changed && saveActions(`Action ${adEditing ? 'saved' : 'added'}`), note && saveActionNotes('Action update added')]);
 }
 async function deleteAction() {
   const a = adEditing;
@@ -12578,12 +12700,27 @@ function wireMeetings() {
     if (t.closest('[data-mt-extract]')) return openExtractDialog(meetingById(mtSelId));
     if (t.closest('[data-mt-edit]')) return openMeetingDialog(meetingById(mtSelId));
     if (t.closest('[data-act-new]')) return openActionDialog(null, { meeting_id: mtSelId });
+    if (t.closest('[data-att-add]')) return document.getElementById('mt-att-file').click();
+    const del = t.closest('[data-att-del]');
+    if (del) return removeAttachment(del.dataset.attDel);
     const edit = t.closest('[data-act-edit]');
     if (edit) return openActionDialog(state.actions.find(a => a.id === edit.dataset.actEdit) || null);
     const go = t.closest('[data-raid-go]');
     if (go) goToLink(go.dataset.raidGo);
   });
   pane.addEventListener('change', (e) => { if (e.target.matches('[data-act-done]')) setActionDone(e.target.dataset.actDone, e.target.checked); });
+  const attInput = document.getElementById('mt-att-file');
+  attInput.addEventListener('change', () => { attachFiles(meetingById(mtSelId), attInput.files); attInput.value = ''; });
+  // Files dropped on a meeting are attached to it.
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  pane.addEventListener('dragover', (e) => { if (!hasFiles(e) || !meetingById(mtSelId)) return; e.preventDefault(); pane.classList.add('over'); });
+  pane.addEventListener('dragleave', (e) => { if (!pane.contains(e.relatedTarget)) pane.classList.remove('over'); });
+  pane.addEventListener('drop', (e) => {
+    pane.classList.remove('over');
+    if (!hasFiles(e) || !meetingById(mtSelId)) return;
+    e.preventDefault();
+    attachFiles(meetingById(mtSelId), e.dataTransfer.files);
+  });
   const split = document.getElementById('mt-split');
   const divider = document.getElementById('mt-divider');
   if (prefs.mtListW) split.style.setProperty('--mt-list-w', prefs.mtListW + 'px');
@@ -13256,7 +13393,13 @@ function wireEvents() {
   });
   form.elements.newstream.addEventListener('blur', (e) => { if (!e.target.value.trim()) closeNewStream(form.elements); });
   form.elements.end.addEventListener('input', updateEdType); // keeps a milestone's hidden start in step
-  form.elements.start.addEventListener('input', showEdDuration);
+  // A task can't end before it starts: an end left earlier than a newly chosen start moves up to it.
+  form.elements.start.addEventListener('input', () => {
+    const f = form.elements;
+    f.end.min = f.type.value === 'task' ? f.start.value : '';
+    if (f.type.value === 'task' && f.start.value && (!f.end.value || f.end.value < f.start.value)) f.end.value = f.start.value;
+    showEdDuration();
+  });
   form.elements.duration.addEventListener('input', () => applyEdDuration(false));
   form.elements.duration.addEventListener('change', () => applyEdDuration(true));
   form.elements.duration.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyEdDuration(true); } });
@@ -13275,6 +13418,11 @@ function wireEvents() {
   document.getElementById('ed-deps').addEventListener('deppick', (e) => {
     edDeps.push(e.detail); renderEdDeps(); document.getElementById('ed-adddep').focus();
   });
+  const edParent = (id) => { document.getElementById('edit-form').elements.parent.value = id; renderEdParent(); };
+  document.getElementById('ed-parent').addEventListener('click', (e) => {
+    if (e.target.closest('[data-edrm]')) { edParent(''); document.getElementById('ed-addparent').focus(); }
+  });
+  document.getElementById('ed-parent').addEventListener('deppick', (e) => edParent(e.detail));
 
   // editor table
   document.getElementById('btn-add').onclick = () => { syncEditorToState(); openEditDialog(null); };
