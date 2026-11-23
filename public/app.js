@@ -3080,14 +3080,18 @@ const itemLinks = (m) => Object.entries({ GitLab: 'gitlab_url', 'Use case': 'use
   .filter(([, k]) => m[k] && !linkHidden(k, m.workspace_id || undefined)).map(([l, k]) => [l, m[k]]);
 
 // With `copy` (and no m), a new item starts as a copy of that one: Duplicate on the chart.
-function openEditDialog(m, copy) {
+// With `under`, a new item starts as a child of that one (it rolls up to it), a task by default.
+function openEditDialog(m, copy, under) {
   hideTip();
   editing = m;
   editOpened = m && structuredClone(m);
   const f = document.getElementById('edit-form').elements;
   const last = state.items.at(-1);
   const today = fmtISO(new Date());
-  const v = m || (copy && { ...copy, ref: '', title: `${copy.title} (copy)`, deps: [...copy.deps] }) || {
+  const v = m || (under && {
+    ref: '', title: '', description: '', stream_id: under.stream_id, substream: under.substream, owner: under.owner, gitlab_url: '', use_case_url: '',
+    type: 'task', start: under.end || under.start || today, end: under.end || under.start || today, status: DEFAULT_STATUS, parent: under.id, deps: [],
+  }) || (copy && { ...copy, ref: '', title: `${copy.title} (copy)`, deps: [...copy.deps] }) || {
     ref: '', title: '', description: '', stream_id: last?.stream_id || workspaceStreams()[0]?.id || '', substream: '', owner: '', gitlab_url: '', use_case_url: '',
     type: 'milestone', start: today, end: today, status: DEFAULT_STATUS, parent: '', deps: [],
   };
@@ -3101,7 +3105,7 @@ function openEditDialog(m, copy) {
   if (!v.stream_id) { pickEdStream(f.stream_id, true); f.newstream.value = m ? '' : 'General'; } // no streams yet: name the first
   edDeps = [...v.deps];
 
-  document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : copy ? `Duplicate ${itemLabel(copy)}` : `New ${T.item}`;
+  document.getElementById('ed-heading').textContent = m ? `Edit ${itemLabel(m)}` : copy ? `Duplicate ${itemLabel(copy)}` : under ? `New ${T.item} under ${itemLabel(under)}` : `New ${T.item}`;
   document.getElementById('ed-delete').hidden = !m;
   document.getElementById('ed-report').hidden = !m || reportsOff();
   const n = m ? reportsFor(m.id).length : 0;
@@ -3317,7 +3321,8 @@ async function submitEditDialog(e) {
   growRangeTo([m.id, ...res.moved]);
   rerenderCurrentView();
   if (isShown('editor')) { // redraw the Items grid so saving can't copy its old values back; a new item goes at the bottom
-    refreshEditor(editing ? [] : [m.id]);
+    if (!editing && m.parent && grid.tree) renderEditor([m.id]); // a child goes in under its parent
+    else refreshEditor(editing ? [] : [m.id]);
     if (!editing) document.querySelector(`#editor-body tr[data-id="${m.id}"]`)?.scrollIntoView({ block: 'nearest' });
   }
   const note = [editing ? `${itemLabel(m)} saved` : `Added ${fullLabel(m)}`, movedMessage(m, res.moved)].filter(Boolean).join(' · ');
@@ -3411,17 +3416,17 @@ function refreshDatalists() {
 // Sort, widths, column order and the view mode are a per-browser convenience (storage may be
 // unavailable) and never change the CSV order. Filters last until the page is reloaded.
 
-function makeTable({ table, store, cols, rows, onChange, mode }) {
-  const t = { table, store, baseCols: cols, rows, onChange, mode, sort: { key: null, dir: 1 }, filters: {}, widths: {}, order: {}, colSel: new Set(), anchor: null };
+function makeTable({ table, store, cols, rows, onChange, mode, tree }) {
+  const t = { table, store, baseCols: cols, rows, onChange, mode, tree, sort: { key: null, dir: 1 }, filters: {}, widths: {}, order: {}, colSel: new Set(), anchor: null };
   try {
     const saved = JSON.parse(localStorage.getItem(store) || '{}');
-    for (const k of ['sort', 'widths', 'mode', 'order']) if (saved[k]) t[k] = saved[k];
+    for (const k of ['sort', 'widths', 'mode', 'order', 'tree']) if (saved[k] !== undefined) t[k] = saved[k];
   } catch { /* ignore */ }
   t.cols = () => orderedCols(t);
   return t;
 }
 function saveTablePrefs(t) {
-  try { localStorage.setItem(t.store, JSON.stringify({ sort: t.sort, widths: t.widths, mode: t.mode, order: t.order })); } catch { /* ignore */ }
+  try { localStorage.setItem(t.store, JSON.stringify({ sort: t.sort, widths: t.widths, mode: t.mode, order: t.order, tree: t.tree })); } catch { /* ignore */ }
 }
 const tableEl = (t) => document.getElementById(t.table);
 const widthKey = (c) => c.wkey || c.key;
@@ -3929,7 +3934,7 @@ const itemShow = (id) => { const m = itemById(id); return m ? fullLabel(m) : `#$
 const byItemRef = (a, b) => { const ma = itemById(a), mb = itemById(b); return ma && mb ? cmpRef(ma, mb) : !ma - !mb; };
 // The item's ID is an internal key, so it isn't shown; Ref is how people know an item.
 const GRID_COLS = [
-  { key: 'sel', label: '', w: 36, fixed: true, head: () => `<input type="checkbox" id="grid-sel-all" title="Select all shown" />` },
+  { key: 'sel', label: '', w: 66, fixed: true, head: () => `<input type="checkbox" id="grid-sel-all" title="Select all shown" />` },
   { key: 'ref', label: 'Ref', w: 96 },
   { key: 'title', label: 'Title', w: 260 },
   { key: 'description', label: 'Description', w: 220 },
@@ -3956,6 +3961,7 @@ const grid = makeTable({
   table: 'editor-table',
   store: 'milestone-tracker.grid',
   mode: 'quick',
+  tree: true, // show items under the one they roll up to, indented
   rows: () => state.items,
   cols: () => (grid.mode === 'quick'
     ? Object.entries(QUICK_COLS).map(([k, o]) => ({ ...GRID_COLS.find(c => c.key === k), ...o }))
@@ -3988,6 +3994,33 @@ function gridValue(m, key, byId) {
 // Sorting, filtering, switching mode or view puts everything back in order.
 let gridOrder = null; // ids in the order last shown
 let gridKnown = null; // every item id at that point, so new items can be told apart
+let gridParents = new Set(); // ids of shown items that have shown items rolling up to them
+let gridDepth = new Map(); // item id -> how many shown items it rolls up through (0 = top of a branch)
+
+// With the hierarchy on, each item sits under the one it rolls up to, indented by its depth.
+// Only items that are shown count as ancestors, so a filter that hides a parent leaves its
+// children as tops of their own branches. `reorder` false (editing) only works out the depths.
+function hierarchy(rows, reorder) {
+  gridDepth = new Map();
+  gridParents = new Set();
+  if (!grid.tree) return rows;
+  const shown = new Map(rows.map(r => [r.m.id, r]));
+  const parentOf = (m) => (m.parent && m.parent !== m.id && shown.has(m.parent) ? m.parent : '');
+  const depthOf = (m) => { // a loop of roll-ups stops at the first repeat
+    let d = 0;
+    for (let p = parentOf(m), seen = new Set([m.id]); p && !seen.has(p); p = parentOf(shown.get(p).m)) { seen.add(p); d++; }
+    return d;
+  };
+  for (const r of rows) { gridDepth.set(r.m.id, depthOf(r.m)); if (parentOf(r.m)) gridParents.add(parentOf(r.m)); }
+  if (!reorder) return rows;
+  const kids = new Map();
+  for (const r of rows) if (parentOf(r.m)) (kids.get(parentOf(r.m)) || kids.set(parentOf(r.m), []).get(parentOf(r.m))).push(r);
+  const out = [], done = new Set();
+  const walk = (r) => { if (done.has(r.m.id)) return; done.add(r.m.id); out.push(r); (kids.get(r.m.id) || []).forEach(walk); };
+  rows.filter(r => !gridDepth.get(r.m.id)).forEach(walk);
+  rows.forEach(walk); // anything left is in a roll-up loop
+  return out;
+}
 function gridRows(keepOrder) {
   let rows;
   if (keepOrder && gridOrder) {
@@ -4001,6 +4034,7 @@ function gridRows(keepOrder) {
       .filter(({ m }) => passesFilters(grid, m)),
     (r, key) => gridValue(r.m, key, byId), (a, b) => a.i - b.i);
   }
+  rows = hierarchy(rows, !keepOrder);
   gridOrder = rows.map(r => r.m.id);
   gridKnown = new Set(state.items.map(m => m.id));
   return rows;
@@ -4074,10 +4108,11 @@ function renderEditor(highlight = [], keepOrder = false) {
     const clash = clashOf(m);
 
     const quick = grid.mode === 'quick';
+    const addKid = task ? '<span class="btn-add-child gap"></span>' : `<button class="btn-add-child" data-addchild="${m.id}" title="Add an item under this one (it will roll up to ${escAttr(itemLabel(m))})">＋</button>`;
     // A milestone's two date cells are one date: editing either moves the milestone.
     const dateTitle = task ? '' : ` title="${escAttr(`${T.Milestone} — changing this date moves it. Change the type to ${T.Task} to give it a date range.`)}"`;
     const cells = {
-      sel: `<input type="checkbox" data-sel="${m.id}" ${gridSel.has(m.id) ? 'checked' : ''} title="Select" />`,
+      sel: `<input type="checkbox" data-sel="${m.id}" ${gridSel.has(m.id) ? 'checked' : ''} title="Select" />${addKid}`,
       id: `<span class="id" title="Primary key">${m.id}</span>`,
       ref: `<input data-i="${i}" data-k="ref" value="${escAttr(m.ref)}" placeholder="e.g. 4.1" class="ref-in${dup ? ' dup' : ''}" ${dup ? 'title="Duplicate ref"' : ''} />`,
       title: `<input data-i="${i}" data-k="title" value="${escAttr(m.title)}" placeholder="Title" ${m.description ? `title="${escAttr(m.description)}"` : ''} />`,
@@ -4099,6 +4134,12 @@ function renderEditor(highlight = [], keepOrder = false) {
         : `<button class="btn-del" data-del="${i}" title="Delete row">✕</button>`,
     };
     cols.forEach((c, j) => setCell(tr.children[j], cells[c.key]));
+    const depth = gridDepth.get(m.id) || 0;
+    cols.forEach((c, j) => { if (c.key === 'ref' || c.key === 'title') { tr.children[j].style.paddingLeft = ''; tr.children[j].classList.remove('tree-child'); } });
+    const lead = cols.findIndex(c => c.key === 'title') >= 0 ? cols.findIndex(c => c.key === 'title') : cols.findIndex(c => c.key === 'ref');
+    if (lead >= 0 && depth) { tr.children[lead].style.paddingLeft = `${3 + depth * 30}px`; tr.children[lead].style.setProperty('--tree-x', `${3 + (depth - 1) * 30 + 8}px`); tr.children[lead].classList.add('tree-child'); } // the indent shows on Title (or Ref without it)
+    tr.classList.toggle('tree-parent', gridParents.has(m.id));
+    tr.dataset.depth = depth;
     const at = prev ? prev.nextSibling : body.firstChild;
     if (tr !== at) body.insertBefore(tr, at); // rows only move when the order really changed
     prev = tr;
@@ -4115,6 +4156,7 @@ function renderEditor(highlight = [], keepOrder = false) {
     : count(state.items.length, T.item, T.items);
   document.getElementById('btn-clear-filters').hidden = !filtered;
   document.querySelectorAll('[name="grid-mode"]').forEach(r => { r.checked = r.value === grid.mode; });
+  document.getElementById('grid-tree').checked = !!grid.tree;
   refreshDatalists();
   // Only rows on screen stay selected, so a bulk action never reaches something filtered out of view.
   const shown = new Set(rows.map(r => r.m.id));
@@ -4153,7 +4195,8 @@ async function applyTableChange(m, changes, msg) {
     return refreshEditor();
   }
   growRangeTo([m.id, ...res.moved]);
-  refreshEditor(res.moved);
+  if ('parent' in changes && grid.tree) renderEditor(res.moved); // it belongs under its new parent now
+  else refreshEditor(res.moved);
   scheduleSave([msg, movedMessage(m, res.moved)].filter(Boolean).join(' · '));
 }
 
@@ -4237,6 +4280,11 @@ function onEditorClick(e) {
     refreshEditor();
     refocusGrid(`[data-adddep="${rm.dataset.rmdep}"]`);
     return scheduleSave();
+  }
+  const addKid = e.target.closest('[data-addchild]');
+  if (addKid) {
+    syncEditorToState();
+    return openEditDialog(null, null, itemById(addKid.dataset.addchild));
   }
   const del = e.target.closest('[data-del]');
   if (del) {
@@ -13429,6 +13477,12 @@ function wireEvents() {
 
   wireTable(grid);
   document.querySelectorAll('[name="grid-mode"]').forEach(r => r.addEventListener('change', () => setGridMode(r.value)));
+  document.getElementById('grid-tree').addEventListener('change', (e) => {
+    syncEditorToState();
+    grid.tree = e.target.checked;
+    saveTablePrefs(grid);
+    renderEditor();
+  });
   document.getElementById('btn-clear-filters').onclick = () => {
     clearTableFilters(grid);
     syncEditorToState();
