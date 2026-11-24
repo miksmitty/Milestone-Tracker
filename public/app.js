@@ -132,7 +132,7 @@ const state = {
   showToday: true,
   showFreezes: true,    // change freeze periods shaded across every stream
   showDeps: true,       // dependency lines on the Gantt
-  showRollups: true,    // roll-up lines on the Gantt
+  showRollups: false,   // roll-up lines on the Gantt: hidden unless turned on
   linkMode: 'all',      // dependency lines: 'all', 'hover' (only the item under the pointer) or 'none'
   showBaseline: true,
   showCritical: false,  // pick out the critical path: items with no float, and the links between them
@@ -10651,16 +10651,13 @@ async function downloadPNG() {
   const w = svg.width.baseVal.value, h = svg.height.baseVal.value;
   const chart = new XMLSerializer().serializeToString(copy);
   // the key, drawn as the page shows it (in the light colours) and wrapped to the chart's width
-  const root = document.documentElement;
-  const theme = root.dataset.theme, dark = 'dark' in root.dataset;
-  root.dataset.theme = 'light';
-  delete root.dataset.dark;
+  const restoreTheme = exportInLight();
   let keyXml = '', keyH = 0;
   try {
     const legend = document.querySelector('#view-gantt .legend') || document.querySelector('.legend');
     if (legend) {
       const key = inlineStyles(legend);
-      Object.assign(key.style, { width: w + 'px', height: 'auto', minHeight: '0', maxHeight: 'none', boxSizing: 'border-box', margin: '0', padding: '12px 16px', background: G.bg, borderTop: `1px solid ${G.line}` });
+      Object.assign(key.style, { width: w + 'px', height: 'auto', minHeight: '0', maxHeight: 'none', boxSizing: 'border-box', margin: '0', padding: '12px 16px', background: GANTT_THEMES.light.bg, borderTop: `1px solid ${GANTT_THEMES.light.line}` });
       document.body.appendChild(key); // measure the height as laid out
       key.style.position = 'fixed'; key.style.left = '-100000px'; key.style.top = '0';
       keyH = Math.ceil(key.offsetHeight);
@@ -10669,8 +10666,7 @@ async function downloadPNG() {
       keyXml = new XMLSerializer().serializeToString(key);
     }
   } finally {
-    if (theme) root.dataset.theme = theme; else delete root.dataset.theme;
-    if (dark) root.dataset.dark = '';
+    restoreTheme();
   }
   const H = h + keyH;
   const whole = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${H}">
@@ -13163,14 +13159,27 @@ const PNG_TARGETS = { overview: 'overview-table', streams: 'streams-table', chan
 
 function pngSlug(s) { return s.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase(); }
 
+// Puts the page in the light theme for an export; call what it returns to put it back. Transitions
+// are off meanwhile, or whatever fades between colours would still be read as dark.
+function exportInLight() {
+  const root = document.documentElement;
+  const theme = root.dataset.theme, dark = 'dark' in root.dataset;
+  root.dataset.exporting = '';
+  root.dataset.theme = 'light';
+  delete root.dataset.dark;
+  return () => {
+    if (theme) root.dataset.theme = theme; else delete root.dataset.theme;
+    if (dark) root.dataset.dark = '';
+    void root.offsetHeight; // settle before transitions come back
+    delete root.dataset.exporting;
+  };
+}
+
 async function downloadPagePNG() {
   const view = currentView();
   const src = document.getElementById(PNG_TARGETS[view]);
   if (!src) return;
-  const root = document.documentElement;
-  const theme = root.dataset.theme, dark = 'dark' in root.dataset;
-  root.dataset.theme = 'light'; // light colours, whatever the theme
-  delete root.dataset.dark;
+  const restoreTheme = exportInLight(); // light colours, whatever the theme
   let png;
   try {
     const box = view === 'changes' || view === 'dash' ? src : src.closest('.table-wrap');
@@ -13197,8 +13206,7 @@ async function downloadPagePNG() {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width + 44}" height="${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
     png = await svgToPNG(svg, width + 44, height);
   } finally {
-    if (theme) root.dataset.theme = theme; else delete root.dataset.theme;
-    if (dark) root.dataset.dark = '';
+    restoreTheme();
   }
   const a = document.createElement('a');
   const p = currentWorkspace();
@@ -13626,7 +13634,7 @@ async function loadConfig() {
   if (['all', 'hover', 'none'].includes(prefs.linkMode)) state.linkMode = prefs.linkMode;
   if (prefs.showBaseline === false) state.showBaseline = false;
   if (prefs.showDeps === false) state.showDeps = false;
-  if (prefs.showRollups === false) state.showRollups = false;
+  if (prefs.showRollups === true) state.showRollups = true;
   if (prefs.showCritical === true) state.showCritical = true;
   wireEvents();
   await loadConfig();

@@ -2045,3 +2045,6 @@ mark { background: var(--flash); color: inherit; border-radius: 2px; padding: 0 
 #editor-table .col-sel { white-space: nowrap; }
 #editor-table .col-sel .btn-add-child { display: inline-block; vertical-align: middle; margin: 0 0 0 6px; }
 #editor-table .col-sel .btn-add-child.gap { visibility: hidden; }
+
+/* a PNG is being drawn in the light theme: colours change at once */
+:root[data-exporting] *, :root[data-exporting] *::before, :root[data-exporting] *::after { transition: none !important; }
